@@ -1,0 +1,288 @@
+<html lang="ru">
+
+<head>
+    <meta charset="utf-8">
+    <meta name="theme-color" content="#1C1C1C">
+    <title>CSRacing</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+    <style>
+        @keyframes loading {
+            0% {
+                transform: rotate(0)
+            }
+
+            to {
+                transform: rotate(360deg)
+            }
+        }
+
+        .ag-textarea .MuiInputBase-input::-webkit-scrollbar {
+            height: 6px;
+            width: 6px
+        }
+
+        .ag-textarea .MuiInputBase-input::-webkit-scrollbar-track {
+            background: transparent
+        }
+
+        .ag-textarea .MuiInputBase-input::-webkit-scrollbar-thumb {
+            background: #dfdfdf;
+            border-radius: 4px
+        }
+
+        .ag-textarea .MuiInputBase-input::-webkit-scrollbar-thumb:hover {
+            background: #d4d4d4
+        }
+
+        .participants_container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            overflow-y: hidden;
+        }
+
+        .participants {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            grid-row-gap: 30px;
+            grid-column-gap: 40px;
+            justify-items: center;
+            height: 100vh;
+}
+
+    </style>
+    <style>
+        .translated-content .ytCoreImageHost {
+            visibility: visible;
+        }
+    </style>
+</head>
+
+<body class="">
+    <link rel="stylesheet" href="/css/print.min.css?v=33054">
+    <link rel="stylesheet" href="/css/styles.css?v=33054">
+    <link rel="stylesheet" href="/css/responsive.css?v=33054">
+
+    <section class="money-horse-section js-money-horse-section">
+        <div class="content">
+            <div class="panel">
+                <div class="title">Round N 96908788</div>
+                <div class="btn_return_url" style="display: none;"></div>
+                <div class="limits">
+                    Min: 10 HTG<br>
+                    Max: 5000 HTG<br>
+                </div>
+
+                <div class="menu">
+                    <button class="toggle_menu"></button>
+                    <div class="menu_items">
+                        <span class="money"></span>
+                    </div>
+                </div>
+
+            </div>
+            <div class="screen game_screen active">
+    <div class="participants_container">
+        <div class="participants">
+            <!-- TEMPLATE : utilisé uniquement pour le clonage JS -->
+            <div class="js_template" style="display:none;">
+                <div class="avatar_background">
+                    <div class="avatar"></div>
+                </div>
+                <div class="name"></div>
+                <div class="coeff_container">
+                    <div class="coeff"></div>
+                    <div data-l10n-id="horse_prize_coef" class="coeff_hint"></div>
+                </div>
+                <div class="bet">
+                    <form class="create">
+                        <input type="number" placeholder="Bet" tabindex="1" class="value" min="0" step="0.01">
+                        <input type="submit" value="ok" class="confirm">
+                    </form>
+                    <div class="view">
+                        <div class="value"></div>
+                        <div class="prize"></div>
+                        <button class="cancel"></button>
+                    </div>
+                </div>
+            </div>
+            <!-- Fin du template -->
+
+            <!-- Participants générés dynamiquement -->
+            <!-- (Ton script va cloner le template ci-dessus pour remplir cette liste) -->
+        </div>
+    </div>
+
+    <div class="controls">
+        <button data-l10n-id="horse_add_receipt" class="button add_receipt">Accept bet</button>
+        <button data-l10n-id="horse_added_receipts" class="button added_receipts">
+            Receipts (<span class="count">0</span>)
+        </button>
+    </div>
+
+    <button data-l10n-id="horse_begin_race" class="button start">Start</button>
+
+    <div class="receipts_container">
+        <table class="receipts">
+            <tr>
+                <td></td>
+                <td>№ 6 Paul Pogba (5)</td>
+                <td>№ 7 Ronaldo (4.9)</td>
+                <td>№ 8 Griezmann (7.5)</td>
+                <td>№ 9 Luis Suarez (5.8)</td>
+                <td>№ 10 Messy (8.1)</td>
+                <td>№ 54 Ibrahimovic (4.6)</td>
+                <td>Total</td>
+                <td></td>
+            </tr>
+            <tr class="footer">
+                <td colspan="7"></td>
+                <td class="total">0 HTG</td>
+                <td></td>
+            </tr>
+        </table>
+    </div>
+</div>
+
+            <div class="screen movie_screen">
+                <div id="movieContainer" class="movie_container">
+                    <div class="movie"></div>
+                </div>
+                <button data-l10n-id="horse_skip" class="button skip">Skip</button>
+            </div>
+            <div class="screen finish_screen">
+                <div class="winner">
+                    <div class="title"></div>
+                    <div class="avatar_background">
+                        <div class="avatar"></div>
+                    </div>
+                    <div class="name"></div>
+                </div>
+                <table class="receipts"></table>
+                <button data-l10n-id="horse_new_race" class="button new_game">New round</button>
+            </div>
+        </div>
+        <div class="loading_indicator">
+            <div data-l10n-id="horse_loading" class="message">
+                <div>Please, wait...</div>
+                <div class="lds-hourglass"></div>
+            </div>
+        </div>
+        <div class="notification_container">
+            <div class="js_template">
+                <button class="close"></button>
+                <div class="message"></div>
+            </div>
+        </div>
+    </section>
+
+    <script src="/js/print.min.js?v=33054"></script>
+    <script src="/js/jquery_min.js?v=33054"></script>
+    <script src="/js/big_min.js?v=33054"></script>
+    <script src="/js/async.min.js?v=33054"></script>
+    <script src="/js/crafty-0.5.4.js?v=33054"></script>
+    <script src="/js/currency.js?v=33054"></script>
+    <script src="/js/context.js?v=33054"></script>
+    <script src="/js/managers.js?v=33054"></script>
+    <script src="/js/misc.js?v=33054"></script>
+    <script src="/js/models.js?v=33054"></script>
+    <script src="/js/server.js?v=33054"></script>
+    <script src="/js/webclient.js?v=33054"></script>
+    <script src="/js/user_manager.js?v=33054"></script>
+    <script src="/js/components.js?v=33054"></script>
+    <script src="/js/movie.js?v=33054"></script>
+    <script src="/js/path_generator.js?v=33054"></script>
+    <script src="/js/scene_builders.js?v=33054"></script>
+    <script src="/js/game.js?v=33054"></script>
+    <script src="/js/movie1.js?v=33054"></script>
+    <script src="/js/finish.js?v=33054"></script>
+    <script src="/js/fullscreen.js?v=33054"></script>
+
+    <script>
+        let Messages = {
+            TITLE: "Round N $id",
+            MONEY_AMOUNT: "$value HTG",
+            PAYOUT: "Payment",
+            TOTAL: "Total",
+            WINNER: "Winner of the round № $id",
+            BET_TOO_SMALL: "The minimum bet is $value. Make one more bet.",
+            BET_TOO_BIG: "The maximum bet is $value. Make a smaller bet.",
+            NO_BETS: "Bets are not defined.",
+            NO_RECEIPTS: "No receipts.",
+            AJAX_TIMEOUT: "Failed to send request. Please check your internet connection",
+        };
+
+        let client = new WebClient();
+        let minBet = 1000;
+        let maxBet = 500000;
+        let showDecimal = false;
+        window.wsConfig = {
+            enableReceiptPrinting: "true",
+            connectionString: "ws://localhost:8081/connection/websocket",
+            token: "LOCAL_TEST_TOKEN",
+            userId: "local.6130290",
+            partnerId: "platform_horses"
+        };
+
+        if (showDecimal) Currency.changeDigits({ digits: 2, visibleDigits: 2 });
+        else Currency.changeDigits({ digits: 2, visibleDigits: 0 });
+
+        client.init(
+            {
+                assetPath: "/img/",
+                receiptUrl: "/api/v1/receipts/",
+                limits: new LimitModel(new Big(minBet), new Big(maxBet)),
+                keepAliveUrl: "/api/v1/keepalive/",
+                keepAliveTick: "20000",
+                keepAliveTimeout: "5000"
+            },
+            Messages
+        )
+
+        
+    </script>
+
+    <script>
+        window.wsConfig = {
+            enableReceiptPrinting: "true",
+            connectionString: "ws://localhost:8081/connection/websocket",
+            token: "LOCAL_TEST_TOKEN",
+            userId: "local.6130290",
+            partnerId: "platform_horses"
+        };
+    </script>
+
+    <script>
+        const startButton = document.querySelector(".button.start");
+
+        startButton.addEventListener("click", function() {
+            // Crée l'instance du movie
+            const movie = new Movie();
+
+            // Récupère le round courant depuis l'API
+            $.post("/api/v1/rounds/", { action: "get" }, function(response) {
+                console.log(" Réponse API reçue pour le round :", response);
+                // Vérifie que participants existent
+                if (response?.data?.participants && response.data.participants.length > 0) {
+                    console.log("Participants reçus pour movie.init :", response.data.participants);
+                    movie.init(response.data, "movieContainer"); // Crafty.init acceptera l'ID
+
+                } else {
+                    console.error("Aucun participant dans la réponse API !", response);
+                    alert("Impossible de lancer la course : aucun participant disponible.");
+                }
+            }).fail(function(err) {
+                console.error("Erreur API lors de la récupération du round :", err);
+                alert("Impossible de récupérer les participants du round !");
+            });
+        });
+    </script>
+
+    <script src="/js/centrifuge.min.js"></script>
+    <script src="/js/jackpots.ws.js?v=33054"></script>
+    <link rel="stylesheet" href="/css/jackpots.css?v=33054">
+
+
+</body>
+
+</html>
