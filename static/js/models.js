@@ -35,6 +35,7 @@ GameModel.prototype.getWinner = function() {
  */
 GameModel.prototype.hasBetsForParticipant = function(number) {
     return this.receipts ? this.receipts.some(function(receipt) {
+        console.log("Checking receipt:", receipt);
         return receipt.getBetForParticipant(number) != null;
     }) : false;
 };
@@ -44,6 +45,7 @@ GameModel.prototype.hasBetsForParticipant = function(number) {
  */
 GameModel.prototype.getTotalPrize = function() {
     return this.receipts.reduce(function(accumulated, receipt) {
+        console.log("Adding receipt prize:", receipt.prize);
         return accumulated.plus(receipt.prize);
     }, new Big(0));
 };

@@ -1,6 +1,6 @@
 @font-face {
     font-family: Scada;
-    src: url(../fonts/Scada-Regular.ttf);
+    src: url(/fonts/Scada-Regular.ttf);
 }
 
 html, body {
@@ -9,7 +9,7 @@ html, body {
 
 body {
     max-height: 100vh;
-    background: url(../img/background.jpg);
+    background: url(/img/background.jpg);
 }
 body:fullscreen::backdrop {
     background: transparent;
@@ -565,7 +565,7 @@ body.loading .loading_indicator {
 }
 
 .repeat-print {
-    background-image: url("/static/img/print.svg");
+    background-image: url("../img/print.svg");
     width: 16px;
     height: 16px;
 }

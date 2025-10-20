@@ -13,6 +13,7 @@ let ViewportUpdater = function (viewport, onFinish) {
 ViewportUpdater.VIEWPORT_PADDING = 30;
 ViewportUpdater.START_DELAY = 1;
 ViewportUpdater.FINISH_DELAY = 2;
+        
 
 ViewportUpdater.prototype._getCameraCenterByGroup = function (entities) {
     let min = 1e9;
@@ -79,13 +80,13 @@ Movie.prototype._createLoadingScene = function () {
 };
 
 Movie.prototype._createGameScene = function (game, onReady) {
-    console.log("🎬 Création de la scène de jeu pour le film", game);
+    console.log("Game models :", game);
     let builder = new GameSceneBuilder(game, onReady);
     builder.build();
-    console.log("le Builder : ", builder);
 };
 
 Movie.prototype._generatePaths = function (participants) {
+    console.log("Generating paths for participants:", participants);
     let paths = this._pathGenerator.generateAll(participants.length);
     paths.sort(function (a, b) {
         return a.getTime(GameParams.TRACK_LENGTH) > b.getTime(GameParams.TRACK_LENGTH) ? 1 : -1;
@@ -97,8 +98,10 @@ Movie.prototype._generatePaths = function (participants) {
         if (participant.place === 1) {
             this._pathGenerator.setFastOnFinish(path);
         }
+        console.log("Path for participant", participant.number, ":", path);
         result[participant.number] = path;
     }
+    console.log("Assigned paths to participants:", result);
     return result;
 };
 
@@ -111,21 +114,12 @@ Movie.prototype._updateAnimationSpeed = function (entity) {
 };
 
 Movie.prototype._setupLoop = function (entities, paths) {
-    console.log("🎬 [DEBUG] Setup loop démarré, Crafty timer:", Crafty.timer?.isRunning);
-
     let timestamp = (new Date()).getTime();
     this._interval = setInterval($.proxy(function () {
         let elapsed = ((new Date).getTime() - timestamp) / 1000 - ViewportUpdater.START_DELAY;
         if (elapsed < 0) {
             return;
         }
-
-        // Vérification sécurité avant update
-        if (!entities || Object.keys(entities).length === 0) {
-            console.warn("⚠️ Aucun cheval dans entities !");
-            return;
-        }
-
         for (let id in entities) {
             if (entities.hasOwnProperty(id)) {
                 let entity = entities[id];
@@ -136,15 +130,12 @@ Movie.prototype._setupLoop = function (entities, paths) {
                 }
             }
         }
-
         this._viewportUpdater.update(entities, elapsed);
-    }, this), 16); // 16ms ≈ 60fps
+    }, this), 1);
 };
 
 Movie.prototype._start = function (container) {
     Crafty.init(Movie.WIDTH, Movie.HEIGHT, container);
-    console.log("✅ Crafty initialisé :", Crafty.timer?.isRunning);
-
     Crafty.background("black");
     if ($.isEmptyObject(Crafty.assets)) {
         Crafty.scene("loading");
@@ -152,25 +143,41 @@ Movie.prototype._start = function (container) {
         Crafty.scene("game");
     }
     $('.panel').hide();
-    window.scrollTo(0, 1);
+    window.scrollTo(0,1);
 };
 
 Movie.prototype.init = function (game, container) {
-    console.log("🎥 Initialisation du film avec", game.participants?.length, "participants");
+    console.log("Starting movie… retrieving latest game data via GameManager");
+    console.log("Container:", container);
 
+    // Crée la scène de chargement pendant la récupération des données
     this._createLoadingScene();
-    this._createGameScene(game, $.proxy(function (entities) {
-        let paths = this._generatePaths(game.participants);
-        console.log("✅ Paths générés:", paths);
-        this._setupLoop(entities, paths);
-        this._onStart();
+
+    // 🔹 Étape 1 : récupérer les données du round depuis GameManager
+    this._context.getGameManager().getRoundRequest($.proxy(function (responseGame) {
+        // Remplace les données "game" locales par celles du serveur
+        game = responseGame;
+        console.log("✅ Game data loaded via GameManager:", game);
+
+        // 🔹 Étape 2 : construire la scène de jeu avec les vraies données
+        this._createGameScene(game, $.proxy(function (entities) {
+            let paths = this._generatePaths(game.participants);
+            console.log("Generated paths:", paths);
+
+            // 🔹 Étape 3 : démarrer la boucle principale d’animation
+            this._setupLoop(entities, paths);
+            this._onStart();
+        }, this));
+
+        // 🔹 Étape 4 : lancer l’affichage du jeu
+        this._start(container);
+
     }, this));
-    this._start(container);
 };
+
 
 Movie.prototype.deinit = function () {
     clearInterval(this._interval);
     $('.panel').show();
     Crafty.stop();
-    console.log("🛑 Crafty arrêté proprement.");
 };

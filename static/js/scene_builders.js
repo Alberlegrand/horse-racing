@@ -1,13 +1,11 @@
 let LoadingSceneBuilder = function(context) {
     this._context = context;
 };
+
 LoadingSceneBuilder.prototype._getAssetPath = function(number) {
+    /* return `${this._context.getSettings().assetPath}/${number}.png`; */
     return `/img/${number}.png`;
 };
-
-/* LoadingSceneBuilder.prototype._getAssetPath = function(number) {
-    return `${this._context.getSettings().assetPath}/${number}.png`;
-}; */
 
 LoadingSceneBuilder.prototype._getAssets = function() {
     let assets = [];
@@ -184,6 +182,7 @@ LoadingSceneBuilder.prototype.build = function() {
 };
 
 let GameSceneBuilder = function(game, onReady) {
+    console.log("game scene builder :", game);
     this._game = game;
     this._onReady = onReady;
 };

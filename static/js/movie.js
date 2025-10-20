@@ -39,6 +39,6 @@ MovieScreenView.prototype.deinit = function() {
 };
 
 MovieScreenView.prototype.update = function(game) {
+    console.log("Updating movie view with game:", game);
     this._movie.init(game, this._container.find(".movie")[0]);
-    console.log("MovieScreenView updated with game:", game);
 };

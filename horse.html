@@ -66,7 +66,7 @@
     <section class="money-horse-section js-money-horse-section">
         <div class="content">
             <div class="panel">
-                <div class="title">Round N 96908788</div>
+                <div class="title"></div>
                 <div class="btn_return_url" style="display: none;"></div>
                 <div class="limits">
                     Min: 10 HTG<br>
@@ -123,24 +123,7 @@
     <button data-l10n-id="horse_begin_race" class="button start">Start</button>
 
     <div class="receipts_container">
-        <table class="receipts">
-            <tr>
-                <td></td>
-                <td>№ 6 Paul Pogba (5)</td>
-                <td>№ 7 Ronaldo (4.9)</td>
-                <td>№ 8 Griezmann (7.5)</td>
-                <td>№ 9 Luis Suarez (5.8)</td>
-                <td>№ 10 Messy (8.1)</td>
-                <td>№ 54 Ibrahimovic (4.6)</td>
-                <td>Total</td>
-                <td></td>
-            </tr>
-            <tr class="footer">
-                <td colspan="7"></td>
-                <td class="total">0 HTG</td>
-                <td></td>
-            </tr>
-        </table>
+        <div class="receipts"></div>
     </div>
 </div>
 
@@ -198,90 +181,10 @@
     <script src="/js/finish.js?v=33054"></script>
     <script src="/js/fullscreen.js?v=33054"></script>
 
-    <script>
-        let Messages = {
-            TITLE: "Round N $id",
-            MONEY_AMOUNT: "$value HTG",
-            PAYOUT: "Payment",
-            TOTAL: "Total",
-            WINNER: "Winner of the round № $id",
-            BET_TOO_SMALL: "The minimum bet is $value. Make one more bet.",
-            BET_TOO_BIG: "The maximum bet is $value. Make a smaller bet.",
-            NO_BETS: "Bets are not defined.",
-            NO_RECEIPTS: "No receipts.",
-            AJAX_TIMEOUT: "Failed to send request. Please check your internet connection",
-        };
-
-        let client = new WebClient();
-        let minBet = 1000;
-        let maxBet = 500000;
-        let showDecimal = false;
-        window.wsConfig = {
-            enableReceiptPrinting: "true",
-            connectionString: "ws://localhost:8081/connection/websocket",
-            token: "LOCAL_TEST_TOKEN",
-            userId: "local.6130290",
-            partnerId: "platform_horses"
-        };
-
-        if (showDecimal) Currency.changeDigits({ digits: 2, visibleDigits: 2 });
-        else Currency.changeDigits({ digits: 2, visibleDigits: 0 });
-
-        client.init(
-            {
-                assetPath: "/img/",
-                receiptUrl: "/api/v1/receipts/",
-                limits: new LimitModel(new Big(minBet), new Big(maxBet)),
-                keepAliveUrl: "/api/v1/keepalive/",
-                keepAliveTick: "20000",
-                keepAliveTimeout: "5000"
-            },
-            Messages
-        )
-
-        
-    </script>
-
-    <script>
-        window.wsConfig = {
-            enableReceiptPrinting: "true",
-            connectionString: "ws://localhost:8081/connection/websocket",
-            token: "LOCAL_TEST_TOKEN",
-            userId: "local.6130290",
-            partnerId: "platform_horses"
-        };
-    </script>
-
-    <script>
-        const startButton = document.querySelector(".button.start");
-
-        startButton.addEventListener("click", function() {
-            // Crée l'instance du movie
-            const movie = new Movie();
-
-            // Récupère le round courant depuis l'API
-            $.post("/api/v1/rounds/", { action: "get" }, function(response) {
-                console.log(" Réponse API reçue pour le round :", response);
-                // Vérifie que participants existent
-                if (response?.data?.participants && response.data.participants.length > 0) {
-                    console.log("Participants reçus pour movie.init :", response.data.participants);
-                    movie.init(response.data, "movieContainer"); // Crafty.init acceptera l'ID
-
-                } else {
-                    console.error("Aucun participant dans la réponse API !", response);
-                    alert("Impossible de lancer la course : aucun participant disponible.");
-                }
-            }).fail(function(err) {
-                console.error("Erreur API lors de la récupération du round :", err);
-                alert("Impossible de récupérer les participants du round !");
-            });
-        });
-    </script>
-
     <script src="/js/centrifuge.min.js"></script>
     <script src="/js/jackpots.ws.js?v=33054"></script>
+    <script src="/js/main.js?v=33054"></script>
     <link rel="stylesheet" href="/css/jackpots.css?v=33054">
-
 
 </body>
 

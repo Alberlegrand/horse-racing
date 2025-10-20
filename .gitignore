@@ -1,0 +1,167 @@
+# Ignore node_modules
+/node_modules
+
+# Ignore logs and log files
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pids*
+logs
+
+# Ignore runtime data
+pids/*
+runtime
+
+# Ignore test data
+test-data
+
+# Ignore VSCode settings
+.vscode
+*.code-workspace
+*.vscode-test
+*.vscode-node
+*.vscode-jsconfig
+*.vscode-jest
+*.vscode-react
+*.vscode-go
+*.vscode-typescript
+
+# Ignore mac system files
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Ignore IntelliJ project files
+.idea
+*.iml
+*.ipr
+*.iws
+*.swp
+out
+target
+
+# Ignore NetBeans project files
+nbproject
+build
+nbbuild
+dist
+nbdist
+nbprivate
+test-report.xml
+
+# Ignore Eclipse project files
+.classpath
+.project
+.settings
+org.eclipse.core.resources.prefs
+org.eclipse.jdt.core.prefs
+org.eclipse.m2e.core.prefs
+org.eclipse.wst.common.component
+org.eclipse.wst.common.project.facet.core.xml
+org.eclipse.wst.common.project.facet.core.prefs
+.wstworkspaces
+
+# Ignore Maven and Gradle project files
+target
+classes
+test-classes
+
+# Ignore Django project files
+db.sqlite3
+db.sqlite3-journal
+__pycache__
+
+# Ignore Python bytecode
+*.pyc
+*.pyo
+
+# Ignore Django migrations
+migrations/*.py
+
+# Ignore Python distutils build directories
+dist
+build
+EGG_INFO
+
+# Ignore Sphinx documentation
+docs/_build
+
+# Ignore ctags
+tags
+
+# Ignore Gulp files
+gulpfile.js
+gulp
+
+# Ignore the following directories created by npm or their dependencies.
+node_modules
+bower_components
+app/bower_components
+
+# Ignore test directories
+test
+tests
+spec
+
+# Ignore OSX trash, such as ._. files
+# Customize this if you have any localization like en or fr
+# ._.DS_Store is how OSX stores custom Finder data
+._*.
+.DS_Store
+
+# Ignore any file named desktop
+desktop
+
+# Ignore hidden files and directories
+# (optional)
+# Ignore any generated files in your www directory
+www/__generated__
+
+# Ignore any files in the www/build directory
+www/build
+
+# Ignore any files ending in .tmp from the build directory
+www/build/*.tmp
+
+# Ignore any files in the www/coverage directory
+www/coverage
+
+# Ignore any files ending in .log from the build directory
+www/build/*.log
+
+# Ignore any hidden files in the build directory
+www/build/.*
+
+# Ignore any hidden files in the .tmp directory
+.tmp/.*
+
+# Ignore any hidden files in the .coverage directory
+coverage/.*
+
+# Ignore any files ending in .tmp from the .tmp directory
+tmp/*.tmp
+
+# Ignore any files ending in .log from the .tmp directory
+tmp/*.log
+
+# Ignore any hidden files in the .tmp directory
+tmp/.*
+
+# Ignore any files ending in .tmp from the .coverage directory
+coverage/*.tmp
+
+# Ignore any files ending in .log from the .coverage directory
+coverage/*.log
+
+# Ignore any hidden files in the .coverage directory
+coverage/.*
+
+# Ignore any files ending in .tmp from the .coverage directory
+coverage/*.tmp
+
+# Ignore any files ending in .log from the .coverage directory
+coverage/*.log
+
+# Ignore any hidden files in the .coverage directory
+coverage/.*

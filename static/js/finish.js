@@ -59,8 +59,10 @@ FinishScreenView.prototype._updateWinner = function (winner) {
 };
 
 FinishScreenView.prototype._updateReceipts = function (game) {
+    console.log("Updating receipts for game:", game);
     this._updateReceiptTableHeader(game);
     this._updateReceiptTableBody(game);
+    
 };
 
 FinishScreenView.prototype._updateReceiptTableHeader = function (game) {
@@ -74,6 +76,7 @@ FinishScreenView.prototype._updateReceiptTableHeader = function (game) {
         return result;
     });
     const totalPrize = Currency.systemToPublic(game.getTotalPrize()).toFixed(Currency.visibleDigits);
+    console.log("Total prize calculated:", totalPrize);
     this._container.find(".receipts").append(`
         <tr>
             <td></td>

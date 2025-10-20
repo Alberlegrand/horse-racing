@@ -22,10 +22,10 @@ app.use(express.urlencoded({ extended: true }));
 // === CORRECTION IMPORT
 // Sert les fichiers depuis le dossier courant (où se trouvent index.html, js/, css/)
 // Cela corrige l'erreur de type MIME ('text/html' au lieu de 'text/css').
-app.use(express.static(path.join(__dirname)));
-app.use('/css', express.static(path.join(__dirname, 'css')));
-app.use('/js', express.static(path.join(__dirname, 'js')));
-app.use('/img', express.static(path.join(__dirname, 'img')));
+app.use(express.static(path.join(__dirname, "static")));
+app.use('/css', express.static(path.join(__dirname, 'static', 'css')));
+app.use('/js', express.static(path.join(__dirname, 'static', 'js')));
+app.use('/img', express.static(path.join(__dirname, 'static', 'img')));
 
 
 // =================================================================
@@ -38,7 +38,7 @@ function generateRoundId() {
 
 // Données de base des participants qui seront réutilisées à chaque tour
 const BASE_PARTICIPANTS = [
-  { number: 6, name: "De Bruyne", coeff: 5.5, family: 0 },
+  { number: 6, name: "De Bruyne", coeff: 5.5, family: 0, place: 0  },
   { number: 7, name: "Ronaldo", coeff: 4.7, family: 1 },
   { number: 8, name: "Mbappe", coeff: 7.2, family: 2 },
   { number: 9, name: "Halland", coeff: 5.8, family: 3 },
@@ -63,31 +63,54 @@ function wrap(data) {
  */
 function startNewRound() {
     console.log(`🏁 Fin du tour #${currentRound.id}. Archivage des résultats.`);
-    
-    // 1. Archive le tour complété
+
+    // 1️⃣ Archive le tour complété
     if (currentRound.id) {
         const finishedRound = {
             id: currentRound.id,
-            winner: currentRound.participants.find(p => p.place === 1),
+            // deep-clone receipts & participants pour éviter toute mutation future
+            receipts: JSON.parse(JSON.stringify(currentRound.receipts || [])),
+            participants: JSON.parse(JSON.stringify(currentRound.participants || [])),
+            totalPrize: currentRound.totalPrize || 0,
+            winner: (currentRound.participants || []).find(p => p.place === 1) || null,
         };
         gameHistory.push(finishedRound);
-        if (gameHistory.length > 10) gameHistory.shift(); // Garde seulement les 10 derniers tours
+
+        // Garde seulement les 10 derniers tours
+        if (gameHistory.length > 10) gameHistory.shift();
     }
 
-    // 2. Prépare le nouveau tour
+    // 2️⃣ Prépare le nouveau tour avec des places uniques aléatoires
     const newRoundId = generateRoundId();
+
+    // Génère un tableau de places 1..N
+    const basePlaces = Array.from({ length: BASE_PARTICIPANTS.length }, (_, i) => i + 1);
+
+    // Mélange les places avec Fisher-Yates pour avoir un ordre aléatoire
+    for (let i = basePlaces.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [basePlaces[i], basePlaces[j]] = [basePlaces[j], basePlaces[i]];
+    }
+
+    // Assigne les places uniques à chaque participant
     currentRound = {
         id: newRoundId,
-        participants: BASE_PARTICIPANTS.map(p => ({...p, place: undefined})), // Réinitialise les places
-        receipts: [],
-        lastReceiptId: 1,
+        participants: BASE_PARTICIPANTS.map((p, i) => ({
+            ...p,
+            place: basePlaces[i],
+        })),
+        receipts: [],         // <-- garantie : table des receipts vide pour chaque nouveau round
+        lastReceiptId: 3,
+        totalPrize: 0
     };
 
     console.log(`🚀 Nouveau tour #${currentRound.id} prêt à commencer !`);
 
-    // 3. Notifie tous les clients qu'un nouveau tour est disponible
-    broadcast({ event: "new_round", game: currentRound });
+    // 3️⃣ Notifie tous les clients qu'un nouveau tour est disponible
+    // en envoyant une copie sûre (receipts vide)
+    broadcast({ event: "new_round", game: JSON.parse(JSON.stringify(currentRound)) });
 }
+
 
 
 // =================================================================
@@ -104,6 +127,8 @@ app.get("/horse", (req, res) => {
   res.sendFile(path.join(__dirname, "horse.html"));
 });
 
+  let totalPrize = 0;
+
 // === API v1 ===
 // POST /api/v1/rounds/  - body.action = "get" | "finish" | "confirm"
 app.post("/api/v1/rounds/", (req, res) => {
@@ -119,8 +144,8 @@ app.post("/api/v1/rounds/", (req, res) => {
     null;
 
   // Debug utile pour tracer
-  console.log("/api/v1/rounds/ headers:", req.headers);
-  console.log("/api/v1/rounds parsed action:", action);
+  //console.log("/api/v1/rounds/ headers:", req.headers);
+  //console.log("/api/v1/rounds parsed action:", action);
   if (!action) console.warn("/api/v1/rounds/ no action found. body:", req.body, "query:", req.query);
 
   // === GET ===
@@ -136,38 +161,54 @@ app.post("/api/v1/rounds/", (req, res) => {
 
     // Simule la durée de la course
     setTimeout(() => {
-      const winner = currentRound.participants[Math.floor(Math.random() * currentRound.participants.length)];
+      // Defensive: ensure participants array exists and has entries
+      const participants = Array.isArray(currentRound.participants) ? currentRound.participants : [];
+      if (participants.length === 0) {
+        console.error("finish: aucun participant dans currentRound -> annulation de la finish flow.");
+        return;
+      }
+
+      const winner = participants[Math.floor(Math.random() * participants.length)];
       const winnerWithPlace = { ...winner, place: 1, family: winner.family ?? 0 };
 
-
       // Met à jour les places dans le tour courant
-      currentRound.participants = currentRound.participants.map(p =>
+      currentRound.participants = participants.map(p =>
         (p.number === winner.number ? winnerWithPlace : p)
       );
 
-      // Calcul des gains
-      currentRound.receipts.forEach(receipt => {
-        let totalPrize = 0;
+      // Calcul des gains : variables locales, protections
+      let totalPrizeAll = 0; // total de tous les tickets
+      const receipts = Array.isArray(currentRound.receipts) ? currentRound.receipts : [];
+
+      receipts.forEach(receipt => {
+        let totalPrizeForReceipt = 0;
+
         if (Array.isArray(receipt.bets)) {
           receipt.bets.forEach(bet => {
-            try {
-              if (Number(bet.number) === Number(winner.number)) {
-                const betValue = Number(bet.value) || 0;
-                const coeff = Number(winner.coeff) || 0;
-                totalPrize += betValue * coeff;
-              }
-            } catch (e) {}
+            // chaque bet doit contenir number et value validés upstream
+            if (Number(bet.number) === Number(winner.number)) {
+              const betValue = Number(bet.value) || 0;
+              const coeff = Number(winner.coeff) || 0;
+              totalPrizeForReceipt += betValue * coeff;
+            }
           });
         }
-        receipt.prize = totalPrize;
+
+        receipt.prize = totalPrizeForReceipt;
+        console.log(`Ticket #${receipt.id} a un gain de : ${receipt.prize} HTG`);
+        totalPrizeAll += totalPrizeForReceipt;
       });
 
-      // Envoie les résultats
+      // Stocker le total pour le FinishScreen
+      currentRound.totalPrize = totalPrizeAll;
+
+      // Envoie les résultats (cloner pour éviter références mutables)
       broadcast({
         event: "race_end",
         winner: winnerWithPlace,
-        receipts: currentRound.receipts,
-        roundId: currentRound.id
+        receipts: JSON.parse(JSON.stringify(receipts)),
+        roundId: currentRound.id,
+        prize: currentRound.totalPrize,
       });
 
       // Nouveau tour après 15s
@@ -191,50 +232,102 @@ app.post("/api/v1/rounds/", (req, res) => {
 
 // GET /api/v1/receipts/?action=print&id=...
 app.get("/api/v1/receipts/", (req, res) => {
-    if (req.query.action === 'print') {
-        const receiptId = parseInt(req.query.id, 10);
-        const receipt = currentRound.receipts.find(r => r.id === receiptId);
+  if (req.query.action === 'print') {
+    const receiptId = parseInt(req.query.id, 10);
+    const receipt = currentRound.receipts.find(r => r.id === receiptId);
 
-        if (!receipt) {
-            return res.status(404).send("<h1>Ticket non trouvé</h1>");
-        }
+    console.log(`🧾 Impression du ticket #${receiptId}:`, receipt);
 
-        // === AMÉLIORATION : Génération d'un ticket style "imprimante thermique" ===
-        const createdTime = req.query.createdTime || new Date(receipt.create_time).toLocaleString('fr-FR');
-        
-        let betsHTML = receipt.bets.map(bet => {
-            const participantName = bet.participant.name || `N°${bet.participant.number}`;
-            return `
-                <tr>
-                    <td style="text-align: left;">${participantName}</td>
-                    <td style="text-align: right;">${parseFloat(bet.value).toFixed(2)} HTG</td>
-                </tr>
-            `;
-        }).join('');
-
-        const receiptHTML = `
-            <div style="font-family: 'Courier New', monospace; width: 300px; padding: 10px; border: 1px solid #ccc;">
-                <h3 style="text-align: center; margin: 0;">PARYAJ CHEVAL</h3>
-                <p style="text-align: center; border-bottom: 1px dashed #000; padding-bottom: 10px;">
-                    Ticket #${receipt.id} | Tour #${currentRound.id}<br>
-                    ${createdTime}
-                </p>
-                <table style="width: 100%; font-size: 14px;">
-                    <thead><tr><th style="text-align: left;">Participant</th><th style="text-align: right;">Mise</th></tr></thead>
-                    <tbody>${betsHTML}</tbody>
-                </table>
-                <hr style="border: none; border-top: 1px dashed #000;">
-                <p style="text-align: right; font-size: 1.1em; font-weight: bold;">
-                    TOTAL MISÉ : ${parseFloat(receipt.total_value).toFixed(2)} HTG
-                </p>
-                <p style="text-align: center; font-size: 0.8em;">Bonne chance !</p>
-            </div>
-        `;
-        
-        return res.setHeader('Content-Type', 'text/html').send(receiptHTML);
+    if (!receipt) {
+      return res.status(404).send("<h1>Ticket non trouvé</h1>");
     }
-    return res.status(400).send("Action non reconnue.");
+
+    // Horodatage
+    const createdTime =
+      receipt.created_time
+        ? new Date(receipt.created_time).toLocaleString('fr-FR')
+        : new Date().toLocaleString('fr-FR');
+
+    // === Calculs ===
+    let totalMise = 0;
+    let totalGainPotentiel = 0;
+
+    const betsHTML = receipt.bets.map((bet, index) => {
+      const participant = bet.participant || {};
+      const name = participant.name || `N°${participant.number || "?"}`;
+      const coeff = parseFloat(participant.coeff || 0);
+      const mise = parseFloat(bet.value || 0);
+      const gainPot = mise * coeff;
+
+      totalMise += mise;
+      totalGainPotentiel += gainPot;
+
+      return `
+        <tr>
+          <td style="text-align: left;">${name}</td>
+          <td style="text-align: right;">${mise.toFixed(2)} HTG</td>
+          <td style="text-align: right;">x${coeff.toFixed(2)}</td>
+          <td style="text-align: right;">${gainPot.toFixed(2)} HTG</td>
+        </tr>
+      `;
+    }).join('');
+
+    // === Gabarit du reçu HTML ===
+    const receiptHTML = `
+      <div style="
+        font-family: 'Courier New', monospace;
+        width: 300px;
+        padding: 10px;
+        border: 1px solid #000;
+      ">
+        <!-- ENTÊTE -->
+        <h2 style="text-align: center; margin: 0;">🏇 PARYAJ CHEVAL</h2>
+        <p style="text-align: center; font-size: 0.9em; margin: 4px 0;">
+          Ticket #${receipt.id} | Tour #${currentRound.id}<br>
+          ${escapeHtml(createdTime)}
+        </p>
+        <hr style="border: none; border-top: 1px dashed #000;">
+
+        <!-- TABLE DES PARIS -->
+        <table style="width: 100%; font-size: 14px; border-collapse: collapse;">
+          <thead>
+            <tr>
+              <th style="text-align: left;">Pari</th>
+              <th style="text-align: right;">Mise</th>
+              <th style="text-align: right;">Cote</th>
+              <th style="text-align: right;">Gain</th>
+            </tr>
+          </thead>
+          <tbody>${betsHTML}</tbody>
+        </table>
+
+        <hr style="border: none; border-top: 1px dashed #000; margin: 6px 0;">
+
+        <!-- TOTAUX -->
+        <p style="font-weight: bold; text-align: right;">
+          MISE TOTALE : ${totalMise.toFixed(2)} HTG
+        </p>
+        <p style="font-weight: bold; text-align: right;">
+          GAIN POTENTIEL : ${totalGainPotentiel.toFixed(2)} HTG
+        </p>
+
+        <hr style="border: none; border-top: 1px dashed #000; margin: 6px 0;">
+
+        <!-- PIED DE PAGE -->
+        <p style="text-align: center; font-size: 0.85em; margin: 0;">
+          Merci pour votre confiance 💸<br>
+          Bonne chance 🍀
+        </p>
+      </div>
+    `;
+
+    res.setHeader("Content-Type", "text/html");
+    return res.send(receiptHTML);
+  }
+
+  return res.status(400).send("Action non reconnue.");
 });
+
 
 // POST /api/v1/receipts/?action=add or ?action=delete&id=...
 app.post("/api/v1/receipts/", (req, res) => {
@@ -242,21 +335,65 @@ app.post("/api/v1/receipts/", (req, res) => {
 
   if (action === "add") {
     const receipt = req.body;
-    receipt.id = currentRound.lastReceiptId++;
+    console.log("Ajout d'un nouveau ticket de pari :", receipt);
+
+    // Génération d'un ID unique et aléatoire pour le ticket
+    receipt.id = Math.floor(Math.random() * 10000000000);
+
+    // S'assurer que receipt.bets existe
     receipt.bets = receipt.bets || [];
-    receipt.prize = 0; // Le gain est initialisé à 0
+
+    // 🔹 Fix : assigner number correct à chaque bet à partir du participant choisi
+    receipt.bets = receipt.bets.map(bet => {
+      if (!bet.participant || bet.participant.number === undefined) {
+        console.warn("Bet sans participant valide détecté :", bet);
+        return null; // Ignore les bets invalides
+      }
+
+      return {
+        ...bet,
+        number: bet.participant.number, // <-- Fix ici : prend le numéro réel du participant
+        value: bet.value,
+        prize: bet.prize || 0
+      };
+    }).filter(Boolean); // supprimer les bets invalides
+
+    // Calcule le gain du ticket en se basant sur le WINNER actuel du round (s'il existe)
+    let prizeForThisReceipt = 0;
+    const winner = Array.isArray(currentRound.participants) ? currentRound.participants.find(p => p.place === 1) : null;
+
+    if (Array.isArray(receipt.bets) && winner) {
+      receipt.bets.forEach(bet => {
+        if (Number(bet.number) === Number(winner.number)) {
+          const betValue = Number(bet.value) || 0;
+          const coeff = Number(winner.coeff) || 0;
+          prizeForThisReceipt += betValue * coeff;
+        }
+      });
+    }
+
+    receipt.prize = prizeForThisReceipt;
+    // Met à jour le total du round de façon sûre
+    currentRound.totalPrize = (currentRound.totalPrize || 0) + prizeForThisReceipt;
+
+    console.log("Initialisé le gain du ticket à :", receipt.prize);
+
+    // Ajouter le ticket à la liste des receipts
     currentRound.receipts.push(receipt);
+
+    console.log("Ticket ajouté avec ID :", receipt.id, "avec bets :", receipt.bets);
     return res.json(wrap({ id: receipt.id, success: true }));
   } 
-  
+
   if (action === "delete") {
     const id = parseInt(req.query.id, 10);
     currentRound.receipts = currentRound.receipts.filter(r => r.id !== id);
     return res.json(wrap({ success: true }));
   } 
-  
+
   return res.status(400).json({ error: "Unknown receipts action" });
 });
+
 
 // POST /api/v1/money/ - retourne un solde fictif
 app.post("/api/v1/money/", (req, res) => {
@@ -298,3 +435,12 @@ app.listen(PORT, () => {
 wss.on("listening", () => {
     console.log("✅ Serveur WebSocket lancé sur ws://localhost:8081");
 });
+
+function escapeHtml(str = "") {
+  return String(str)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
