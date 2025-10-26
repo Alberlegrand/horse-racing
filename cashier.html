@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="fr">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>HIT Gambling - Dashboard Caissier</title>
+
+    <!-- Tailwind CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap">
+    <link rel="stylesheet" href="/css/print.min.css?v=33054">
+    <link rel="stylesheet" href="/css/styles.css?v=33054">
+    <link rel="stylesheet" href="/css/responsive.css?v=33054">
+    
+    <style>
+        body {
+            font-family: 'Inter', system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+        }
+
+        :root {
+            --bg: #0f172a;
+            --accent: #3b82f6;
+            --text: #f8fafc;
+        }
+
+        .scrollbar::-webkit-scrollbar {
+            height: 8px;
+            width: 8px;
+        }
+
+        .scrollbar::-webkit-scrollbar-thumb {
+            background: #334155;
+            border-radius: 6px;
+        }
+
+        .page-content {
+            display: none;
+        }
+        
+        .page-content.active {
+            display: block;
+        }
+    </style>
+</head>
+
+<body class="bg-[color:var(--bg)] text-[color:var(--text)] min-h-screen flex">
+
+    <!-- Sidebar -->
+    <aside id="sidebar" class="w-72 bg-slate-900/80 border-r border-slate-800 p-5 hidden lg:flex flex-col">
+        <div class="flex items-center gap-3 mb-6">
+            <div class="w-10 h-10 bg-[color:var(--accent)] rounded-md flex items-center justify-center font-bold">H</div>
+            <div>
+                <div class="text-lg font-semibold">HIT Gambling</div>
+                <div class="text-xs text-slate-400">Espace Caissier</div>
+            </div>
+        </div>
+
+        <nav id="mainNav" class="flex-1 space-y-1">
+            <button data-page="dashboard" data-title="Dashboard"
+                class="nav-link w-full text-left px-3 py-2 rounded-md bg-[color:var(--accent)]/90 font-semibold">Dashboard</button>
+            <button data-page="course-chevaux" data-title="Course Chevaux"
+                class="nav-link w-full text-left px-3 py-2 rounded-md hover:bg-slate-800">Course Chevaux</button>
+            <button data-page="betting" data-title="Placer un pari"
+                class="nav-link w-full text-left px-3 py-2 rounded-md hover:bg-slate-800">Placer un pari</button>
+            <button data-page="my-bets" data-title="Mes Paris"
+                class="nav-link w-full text-left px-3 py-2 rounded-md hover:bg-slate-800">Mes Paris</button>
+            <button data-page="account" data-title="Mon Compte"
+                class="nav-link w-full text-left px-3 py-2 rounded-md hover:bg-slate-800">Mon Compte</button>
+        </nav>
+
+        <div class="mt-6">
+            <div class="text-xs text-slate-400 mb-2">Caissier</div>
+            <div class="flex items-center justify-between">
+                <div>
+                    <div id="cashierName" class="font-medium">Jean Dupont</div>
+                    <div id="cashBalanceSmall" class="text-sm text-slate-400">Solde: 50,000.00 HTG</div>
+                </div>
+                <button id="logoutBtn"
+                    class="px-3 py-2 bg-red-600 hover:bg-red-700 rounded-md text-sm">Déconnexion</button>
+            </div>
+        </div>
+    </aside>
+
+    <!-- Main -->
+    <div class="flex-1 flex flex-col">
+        <!-- Header -->
+        <header class="flex items-center justify-between px-5 py-3 border-b border-slate-800 bg-slate-900/60">
+            <div class="flex items-center gap-4">
+                <button id="mobileOpenBtn" class="lg:hidden px-2 py-1 bg-slate-800 rounded-md">Menu</button>
+                <h1 id="pageTitle" class="text-xl font-semibold">Dashboard</h1>
+            </div>
+
+            <div class="flex items-center gap-4">
+                <div class="text-sm text-slate-300">Solde caisse: <span id="cashBalanceHeader"
+                        class="font-semibold">50,000.00 HTG</span></div>
+                <button id="refreshBtn" class="px-3 py-1 bg-slate-800 rounded-md hover:bg-slate-700">Rafraîchir</button>
+            </div>
+        </header>
+
+        <!-- Content -->
+        <main class="p-6 overflow-auto scrollbar" id="main-content">
+            <!-- Les pages seront chargées dynamiquement ici -->
+            <div id="page-container">
+                <!-- Contenu chargé dynamiquement -->
+            </div>
+        </main>
+    </div>
+
+    <!-- Modal annulation -->
+    <div id="voidModal" class="fixed inset-0 bg-black/60 hidden items-center justify-center z-50">
+        <div class="bg-slate-900 rounded-lg p-6 w-full max-w-md border border-slate-800">
+            <h4 class="font-semibold mb-2">Confirmer annulation</h4>
+            <p class="text-sm text-slate-400 mb-4">Voulez-vous annuler le ticket <span id="modalTicketId"
+                    class="font-medium"></span> ?</p>
+            <div class="flex justify-end gap-3">
+                <button id="cancelVoidBtn" class="px-3 py-1 rounded-md bg-slate-800">Retour</button>
+                <button id="confirmVoidBtn" class="px-3 py-1 rounded-md bg-red-600 hover:bg-red-700">Annuler</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast -->
+    <div id="toast" class="fixed right-6 bottom-6 hidden z-50"></div>
+
+    <!-- Scripts de base -->
+    <script src="/js/jquery_min.js?v=33054"></script>
+    
+    <!-- Script principal de l'application -->
+    <script src="/js/app.js"></script>
+
+    <!-- Scripts de jeu (conservés tels quels) -->
+    <script src="/js/print.min.js?v=33054"></script>
+    <script src="/js/big_min.js?v=33054"></script>
+    <script src="/js/async.min.js?v=33054"></script>
+    <script src="/js/crafty-0.5.4.js?v=33054"></script>
+    <script src="/js/currency.js?v=33054"></script>
+    <script src="/js/context.js?v=33054"></script>
+    <script src="/js/managers.js?v=33054"></script>
+    <script src="/js/misc.js?v=33054"></script>
+    <script src="/js/models.js?v=33054"></script>
+    <script src="/js/server.js?v=33054"></script>
+    <script src="/js/webclient.js?v=33054"></script>
+    <script src="/js/user_manager.js?v=33054"></script>
+    <script src="/js/components.js?v=33054"></script>
+    <script src="/js/movie.js?v=33054"></script>
+    <script src="/js/path_generator.js?v=33054"></script>
+    <script src="/js/scene_builders.js?v=33054"></script>
+    <script src="/js/game.js?v=33054"></script>
+    <script src="/js/movie1.js?v=33054"></script>
+    <script src="/js/finish.js?v=33054"></script>
+    <script src="/js/fullscreen.js?v=33054"></script>
+    <script src="/js/centrifuge.min.js"></script>
+    <script src="/js/jackpots.ws.js?v=33054"></script>
+    <script src="/js/main.js?v=33054"></script>
+
+</body>
+
+</html>

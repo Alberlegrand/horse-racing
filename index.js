@@ -23,9 +23,12 @@ app.use(express.urlencoded({ extended: true }));
 // Sert les fichiers depuis le dossier courant (où se trouvent index.html, js/, css/)
 // Cela corrige l'erreur de type MIME ('text/html' au lieu de 'text/css').
 app.use(express.static(path.join(__dirname, "static")));
+app.use(express.static(path.join(__dirname, 'public')));
+app.use('/pages', express.static(path.join(__dirname, 'public', 'pages')));
 app.use('/css', express.static(path.join(__dirname, 'static', 'css')));
 app.use('/js', express.static(path.join(__dirname, 'static', 'js')));
 app.use('/img', express.static(path.join(__dirname, 'static', 'img')));
+app.use('/fonts', express.static(path.join(__dirname, 'static', 'fonts')));
 
 
 // =================================================================
@@ -127,7 +130,23 @@ app.get("/horse", (req, res) => {
   res.sendFile(path.join(__dirname, "horse.html"));
 });
 
-  let totalPrize = 0;
+// Ajouter cette route avec les autres routes
+app.get("/cashier", (req, res) => {
+  res.sendFile(path.join(__dirname, "cashier.html"));
+});
+
+app.get("/course-chevaux", (req, res) => {
+  res.sendFile(path.join(__dirname, "./pages/course-chevaux.html"));
+});
+
+app.get("/dashboard", (req, res) => {
+  res.sendFile(path.join(__dirname, "./dashboard.html"));
+});
+
+app.get("/bet_frame", (req, res) => {
+  res.sendFile(path.join(__dirname, "bet_frame.html"));
+});
+
 
 // === API v1 ===
 // POST /api/v1/rounds/  - body.action = "get" | "finish" | "confirm"
@@ -402,11 +421,18 @@ app.post("/api/v1/money/", (req, res) => {
 
 // Route /api/v1/keepalive/ pour maintenir la session
 app.all(/^\/api\/v1\/keepalive(\/.*)?$/, (req, res) => {
-  return res.json(wrap({
+  const host = req.get('host') || `localhost:${PORT}`;
+  const proto = req.headers['x-forwarded-proto'] || req.protocol || 'http';
+  const basePath = '/api/v1/keepalive/';
+  const keepAliveUrl = `${proto}://${host}${basePath}`;
+
+  const payload = {
     keepAliveTick: 30000,
     keepAliveTimeout: 5000,
-    keepAliveUrl: "http://localhost:8080/api/v1/keepalive"
-  }));
+    keepAliveUrl
+  };
+
+  return res.json(wrap(payload));
 });
 
 // === WebSocket server ===

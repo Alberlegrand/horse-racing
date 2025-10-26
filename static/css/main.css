@@ -1,0 +1,21 @@
+body {
+  font-family: system-ui, sans-serif;
+  background: #f9fafb;
+  margin: 0;
+}
+
+.nav-link {
+  color: #bbb;
+  text-decoration: none;
+  transition: color 0.2s;
+}
+
+.nav-link.active,
+.nav-link:hover {
+  color: white;
+  font-weight: bold;
+}
+
+button {
+  cursor: pointer;
+}
