@@ -186,6 +186,47 @@
     <script src="/js/main.js?v=33054"></script>
     <link rel="stylesheet" href="/css/jackpots.css?v=33054">
 
+    <script>
+        function connectWebSocket() {
+            const ws = new WebSocket(wsConfig.connectionString);
+
+            ws.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+
+                switch (data.event) {
+                    case "new_round":
+                        console.log("Nouveau tour reçu:", data.game);
+                        if (data.autoStartTime) {
+                            const timeUntilStart = data.autoStartTime - Date.now();
+                            if (timeUntilStart > 0) {
+                                console.log(`⏰ Course programmée dans ${timeUntilStart}ms`);
+                                setTimeout(() => {
+                                    // Démarrer automatiquement
+                                    if (window.gameConfig?.autoStartEnabled) {
+                                        startRound();
+                                    }
+                                }, timeUntilStart);
+                            }
+                        }
+                        break;
+
+                    // ...existing cases...
+                }
+            };
+        }
+
+        // Fonction helper pour démarrer un round
+        function startRound() {
+            fetch("/api/v1/rounds/", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify({ action: "finish" })
+            });
+        }
+    </script>
+
 </body>
 
 </html>

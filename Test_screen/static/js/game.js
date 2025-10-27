@@ -218,9 +218,9 @@ GameScreen.prototype._getTotalValue = function () {
  * @throws
  */
 GameScreen.prototype._validateReceipts = function () {
-    /* if (!this._receipts.length) {
+    if (!this._receipts.length) {
         throw new GameScreen.ValidationError(Messages.NO_RECEIPTS);
-    } */
+    }
 };
 
 /**

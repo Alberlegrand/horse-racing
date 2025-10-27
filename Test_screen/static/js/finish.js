@@ -91,11 +91,6 @@ FinishScreenView.prototype._updateReceiptTableHeader = function (game) {
 };
 
 FinishScreenView.prototype._updateReceiptTableBody = function (game) {
-    // AJOUT DE LA VÉRIFICATION : Ne rien faire si 'receipts' est nul ou vide.
-    if (!game.receipts || game.receipts.length === 0) {
-        return; 
-    }
-    
     let winner = game.getWinner();
     let rows = game.receipts.map(function (receipt) {
         let parts = game.participants.map(function (participant) {
@@ -121,5 +116,3 @@ FinishScreenView.prototype._updateReceiptTableBody = function (game) {
     });
     this._container.find(".footer").before(rows);
 };
-
-

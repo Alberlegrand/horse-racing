@@ -1,0 +1,571 @@
+@font-face {
+    font-family: Scada;
+    src: url(/fonts/Scada-Regular.ttf);
+}
+
+html, body {
+    overflow-y: auto;
+}
+
+body {
+    max-height: 100vh;
+    background: url(/img/background.jpg);
+}
+body:fullscreen::backdrop {
+    background: transparent;
+}
+
+label {
+    display: block;
+}
+
+.datatable {
+    border-collapse: collapse;
+}
+
+.datatable tr:nth-child(even) {
+    background: #ddd;
+}
+
+.datatable th,
+.datatable td {
+    padding: 5px;
+    min-width: 20px;
+    border-left: 1px solid #777;
+    border-right: 1px solid #777;
+    text-align: left;
+}
+
+.money-horse-section {
+    color: white;
+    font-family: "Scada", serif;
+}
+
+.money-horse-section a {
+    color: white;
+}
+
+.money-horse-section button {
+    outline: none;
+}
+
+.money-horse-section input {
+    padding: 1px 0;
+    border: 0;
+    background: #5A5A5A;
+    font: 22px "Scada";
+    color: white;
+}
+
+button, input[type=submit] {
+    cursor: pointer;
+    border: none;
+}
+
+.money-horse-section .js_template {
+    display: none;
+}
+
+.money-horse-section .active {
+    display: block !important;
+}
+
+.money-horse-section .content {
+    position: relative;
+    /*height: 100%;*/
+    margin: 0 auto;
+}
+
+.money-horse-section .button {
+    width: 290px;
+    background: center center url(../img/button.png);
+    border: 0;
+    color: #E2FAB1;
+    font: bold 27px "Scada";
+    cursor: pointer;
+    margin: 0 10px;
+    background-size: cover;
+    padding: 25px;
+}
+
+.money-horse-section .button[disabled] {
+    filter: grayscale(100%);
+}
+
+.money-horse-section .button.start {
+    filter: hue-rotate(90deg);
+    display: inline-block;
+}
+
+.lds-hourglass {
+    display: inline-block;
+    position: relative;
+    width: 64px;
+    height: 64px;
+}
+
+.lds-hourglass:after {
+    content: " ";
+    display: block;
+    border-radius: 50%;
+    width: 0;
+    height: 0;
+    margin: 6px;
+    box-sizing: border-box;
+    border: 26px solid;
+    border-color: #fff transparent #fff transparent;
+    animation: lds-hourglass 1.2s infinite;
+}
+
+@keyframes lds-hourglass {
+    0% {
+        transform: rotate(0);
+        animation-timing-function: cubic-bezier(0.55, 0.055, 0.675, 0.19);
+    }
+    50% {
+        transform: rotate(900deg);
+        animation-timing-function: cubic-bezier(0.215, 0.61, 0.355, 1);
+    }
+    100% {
+        transform: rotate(1800deg);
+    }
+}
+
+.money-horse-section .loading_indicator {
+    display: none;
+    width: 100%;
+    height: 100%;
+    position: absolute;
+    left: 0;
+    top: 0;
+    background: rgba(0, 0, 0, 0.5);
+    z-index: 1000;
+}
+
+.money-horse-section .loading_indicator .message {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 300px;
+    height: 110px;
+    margin: -25px 0 0 -100px;
+    line-height: 50px;
+    text-align: center;
+    background: #222;
+    padding: 10px 0;
+    font-size: 32px;
+}
+
+body.loading .loading_indicator {
+    display: block;
+}
+
+.money-horse-section .notification {
+    display: none;
+    max-width: 600px;
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    z-index: 500;
+    background: url(../img/account_background.jpg);
+    padding: 10px;
+    border: 3px solid;
+    box-shadow: 0 0 10px 2px black;
+}
+
+.money-horse-section .notification.message {
+    border-color: #E2FAB1;
+}
+
+.money-horse-section .notification.error {
+    border-color: #FA8D72;
+}
+
+.money-horse-section .notification .close {
+    position: absolute;
+    right: -5px;
+    top: -5px;
+    display: block;
+    width: 14px;
+    height: 14px;
+    background: no-repeat center center url(../img/cancel.png);
+}
+
+.money-horse-section .screen {
+    display: none;
+    /*margin-top: 9px;*/
+}
+
+.money-horse-section .panel {
+    position: relative;
+    height: 89px;
+    background: repeat-x url(../img/panel.png);
+}
+
+.money-horse-section .panel .title {
+    position: absolute;
+    left: 10px;
+    top: 6px;
+    font-size: 30px;
+}
+
+.money-horse-section .panel .btn_return_url {
+    width: 122px;
+    height: 50%;
+    position: absolute;
+    left: calc(50% - 61px);
+    background: no-repeat center center url(../img/button-return.png);
+    cursor: pointer;
+    background-size: contain;
+}
+
+.money-horse-section .panel .limits {
+    position: absolute;
+    right: 59px;
+    top: 3px;
+    font-size: 18px;
+}
+
+.money-horse-section .panel .menu {
+    position: absolute;
+    right: 0;
+    top: 0;
+    font-size: 25px;
+    z-index: 2;
+}
+
+.money-horse-section .panel .toggle_menu {
+    width: 49px;
+    height: 49px;
+    background: center url(../img/more.png) no-repeat;
+}
+
+.money-horse-section .panel .menu_items {
+    display: none;
+    position: absolute;
+    top: 50px;
+    right: 0;
+    min-width: 190px;
+    background: url(../img/menu.png);
+    padding: 10px;
+    text-align: right;
+}
+
+.money-horse-section .panel .menu_items a {
+    display: block;
+}
+
+.money-horse-section .screen .avatar_background {
+    position: absolute;
+    width: 163px;
+    height: 163px;
+    background: no-repeat 0 0 url(../img/avatars.png);
+}
+
+.money-horse-section .screen .avatar {
+    width: 100%;
+    height: 100%;
+    background: no-repeat url(../img/avatars.png);
+}
+
+.money-horse-section .screen .family0 .avatar {
+    background-position: -163px 0;
+}
+
+.money-horse-section .screen .family1 .avatar {
+    background-position: -326px 0;
+}
+
+.money-horse-section .screen .family2 .avatar {
+    background-position: -489px 0;
+}
+
+.money-horse-section .screen .family3 .avatar {
+    background-position: -652px 0;
+}
+
+.money-horse-section .screen .family4 .avatar {
+    background-position: -815px 0;
+}
+
+.money-horse-section .screen .family5 .avatar {
+    background-position: -978px 0;
+}
+
+.money-horse-section .game_screen {
+    position: relative;
+    text-align: center;
+}
+
+.money-horse-section .game_screen .participants_container {
+    height: 354px;
+    background: repeat-x center center url(../img/game_background.jpg);
+    text-align: center;
+    overflow-x: auto;
+}
+
+.money-horse-section .game_screen .participants_container .participants {
+    width: 1024px;
+    margin: 0 auto;
+}
+
+
+.money-horse-section .game_screen .participant {
+    display: inline-block;
+    width: 315px;
+    height: 160px;
+    position: relative;
+    text-shadow: black 0 0 5px;
+    text-align: left;
+}
+
+.money-horse-section .game_screen .participant .avatar_background {
+    top: 15px;
+    z-index: 1;
+}
+
+.money-horse-section .game_screen .participant .name {
+    position: absolute;
+    left: 152px;
+    top: 46px;
+    width: 150px;
+    font-size: 19px;
+}
+
+.money-horse-section .game_screen .participant .coeff_container {
+    position: absolute;
+    left: 152px;
+    top: 75px;
+    width: 140px;
+}
+
+.money-horse-section .game_screen .participant .coeff {
+    display: inline-block;
+    font-size: 25px;
+}
+
+.money-horse-section .game_screen .participant .coeff_hint {
+    display: inline-block;
+    width: 77px;
+    font-size: 12px;
+}
+
+.money-horse-section .game_screen .participant .bet {
+    position: absolute;
+    left: 78px;
+    top: 115px;
+    width: 215px;
+    height: 40px;
+    background: rgba(0, 0, 0, 0.5);
+}
+
+.money-horse-section .game_screen .participant .bet .create {
+    position: absolute;
+    left: 72px;
+    top: 5px;
+}
+
+.money-horse-section .game_screen .participant.has_bet .bet .create {
+    display: none;
+}
+
+.money-horse-section .game_screen .participant .bet .create .value {
+    position: absolute;
+    display: block;
+    width: 136px;
+    height: 28px;
+    padding-left: 3px;
+}
+
+.money-horse-section .game_screen .participant .bet .create.has_value .value {
+    width: 109px;
+}
+
+.money-horse-section .game_screen .participant .bet .create .confirm {
+    display: none;
+    width: 27px;
+    height: 30px;
+    position: absolute;
+    left: 112px;
+    top: 0;
+    line-height: 21px;
+    background: #999;
+    color: white;
+}
+
+.money-horse-section .game_screen .participant .bet .create.has_value .confirm {
+    display: block;
+}
+
+.money-horse-section .game_screen .participant .bet .view {
+    display: none;
+}
+
+.money-horse-section .game_screen .participant.has_bet .bet .view {
+    display: block;
+}
+
+.money-horse-section .game_screen .participant.has_bet .bet .view .value {
+    position: absolute;
+    right: 90px;
+    top: 10px;
+    background: no-repeat right center url(../img/bet.png);
+    padding-right: 20px;
+}
+
+.money-horse-section .game_screen .participant.has_bet .bet .view .prize {
+    position: absolute;
+    right: 14px;
+    top: 10px;
+    background: no-repeat right center url(../img/prize.png);
+    padding-right: 20px;
+}
+
+.money-horse-section .game_screen .participant.has_bet .bet .view .cancel {
+    position: absolute;
+    right: -5px;
+    top: -5px;
+    display: block;
+    width: 14px;
+    height: 14px;
+    background: no-repeat center center url(../img/cancel.png);
+}
+
+.money-horse-section .game_screen .controls {
+    display: inline-block;
+}
+
+.money-horse-section .game_screen .controls .button {
+    display: inline-block;
+}
+
+.money-horse-section .game_screen .receipts_container {
+    display: none;
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(51, 51, 51, 0.95);
+    z-index: 2;
+}
+
+.money-horse-section .game_screen .receipts {
+    margin: 10px auto;
+    font-size: 16px;
+}
+
+.money-horse-section .game_screen .receipts tr:nth-child(even) {
+    background: #444;
+}
+
+.money-horse-section .game_screen .receipts td {
+    padding: 5px 8px;
+    text-align: right;
+    border-left: 1px solid #777;
+    border-right: 1px solid #777;
+}
+
+.money-horse-section .game_screen .receipts .remove {
+    display: block;
+    width: 14px;
+    height: 14px;
+    background: no-repeat center center url(../img/cancel.png);
+}
+
+.money-horse-section .game_screen .min_bet {
+    position: absolute;
+    left: 13px;
+    top: 398px;
+    font-size: 20px;
+}
+
+.money-horse-section .movie_screen {
+    position: relative;
+}
+
+.money-horse-section .movie_screen .movie_container {
+    /*height: 555px;*/
+    background: repeat-x url(../img/movie_background.png);
+}
+
+.money-horse-section .movie_screen .movie {
+    position: relative;
+    /*top: 22px;*/
+    border: 3px solid #19231F;
+    margin: 0 auto;
+}
+
+.money-horse-section .movie_screen .skip {
+    display: none;
+}
+
+.money-horse-section .movie_screen.skippable .skip {
+    display: block;
+    margin: 0 auto;
+}
+
+.money-horse-section .finish_screen {
+    position: relative;
+}
+
+.money-horse-section .finish_screen .winner {
+    height: 212px;
+    background: repeat-x center center url(../img/finish_background.png);
+    text-align: center;
+}
+
+.money-horse-section .finish_screen .winner .title {
+    padding-top: 9px;
+    vertical-align: middle;
+    font-size: 36px;
+    color: gold;
+}
+
+.money-horse-section .finish_screen .winner .avatar_background {
+    position: relative;
+    display: inline-block;
+    vertical-align: middle;
+}
+
+.money-horse-section .finish_screen .winner .name {
+    display: inline-block;
+    vertical-align: middle;
+    font-size: 25px;
+}
+
+.money-horse-section .finish_screen .receipts {
+    margin: 20px auto;
+    font-size: 16px;
+    background: #333;
+}
+
+.money-horse-section .finish_screen .receipts tr:nth-child(even) {
+    background: #444;
+}
+
+.money-horse-section .finish_screen .receipts td {
+    padding: 5px 8px;
+    text-align: right;
+    border-left: 1px solid #777;
+    border-right: 1px solid #777;
+}
+
+.money-horse-section .finish_screen .receipts td.win {
+    background: #25735e;
+}
+
+.money-horse-section .finish_screen .new_game {
+    margin: 0 auto;
+    display: block;
+}
+
+.bet-section .text {
+    padding: 0 25px;
+}
+
+.repeat-print {
+    background-image: url("../img/print.svg");
+    width: 16px;
+    height: 16px;
+}

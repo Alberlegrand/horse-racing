@@ -1,0 +1,424 @@
+<html lang="ru">
+
+<head>
+    <meta charset="utf-8">
+    <meta name="theme-color" content="#1C1C1C">
+    <title>CSRacing</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+    <link href="https://unpkg.com/tailwindcss@^2.0/dist/tailwindcss.min.css" rel="stylesheet">
+    <style>
+        @keyframes loading {
+            0% {
+                transform: rotate(0)
+            }
+
+            to {
+                transform: rotate(360deg)
+            }
+        }
+
+        .ag-textarea .MuiInputBase-input::-webkit-scrollbar {
+            height: 6px;
+            width: 6px
+        }
+
+        .ag-textarea .MuiInputBase-input::-webkit-scrollbar-track {
+            background: transparent
+        }
+
+        .ag-textarea .MuiInputBase-input::-webkit-scrollbar-thumb {
+            background: #dfdfdf;
+            border-radius: 4px
+        }
+
+        .ag-textarea .MuiInputBase-input::-webkit-scrollbar-thumb:hover {
+            background: #d4d4d4
+        }
+
+        .participants_container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            overflow-y: hidden;
+        }
+
+        .participants {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            grid-row-gap: 30px;
+            grid-column-gap: 40px;
+            justify-items: center;
+            height: 100vh;
+        }
+    </style>
+    <style>
+        .translated-content .ytCoreImageHost {
+            visibility: visible;
+        }
+
+        /* Overlay d'exigence de rotation */
+.rotation-overlay {
+    display: none; /* Caché par défaut */
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.9);
+    color: white;
+    z-index: 99999;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    text-align: center;
+    padding: 20px;
+}
+
+.rotation-overlay h2 {
+    margin-bottom: 20px;
+    font-size: 1.5em;
+}
+
+/* ⚠️ Affiche l'overlay UNIQUEMENT sur les écrans étroits ET en mode portrait */
+@media (max-width: 767px) and (orientation: portrait) {
+    .rotation-overlay {
+        display: flex;
+    }
+}
+
+/* Icône de téléphone tournant (CSS pur pour l'exemple) */
+.rotation-icon {
+    font-size: 60px;
+    animation: rotate-animation 1.5s ease-in-out infinite alternate;
+}
+
+@keyframes rotate-animation {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(90deg); }
+}
+    </style>
+</head>
+
+<body class="">
+    <div class="rotation-overlay">
+        <h2>Veuillez tourner votre téléphone 🔄</h2>
+        <span class="rotation-icon">📱</span>
+        <p>Ce jeu nécessite l'orientation **paysage** (horizontale) pour une meilleure expérience.</p>
+    </div>
+    <link rel="stylesheet" href="/css/print.min.css?v=33054">
+    <link rel="stylesheet" href="/css/styles.css?v=33054">
+    <link rel="stylesheet" href="/css/responsive.css?v=33054">
+
+    <section class="money-horse-section js-money-horse-section">
+        <div class="content">
+            <div class="panel">
+                <div class="title"></div>
+                <span id="currentRound" style="display:none;"></span>
+                <div class="btn_return_url" style="display: none;"></div>
+                <div class="limits">
+                    Min: 10 HTG<br>
+                    Max: 5000 HTG<br>
+                </div>
+
+                <div class="menu">
+                    <button class="toggle_menu"></button>
+                    <div class="menu_items">
+                        <span class="money"></span>
+                    </div>
+                </div>
+
+            </div>
+            <div class="screen game_screen active">
+                <div class="participants_container">
+                    <div class="participants">
+                        <!-- TEMPLATE : utilisé uniquement pour le clonage JS -->
+                        <div class="js_template" style="display:none;">
+                            <div class="avatar_background">
+                                <div class="avatar"></div>
+                            </div>
+                            <div class="name"></div>
+                            <div class="coeff_container">
+                                <div class="coeff"></div>
+                                <div data-l10n-id="horse_prize_coef" class="coeff_hint"></div>
+                            </div>
+                            <div class="bet">
+                                <form class="create">
+                                    <input type="number" placeholder="Bet" tabindex="1" class="value" min="0"
+                                        step="0.01">
+                                    <input type="submit" value="ok" class="confirm">
+                                </form>
+                                <div class="view">
+                                    <div class="value"></div>
+                                    <div class="prize"></div>
+                                    <button class="cancel"></button>
+                                </div>
+                            </div>
+                        </div>
+                        <!-- Fin du template -->
+
+                        <!-- Participants générés dynamiquement -->
+                        <!-- (Ton script va cloner le template ci-dessus pour remplir cette liste) -->
+                    </div>
+                </div>
+
+                <div class="w-full mx-auto my-10 bg-white rounded-lg shadow-md overflow-hidden bottom-0">
+
+                    <table class="history w-full">
+
+                        <thead>
+                            <tr class="bg-gray-50 border-b border-gray-200">
+                                <th scope="col"
+                                    class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                    Round
+                                </th>
+                                <th scope="col"
+                                    class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                    1st
+                                </th>
+                                <th scope="col"
+                                    class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                    2nd
+                                </th>
+                                <th scope="col"
+                                    class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                    3rd
+                                </th>
+                                <th scope="col"
+                                    class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                    4th
+                                </th>
+                                <th scope="col"
+                                    class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                    5th
+                                </th>
+                                <th scope="col"
+                                    class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                    6th
+                                </th>
+                            </tr>
+                        </thead>
+
+                        <tbody class="divide-y divide-gray-200">
+
+                            <tr class="js_template hidden">
+                                <td class="round px-6 py-4 whitespace-nowrap"></td>
+                                <td class="first px-6 py-4 whitespace-nowrap"></td>
+                                <td class="second px-6 py-4 whitespace-nowrap"></td>
+                                <td class="third px-6 py-4 whitespace-nowrap"></td>
+                                <td class="fourth px-6 py-4 whitespace-nowrap"></td>
+                                <td class="fifth px-6 py-4 whitespace-nowrap"></td>
+                                <td class="sixth px-6 py-4 whitespace-nowrap"></td>
+                            </tr>
+
+                            <tr>
+                                <td class="round px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                                    Round 1
+                                </td>
+                                <td class="first px-6 py-4 whitespace-nowrap text-sm text-gray-700">
+                                    Cheval Rapide
+                                </td>
+                                <td class="second px-6 py-4 whitespace-nowrap text-sm text-gray-700">
+                                    Étoile Filante
+                                </td>
+                                <td class="third px-6 py-4 whitespace-nowrap text-sm text-gray-700">
+                                    Tonnerre
+                                </td>
+                                <td class="fourth px-6 py-4 whitespace-nowrap text-sm text-gray-700">
+                                    Galopin
+                                </td>
+                                <td class="fifth px-6 py-4 whitespace-nowrap text-sm text-gray-700">
+                                    Caracalla
+                                </td>
+                                <td class="sixth px-6 py-4 whitespace-nowrap text-sm text-gray-700">
+                                    Turbide
+                                </td>
+                            </tr>
+                             <tr>
+                                <td class="round px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                                    Round 1
+                                </td>
+                                <td class="first px-6 py-4 whitespace-nowrap text-sm text-gray-700">
+                                    Cheval Rapide
+                                </td>
+                                <td class="second px-6 py-4 whitespace-nowrap text-sm text-gray-700">
+                                    Étoile Filante
+                                </td>
+                                <td class="third px-6 py-4 whitespace-nowrap text-sm text-gray-700">
+                                    Tonnerre
+                                </td>
+                                <td class="fourth px-6 py-4 whitespace-nowrap text-sm text-gray-700">
+                                    Galopin
+                                </td>
+                                <td class="fifth px-6 py-4 whitespace-nowrap text-sm text-gray-700">
+                                    Caracalla
+                                </td>
+                                <td class="sixth px-6 py-4 whitespace-nowrap text-sm text-gray-700">
+                                    Turbide
+                                </td>
+                            </tr>
+                             <tr>
+                                <td class="round px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                                    Round 1
+                                </td>
+                                <td class="first px-6 py-4 whitespace-nowrap text-sm text-gray-700">
+                                    Cheval Rapide
+                                </td>
+                                <td class="second px-6 py-4 whitespace-nowrap text-sm text-gray-700">
+                                    Étoile Filante
+                                </td>
+                                <td class="third px-6 py-4 whitespace-nowrap text-sm text-gray-700">
+                                    Tonnerre
+                                </td>
+                                <td class="fourth px-6 py-4 whitespace-nowrap text-sm text-gray-700">
+                                    Galopin
+                                </td>
+                                <td class="fifth px-6 py-4 whitespace-nowrap text-sm text-gray-700">
+                                    Caracalla
+                                </td>
+                                <td class="sixth px-6 py-4 whitespace-nowrap text-sm text-gray-700">
+                                    Turbide
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+
+                </div>
+
+                <button data-l10n-id="horse_begin_race" class="button start" style="visibility: hidden;">Start</button>
+
+                <div class="receipts_container">
+                    <div class="receipts"></div>
+                </div>
+            </div>
+
+            <div class="screen movie_screen">
+                <div id="movieContainer" class="movie_container">
+                    <div class="movie"></div>
+                </div>
+                <button data-l10n-id="horse_skip" class="button skip" style="display:none;">Skip</button>
+            </div>
+            <div class="screen finish_screen">
+                <div class="winner">
+                    <div class="title"></div>
+                    <div class="avatar_background">
+                        <div class="avatar"></div>
+                    </div>
+                    <div class="name"></div>
+                </div>
+                <table class="receipts" style="display:none;"></table>
+                <table id="ticketsTable" style="display:none;"></table>
+
+                <button data-l10n-id="horse_new_race" class="button new_game" style="visibility:hidden;">New
+                    round</button>
+            </div>
+        </div>
+        <div class="loading_indicator">
+            <div data-l10n-id="horse_loading" class="message">
+                <div>Please, wait...</div>
+                <div class="lds-hourglass"></div>
+            </div>
+        </div>
+        <div class="notification_container">
+            <div class="js_template">
+                <button class="close"></button>
+                <div class="message"></div>
+            </div>
+        </div>
+    </section>
+
+    <script src="/js/print.min.js?v=33054"></script>
+    <script src="/js/jquery_min.js?v=33054"></script>
+    <script src="/js/big_min.js?v=33054"></script>
+    <script src="/js/async.min.js?v=33054"></script>
+    <script src="/js/crafty-0.5.4.js?v=33054"></script>
+    <script src="/js/currency.js?v=33054"></script>
+    <script src="/js/context.js?v=33054"></script>
+    <script src="/js/managers.js?v=33054"></script>
+    <script src="/js/misc.js?v=33054"></script>
+    <script src="/js/models.js?v=33054"></script>
+    <script src="/js/server.js?v=33054"></script>
+    <script src="/js/webclient.js?v=33054"></script>
+    <script src="/js/user_manager.js?v=33054"></script>
+    <script src="/js/components.js?v=33054"></script>
+    <script src="/js/movie.js?v=33054"></script>
+    <script src="/js/path_generator.js?v=33054"></script>
+    <script src="/js/scene_builders.js?v=33054"></script>
+    <script src="/js/game.js?v=33054"></script>
+    <script src="/js/movie1.js?v=33054"></script>
+    <script src="/js/finish.js?v=33054"></script>
+    <script src="/js/fullscreen.js?v=33054"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <script src="/js/centrifuge.min.js"></script>
+    <script src="/js/jackpots.ws.js?v=33054"></script>
+    <script src="/js/main.js?v=33054"></script>
+    <link rel="stylesheet" href="/css/jackpots.css?v=33054">
+    <script>
+        $(document).ready(function () {
+
+            // 1. Délai entre la fin d'une course et le début de la suivante (en millisecondes)
+            // ATTENTION : Ce délai est maintenant le temps d'attente AVANT de recharger la page.
+            var delaiAvantRechargement = 25000;
+
+            /**
+             * Fonction 1: Démarre la course
+             * (Reste inchangée)
+             */
+            function demarrerCourse() {
+                var $startButton = $('.start');
+
+                if ($startButton.length > 0 && $startButton.is(':visible')) {
+                    console.log('Démarrage de la course...');
+                    $startButton.click();
+
+                    // Une fois la course lancée, on se met en mode "attente de la fin"
+                    attendreFinDeCourse();
+                } else {
+                    console.log('En attente du bouton "Start"...');
+                    setTimeout(demarrerCourse, 1000);
+                }
+            }
+
+            // ----------------------------------------------------------------------
+            // FONCTION CORRIGÉE POUR RECHARGER LA PAGE
+            // ----------------------------------------------------------------------
+            /**
+             * Fonction 2: Attend la fin de la course, puis recharge la page après le délai
+             */
+            function attendreFinDeCourse() {
+                // On crée un "checker" qui s'exécute 1x par seconde
+                var checkInterval = setInterval(function () {
+                    var $newGameButton = $('.new_game'); // Le bouton "New round"
+
+                    if ($newGameButton.length > 0 && $newGameButton.is(':visible')) {
+                        // On a trouvé le bouton de fin !
+                        clearInterval(checkInterval); // On arrête de vérifier
+                        setTimeout(function () {
+                            // 1. On clique quand même sur 'New Round' pour nettoyer l'état du jeu si nécessaire
+                            console.log('Course terminée. Clic sur "New round" (Nettoyage de l\'état du jeu).');
+                            $newGameButton.click();
+
+                            // 2. On programme le rechargement de la page après le délai
+                            console.log('Rechargement de la page prévu dans ' + (delaiAvantRechargement / 1000) + ' secondes.');
+
+
+                            console.log("Délai écoulé. Rechargement de la page...");
+                            // window.location.reload(true) force le rechargement depuis le serveur (non-cache)
+                            window.location.reload(true);
+                        }, 5000); // Petit délai avant rechargement pour s'assurer que l'état est propre
+                    }
+                }, 1000); // Vérification toutes les 1000ms
+            }
+            // ----------------------------------------------------------------------
+
+            // --- Lancement de la toute première course ---
+            // Vous aviez 5000ms (5s) pour le premier démarrage.
+            console.log('Lancement de la boucle automatique dans 5 secondes...');
+            setTimeout(demarrerCourse, delaiAvantRechargement);
+
+        });
+    </script>
+
+</body>
+
+</html>

@@ -24,6 +24,7 @@ app.use(express.urlencoded({ extended: true }));
 // Cela corrige l'erreur de type MIME ('text/html' au lieu de 'text/css').
 app.use(express.static(path.join(__dirname, "static")));
 app.use(express.static(path.join(__dirname, 'public')));
+app.use('/Test_screen', express.static(path.join(__dirname, 'Test_screen')));
 app.use('/pages', express.static(path.join(__dirname, 'public', 'pages')));
 app.use('/css', express.static(path.join(__dirname, 'static', 'css')));
 app.use('/js', express.static(path.join(__dirname, 'static', 'js')));
@@ -64,54 +65,61 @@ function wrap(data) {
 /**
  * Archive le tour terminé et en démarre un nouveau.
  */
-function startNewRound() {
-    console.log(`🏁 Fin du tour #${currentRound.id}. Archivage des résultats.`);
+function startNewRound(broadcast) {
+  console.log(`🏁 Fin du tour #${currentRound.id}. Archivage des résultats.`);
 
-    // 1️⃣ Archive le tour complété
-    if (currentRound.id) {
-        const finishedRound = {
-            id: currentRound.id,
-            // deep-clone receipts & participants pour éviter toute mutation future
-            receipts: JSON.parse(JSON.stringify(currentRound.receipts || [])),
-            participants: JSON.parse(JSON.stringify(currentRound.participants || [])),
-            totalPrize: currentRound.totalPrize || 0,
-            winner: (currentRound.participants || []).find(p => p.place === 1) || null,
-        };
-        gameHistory.push(finishedRound);
-
-        // Garde seulement les 10 derniers tours
-        if (gameHistory.length > 10) gameHistory.shift();
-    }
-
-    // 2️⃣ Prépare le nouveau tour avec des places uniques aléatoires
-    const newRoundId = generateRoundId();
-
-    // Génère un tableau de places 1..N
-    const basePlaces = Array.from({ length: BASE_PARTICIPANTS.length }, (_, i) => i + 1);
-
-    // Mélange les places avec Fisher-Yates pour avoir un ordre aléatoire
-    for (let i = basePlaces.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [basePlaces[i], basePlaces[j]] = [basePlaces[j], basePlaces[i]];
-    }
-
-    // Assigne les places uniques à chaque participant
-    currentRound = {
-        id: newRoundId,
-        participants: BASE_PARTICIPANTS.map((p, i) => ({
-            ...p,
-            place: basePlaces[i],
-        })),
-        receipts: [],         // <-- garantie : table des receipts vide pour chaque nouveau round
-        lastReceiptId: 3,
-        totalPrize: 0
+  // Archive le tour complété
+  if (currentRound.id) {
+    const finishedRound = {
+      id: currentRound.id,
+      // deep-clone receipts & participants pour éviter toute mutation future
+      receipts: JSON.parse(JSON.stringify(currentRound.receipts || [])),
+      participants: JSON.parse(JSON.stringify(currentRound.participants || [])),
+      totalPrize: currentRound.totalPrize || 0,
+      winner: (currentRound.participants || []).find(p => p.place === 1) || null,
     };
+    gameHistory.push(finishedRound);
 
-    console.log(`🚀 Nouveau tour #${currentRound.id} prêt à commencer !`);
+    // Garde seulement les 10 derniers tours
+    if (gameHistory.length > 10) gameHistory.shift();
+  }
 
-    // 3️⃣ Notifie tous les clients qu'un nouveau tour est disponible
-    // en envoyant une copie sûre (receipts vide)
-    broadcast({ event: "new_round", game: JSON.parse(JSON.stringify(currentRound)) });
+  // 2️⃣ Prépare le nouveau tour
+  const newRoundId = generateRoundId();
+
+  // Génère un tableau de places 1..N
+  const basePlaces = Array.from({ length: BASE_PARTICIPANTS.length }, (_, i) => i + 1);
+
+  // Mélange les places avec Fisher-Yates pour avoir un ordre aléatoire
+  for (let i = basePlaces.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [basePlaces[i], basePlaces[j]] = [basePlaces[j], basePlaces[i]];
+  }
+
+  // Assigne les places uniques à chaque participant
+  currentRound = {
+    id: newRoundId,
+    participants: BASE_PARTICIPANTS.map((p, i) => ({
+      ...p,
+      place: basePlaces[i],
+    })),
+    receipts: [],         // <-- garantie : table des receipts vide pour chaque nouveau round
+    lastReceiptId: 3,
+    totalPrize: 0
+  };
+
+  console.log(`🚀 Nouveau tour #${currentRound.id} prêt à commencer !`);
+
+  // 3️⃣ Notifie les clients
+  if (broadcast) {
+    broadcast({ 
+      event: "new_round", 
+      game: JSON.parse(JSON.stringify(currentRound)),
+      autoStartTime: Date.now() + (currentRound.autoStartDelay || 15000)
+    });
+  }
+
+  console.log("⏰ Le nouveau tour commencera automatiquement dans 15 secondes...");
 }
 
 
@@ -151,25 +159,14 @@ app.get("/bet_frame", (req, res) => {
 // === API v1 ===
 // POST /api/v1/rounds/  - body.action = "get" | "finish" | "confirm"
 app.post("/api/v1/rounds/", (req, res) => {
-  // Parsing défensif de l'action
-  let rawBody = req.body;
-  if (typeof rawBody === "string" && rawBody.trim()) {
-    try { rawBody = JSON.parse(rawBody); } catch (e) { /* keep string */ }
-  }
-
-  const action =
-    (rawBody && (rawBody.action || (rawBody.data && rawBody.data.action))) ||
-    req.query.action ||
-    null;
-
-  // Debug utile pour tracer
-  //console.log("/api/v1/rounds/ headers:", req.headers);
-  //console.log("/api/v1/rounds parsed action:", action);
-  if (!action) console.warn("/api/v1/rounds/ no action found. body:", req.body, "query:", req.query);
+  const { action } = req.body;
 
   // === GET ===
   if (action === "get") {
-    return res.json(wrap(currentRound));
+    return res.json(wrap({
+      ...currentRound,
+      autoStartTime: Date.now() + (currentRound.autoStartDelay || 15000)
+    }));
   }
 
   // === FINISH ===

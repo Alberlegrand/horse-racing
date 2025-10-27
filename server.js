@@ -29,6 +29,8 @@ app.use(express.urlencoded({ extended: true }));
 // Fichiers statiques
 app.use(express.static(path.join(__dirname, "static")));
 app.use(express.static(path.join(__dirname, 'public')));
+app.use('/Test_screen', express.static(path.join(__dirname, 'Test_screen')));
+
 app.use('/pages', express.static(path.join(__dirname, 'public', 'pages')));
 app.use('/css', express.static(path.join(__dirname, 'static', 'css')));
 app.use('/js', express.static(path.join(__dirname, 'static', 'js')));
@@ -44,17 +46,17 @@ const wss = new WebSocketServer({ port: 8081, path: "/connection/websocket" });
  * Diffuse des données à tous les clients WebSocket connectés.
  */
 function broadcast(data) {
-  wss.clients.forEach((client) => {
-    if (client.readyState === 1) { // 1 = WebSocket.OPEN
-      client.send(JSON.stringify(data));
-    }
-  });
+  wss.clients.forEach((client) => {
+    if (client.readyState === 1) { // 1 = WebSocket.OPEN
+      client.send(JSON.stringify(data));
+    }
+  });
 }
 
 wss.on("connection", (ws) => {
-  console.log("📡 Client connecté au WebSocket local");
-  // On envoie l'ID du tour courant depuis le gameState importé
-  ws.send(JSON.stringify({ event: "connected", roundId: gameState.currentRound.id }));
+  console.log("📡 Client connecté au WebSocket local");
+  // On envoie l'ID du tour courant depuis le gameState importé
+  ws.send(JSON.stringify({ event: "connected", roundId: gameState.currentRound.id }));
 });
 
 // =================================================================
@@ -68,7 +70,8 @@ app.get("/cashier", (req, res) => res.sendFile(path.join(__dirname, "cashier.htm
 app.get("/course-chevaux", (req, res) => res.sendFile(path.join(__dirname, "./pages/course-chevaux.html")));
 app.get("/dashboard", (req, res) => res.sendFile(path.join(__dirname, "./dashboard.html")));
 app.get("/bet_frame", (req, res) => res.sendFile(path.join(__dirname, "bet_frame.html")));
-app.get("/my-bets", (req, res) => res.sendFile(path.join(__dirname,"./static/pages", "my-bets.html")));
+app.get("/my-bets", (req, res) => res.sendFile(path.join(__dirname, "./static/pages", "my-bets.html")));
+
 
 
 // === API v1 ===
@@ -105,11 +108,11 @@ app.all(/^\/api\/v1\/keepalive(\/.*)?$/, (req, res) => {
 // ===           DÉMARRAGE                                       ===
 // =================================================================
 app.listen(PORT, () => {
-  console.log(`✅ Serveur de jeu lancé sur http://localhost:${PORT}`);
-  // Démarre le premier tour au lancement, en passant la fonction broadcast
-  startNewRound(broadcast);
+  console.log(`✅ Serveur de jeu lancé sur http://localhost:${PORT}`);
+  // Démarre le premier tour au lancement, en passant la fonction broadcast
+  startNewRound(broadcast);
 });
 
 wss.on("listening", () => {
-    console.log("✅ Serveur WebSocket lancé sur ws://localhost:8081");
+  console.log("✅ Serveur WebSocket lancé sur ws://localhost:8081");
 });

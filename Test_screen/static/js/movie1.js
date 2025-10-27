@@ -80,11 +80,13 @@ Movie.prototype._createLoadingScene = function () {
 };
 
 Movie.prototype._createGameScene = function (game, onReady) {
+    console.log("Game models :", game);
     let builder = new GameSceneBuilder(game, onReady);
     builder.build();
 };
 
 Movie.prototype._generatePaths = function (participants) {
+    console.log("Generating paths for participants:", participants);
     let paths = this._pathGenerator.generateAll(participants.length);
     paths.sort(function (a, b) {
         return a.getTime(GameParams.TRACK_LENGTH) > b.getTime(GameParams.TRACK_LENGTH) ? 1 : -1;
@@ -96,8 +98,10 @@ Movie.prototype._generatePaths = function (participants) {
         if (participant.place === 1) {
             this._pathGenerator.setFastOnFinish(path);
         }
+        console.log("Path for participant", participant.number, ":", path);
         result[participant.number] = path;
     }
+    console.log("Assigned paths to participants:", result);
     return result;
 };
 
@@ -143,6 +147,8 @@ Movie.prototype._start = function (container) {
 };
 
 Movie.prototype.init = function (game, container) {
+    console.log("Starting movie… retrieving latest game data via GameManager");
+    console.log("Container:", container);
 
     // Crée la scène de chargement pendant la récupération des données
     this._createLoadingScene();
@@ -151,10 +157,12 @@ Movie.prototype.init = function (game, container) {
     this._context.getGameManager().getRoundRequest($.proxy(function (responseGame) {
         // Remplace les données "game" locales par celles du serveur
         game = responseGame;
+        console.log("✅ Game data loaded via GameManager:", game);
 
         // 🔹 Étape 2 : construire la scène de jeu avec les vraies données
         this._createGameScene(game, $.proxy(function (entities) {
             let paths = this._generatePaths(game.participants);
+            console.log("Generated paths:", paths);
 
             // 🔹 Étape 3 : démarrer la boucle principale d’animation
             this._setupLoop(entities, paths);

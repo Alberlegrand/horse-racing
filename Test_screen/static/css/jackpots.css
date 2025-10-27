@@ -1,0 +1,68 @@
+#jackpots-container {
+    position: absolute;
+    top: 0;
+    left: calc(50% - 150px);
+    width: 325px;
+    z-index: 1000;
+    display: none;
+}
+
+#jackpots-panel {
+    width: 325px;
+    background-image: url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAUUAAAAbCAYAAADrh51uAAAABmJLR0QA/wD/AP+gvaeTAAAACXBIWXMAAAsTAAALEwEAmpwYAAACzklEQVR42u3cS0hUURzH8e8ZByrIpLSyGYMIpEXQgzaBge2cDCVRLMqwhy80QpJKCsOSqIQieoimVqKVmKGUUtCmaOOmWglhUBA6aWohRpGQtZgRRPAxekcd5/dZnnvO/xx+By5zX2MAwmKTIoEzQAKwDhGR4DAMfAGagSsDr5u6TdjO5I3AKyBC+YhIEOsDYu3GZqvUCVFEhAigwo7NbFcWIiIAxNiNsXUAG5SFiAgf7BiTh+cm41LlISJB7CeQZwCWu9K2Ai2AQ7mISBDqAeJ/vKh7Z0ZaVuw6uNZ7YtykfEQkiHwEXN+f134CMKOPhO9OXwY0AHHKSUSCQBuQ2N9a0zvSYMb2CE84bAfKgEzlJSILWCuQ2v/s3q/RjWa83hGJRwqBS8pNRBagaiC77+ndv2MPmIlGrdyTuReoARYpQxFZIM73NlcWj3fQTDZ6VVL2Djyv7IQrSxEJYMNA9remiqqJOpmpVFqdnBPtvf6OVq4iEoB+A6k9T8pbJutoploxMiU3wvuLMUb5ikgA6QMSuhvL2qbS2fhSeU3qscV47jGmKmcRCQCfAdfXhlsdUx1gfJ3Bse+4wfNU+rTyFpF57D0Q766/0e3LIDPd2Rz787PwvM8YouxFZJ55CSS7H14f9HWgmcmsjgMn4oDHQKj2QETmiVogw/3g2tB0BpuZzu5IK9iM55vpKO2FiMyxUqDQXXf133QLGCtW4Ug/5fSeGLdoT0RkDgwD+e6a0pszLWSsWpHzUGEonj+TcGl/RGQW/QHSuu5fbrSimLFyZc6jZ0OA20C29klEZsEAkNBVffGNVQWNP1bpzCg66b22FxHxl07A1VVV0m5lUeOv1TqzzqXgeQq0WHsnIhZrB1xddy50Wl3Y+HPVUTnF24BH6JtpEbFOPZDVWV486I/ixt+rj8otWQIUAOnAesCmPRURHw0Bb4HSzrKiZn9O9B/+8Y8w934wWgAAAABJRU5ErkJggg==");
+    background-repeat: no-repeat;
+    background-position: center top;
+    color: #9EB8AC;
+    display: block;
+    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+    font-size: 12px;
+    padding: 5px 0 0 0;
+    text-align: center;
+}
+
+#jackpots-panel div {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    grid-column-gap: 10px;
+    margin: 0 auto;
+    width: 285px;
+}
+
+#jackpots-panel .jackpot-value {
+    color: #ffd900;
+    font-weight: bold;
+}
+
+#jackpots-panel .jackpot-coming-soon {
+    color: #ff002e;
+    font-weight: bold;
+}
+
+#jackpot-win-container {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100vw;
+    height: 100vh;
+    z-index: 1001;
+    background: rgba(0, 0, 0, 0.5);
+    display: none;
+    justify-content: center;
+    align-items: center;
+    flex-direction: column;
+}
+#jackpot-win-container .jackpot-win-image {
+    width: 50%;
+}
+#jackpot-win-container #jackpot-win-sum {
+    color: #f1e616;
+    font-size: 5vw;
+    font-family: sans-serif;
+    margin-top: -16vw;
+}
+#jackpot-win-container .jackpot-win-close {
+    position: absolute;
+    cursor: pointer;
+    margin-left: 30vw;
+    margin-top: -22vw;
+}

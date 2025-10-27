@@ -43,17 +43,11 @@ GameModel.prototype.hasBetsForParticipant = function(number) {
 /**
  * @return {Big}
  */
-
 GameModel.prototype.getTotalPrize = function() {
-    // AJOUT DE LA VÉRIFICATION : S'assurer que 'this.receipts' est un tableau avant d'utiliser reduce.
-    if (!this.receipts || this.receipts.length === 0) {
-        return new Big(0); // Retourne 0 (Big) si aucun reçu n'est présent
-    }
-    
-    return this.receipts.reduce(function(accumulated, receipt) {
-        console.log("Adding receipt prize:", receipt.prize);
-        return accumulated.plus(receipt.prize);
-    }, new Big(0));
+    return this.receipts.reduce(function(accumulated, receipt) {
+        console.log("Adding receipt prize:", receipt.prize);
+        return accumulated.plus(receipt.prize);
+    }, new Big(0));
 };
 
 /**
