@@ -199,7 +199,7 @@ body.loading .loading_indicator {
 .money-horse-section .panel {
     position: relative;
     height: 89px;
-    /* background: repeat-x url(../img/panel.png); */
+    background: repeat-x url(../img/panel.png);
 }
 
 .money-horse-section .panel .title {

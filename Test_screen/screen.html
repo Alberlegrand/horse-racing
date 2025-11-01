@@ -198,6 +198,101 @@
             overflow: hidden;
             margin-top: 8px;
         }
+
+        /* Styles pour la section des gagnants */
+        .winners-section {
+            background-color: rgba(17, 24, 39, 0.95); /* Même background que panel-timer */
+            width: 100%;
+            padding: 16px;
+            margin-top: 20px;
+            border-radius: 8px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+        }
+
+        .winners-header {
+            margin-bottom: 12px;
+        }
+
+        .winners-title {
+            color: white;
+            font-weight: 700;
+            font-size: 1.1em;
+            letter-spacing: 0.5px;
+            margin: 0;
+            text-align: center;
+        }
+
+        .winners-list {
+            display: flex;
+            flex-direction: row;
+            gap: 10px;
+            justify-content: space-around;
+            flex-wrap: wrap;
+        }
+
+        .winner-item {
+            background-color: rgba(31, 41, 55, 0.8); /* bg-gray-800 avec opacité */
+            border-radius: 8px;
+            padding: 12px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 8px;
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+            flex: 1;
+            min-width: 150px;
+            max-width: 200px;
+        }
+
+        .winner-item:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+        }
+
+        .winner-item.empty {
+            opacity: 0.6;
+            pointer-events: none;
+        }
+
+        .winner-place {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #22c55e, #16a34a);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: 700;
+            font-size: 1.1em;
+            flex-shrink: 0;
+        }
+
+        .winner-item.empty .winner-place {
+            background: rgba(75, 85, 99, 0.5);
+        }
+
+        .winner-info {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            align-items: center;
+            text-align: center;
+            width: 100%;
+        }
+
+        .winner-name {
+            color: white;
+            font-weight: 600;
+            font-size: 1em;
+            letter-spacing: 0.3px;
+        }
+
+        .winner-round {
+            color: rgba(255, 255, 255, 0.7);
+            font-size: 0.9em;
+            font-weight: 500;
+        }
     </style>
 </head>
 
@@ -278,133 +373,27 @@
                     </div>
                 </div>
 
-                <div class="w-full mx-auto my-10 bg-white rounded-lg shadow-md overflow-hidden bottom-0">
-
-                    <table class="history w-full">
-
-                        <thead>
-                            <tr class="bg-gray-50 border-b border-gray-200">
-                                <th scope="col"
-                                    class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                    Round
-                                </th>
-                                <th scope="col"
-                                    class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                    1st
-                                </th>
-                                <th scope="col"
-                                    class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                    2nd
-                                </th>
-                                <th scope="col"
-                                    class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                    3rd
-                                </th>
-                                <th scope="col"
-                                    class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                    4th
-                                </th>
-                                <th scope="col"
-                                    class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                    5th
-                                </th>
-                                <th scope="col"
-                                    class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                    6th
-                                </th>
-                            </tr>
-                        </thead>
-
-                        <tbody class="divide-y divide-gray-200">
-
-                            <tr class="js_template hidden">
-                                <td class="round px-6 py-4 whitespace-nowrap"></td>
-                                <td class="first px-6 py-4 whitespace-nowrap"></td>
-                                <td class="second px-6 py-4 whitespace-nowrap"></td>
-                                <td class="third px-6 py-4 whitespace-nowrap"></td>
-                                <td class="fourth px-6 py-4 whitespace-nowrap"></td>
-                                <td class="fifth px-6 py-4 whitespace-nowrap"></td>
-                                <td class="sixth px-6 py-4 whitespace-nowrap"></td>
-                            </tr>
-
-                            <tr>
-                                <td class="round px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                                    Round 1
-                                </td>
-                                <td class="first px-6 py-4 whitespace-nowrap text-sm text-gray-700">
-                                    Cheval Rapide
-                                </td>
-                                <td class="second px-6 py-4 whitespace-nowrap text-sm text-gray-700">
-                                    Étoile Filante
-                                </td>
-                                <td class="third px-6 py-4 whitespace-nowrap text-sm text-gray-700">
-                                    Tonnerre
-                                </td>
-                                <td class="fourth px-6 py-4 whitespace-nowrap text-sm text-gray-700">
-                                    Galopin
-                                </td>
-                                <td class="fifth px-6 py-4 whitespace-nowrap text-sm text-gray-700">
-                                    Caracalla
-                                </td>
-                                <td class="sixth px-6 py-4 whitespace-nowrap text-sm text-gray-700">
-                                    Turbide
-                                </td>
-                            </tr>
-                            <tr>
-                                <td class="round px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                                    Round 1
-                                </td>
-                                <td class="first px-6 py-4 whitespace-nowrap text-sm text-gray-700">
-                                    Cheval Rapide
-                                </td>
-                                <td class="second px-6 py-4 whitespace-nowrap text-sm text-gray-700">
-                                    Étoile Filante
-                                </td>
-                                <td class="third px-6 py-4 whitespace-nowrap text-sm text-gray-700">
-                                    Tonnerre
-                                </td>
-                                <td class="fourth px-6 py-4 whitespace-nowrap text-sm text-gray-700">
-                                    Galopin
-                                </td>
-                                <td class="fifth px-6 py-4 whitespace-nowrap text-sm text-gray-700">
-                                    Caracalla
-                                </td>
-                                <td class="sixth px-6 py-4 whitespace-nowrap text-sm text-gray-700">
-                                    Turbide
-                                </td>
-                            </tr>
-                            <tr>
-                                <td class="round px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                                    Round 1
-                                </td>
-                                <td class="first px-6 py-4 whitespace-nowrap text-sm text-gray-700">
-                                    Cheval Rapide
-                                </td>
-                                <td class="second px-6 py-4 whitespace-nowrap text-sm text-gray-700">
-                                    Étoile Filante
-                                </td>
-                                <td class="third px-6 py-4 whitespace-nowrap text-sm text-gray-700">
-                                    Tonnerre
-                                </td>
-                                <td class="fourth px-6 py-4 whitespace-nowrap text-sm text-gray-700">
-                                    Galopin
-                                </td>
-                                <td class="fifth px-6 py-4 whitespace-nowrap text-sm text-gray-700">
-                                    Caracalla
-                                </td>
-                                <td class="sixth px-6 py-4 whitespace-nowrap text-sm text-gray-700">
-                                    Turbide
-                                </td>
-                            </tr>
-                        </tbody>
-                    </table>
-
-                </div>
-
                 <button data-l10n-id="horse_begin_race" class="button start" style="visibility: hidden;">Start</button>
 
                 <div class="receipts_container">
                     <div class="receipts"></div>
+                </div>
+
+                <!-- Section des 3 derniers gagnants -->
+                <div class="winners-section">
+                    <div class="winners-header">
+                        <h3 class="winners-title">🏆 3 Derniers Gagnants</h3>
+                    </div>
+                    <div class="winners-list" id="winnersList">
+                        <!-- Les gagnants seront générés dynamiquement ici -->
+                        <div class="winner-item empty">
+                            <div class="winner-place">-</div>
+                            <div class="winner-info">
+                                <div class="winner-name">Aucun gagnant</div>
+                                <div class="winner-round">Round -</div>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
 
@@ -484,7 +473,7 @@
             var delaiApresFinCourse = 5000; // Délai local avant de nettoyer l'UI (5s)
             var delaiRetryErreur = 10000; // Délai avant de retenter en cas d'erreur API
             var delaiPoll = 2000; // Délai de re-vérification si le bouton .start n'est pas prêt
-            const RACE_DURATION_MS = 23000; // 23 secondes pour movie_screen
+            const RACE_DURATION_MS = 25000; // 23 secondes pour movie_screen
             const FINISH_DURATION_MS = 5000; // 5 secondes pour finish_screen
 
             /**
@@ -606,6 +595,119 @@
             }
 
             /**
+             * Affiche les 3 derniers gagnants dans la section dédiée
+             */
+            function afficherDerniersGagnants(gameHistory) {
+                console.log('🏆 Mise à jour des 3 derniers gagnants...');
+                
+                // Prendre les 3 derniers rounds avec des gagnants
+                const winnersWithRounds = gameHistory
+                    .filter(round => round.winner)
+                    .slice(-3)
+                    .reverse(); // Plus récent en premier
+                
+                const $winnersList = $('#winnersList');
+                $winnersList.empty();
+                
+                if (winnersWithRounds.length === 0) {
+                    // Afficher un message par défaut
+                    $winnersList.html('<div class="winner-item empty"><div class="winner-place">-</div><div class="winner-info"><div class="winner-name">Aucun gagnant</div><div class="winner-round">Round -</div></div></div>');
+                    return;
+                }
+                
+                // Afficher les gagnants
+                winnersWithRounds.forEach((round, index) => {
+                    const winner = round.winner;
+                    const winnerItem = $('<div class="winner-item"></div>');
+                    
+                    // Numéro de place (1, 2, 3 en partant du plus récent)
+                    const placeNumber = winnersWithRounds.length - index;
+                    const placeCircle = $('<div class="winner-place"></div>').text(placeNumber);
+                    
+                    // Nom du gagnant
+                    const winnerName = $('<div class="winner-name"></div>').text(`№ ${winner.number} ${winner.name}`);
+                    
+                    // Round ID
+                    const roundInfo = $('<div class="winner-round"></div>').text(`Round ${round.id}`);
+                    
+                    // Construire la structure
+                    const winnerInfo = $('<div class="winner-info"></div>')
+                        .append(winnerName)
+                        .append(roundInfo);
+                    
+                    winnerItem
+                        .append(placeCircle)
+                        .append(winnerInfo);
+                    
+                    $winnersList.append(winnerItem);
+                });
+            }
+
+            /**
+             * Nettoie toutes les données fetchées du DOM
+             */
+            function nettoyerDOM() {
+                console.log('🧹 Nettoyage complet du DOM...');
+                
+                // 0. Arrêter tous les intervalles et timers actifs
+                if (countdownInterval) {
+                    clearInterval(countdownInterval);
+                    countdownInterval = null;
+                }
+                
+                // 1. Nettoyer les participants (garder seulement le template)
+                $('.participants').children().not('.js_template').remove();
+                
+                // 2. Nettoyer les receipts
+                $('.receipts').empty();
+                $('.receipts_container .receipts').empty();
+                
+                // 3. Nettoyer le winner dans finish_screen
+                $('.finish_screen .winner .title').empty();
+                $('.finish_screen .winner .name').empty();
+                $('.finish_screen .winner .avatar').empty();
+                // Retirer les classes family-*
+                $('.finish_screen .winner').removeClass(function(index, className) {
+                    return (className.match(/(^|\s)family\S+/g) || []).join(' ');
+                });
+                
+                // 4. Nettoyer l'historique (garder seulement le template)
+                $('.history tbody').children().not('.js_template').remove();
+                
+                // 5. Nettoyer les tickets
+                $('#ticketsTable').empty();
+                
+                // Note: La section des gagnants sera automatiquement mise à jour après le rechargement
+                
+                // 6. Nettoyer le movie container
+                $('#movieContainer .movie').empty();
+                $('.movie_container .movie').empty();
+                
+                // 7. Réinitialiser les écrans
+                $('.screen').removeClass('active');
+                $('.game_screen').addClass('active');
+                
+                // 8. Réinitialiser le timer et les variables
+                $('#progressBar').css('width', '0%').removeClass('bg-green-500 bg-yellow-500 bg-red-500');
+                $('#timeRemainingDisplay').text('00:00');
+                $('#countdownPanel').addClass('hidden');
+                targetEndTime = 0;
+                totalDelayMs = 120000;
+                
+                // 9. Nettoyer les boutons
+                $('.start').css('visibility', 'hidden');
+                $('.new_game').css('visibility', 'hidden');
+                
+                // 10. Fermer la connexion WebSocket si elle existe
+                if (ws && ws.readyState === WebSocket.OPEN) {
+                    ws.close();
+                    ws = null;
+                }
+                
+                console.log('✅ DOM nettoyé avec succès');
+            }
+
+            /**
              * Fonction 3: Attend la fin de la course (WAIT_FOR_END) et relance la boucle.
              */
             function attendreFinDeCourse() {
@@ -630,15 +732,19 @@
                                 success: function (response) {
                                     console.log('✅ Nouveau round créé:', response.data);
                                     
-                                    // 2. Nettoyer l'interface (clic sur le bouton new_game)
+                                    // 2. Nettoyer toutes les données fetchées du DOM
+                                    console.log('🧹 Nettoyage du DOM...');
+                                    nettoyerDOM();
+                                    
+                                    // 3. Nettoyer l'interface (clic sur le bouton new_game)
                                     console.log('🧹 Nettoyage - clic sur "New round"');
                                     $newGameButton.click();
 
-                                    // 3. Recharger la page après un court délai
+                                    // 4. Recharger la page après un court délai
                                     console.log('🔄 Rechargement de la page dans 1 seconde...');
                                     setTimeout(function() {
                                         window.location.reload();
-                                    }, 1000);
+                                    }, 10);
                                 },
                                 error: function (xhr, status, error) {
                                     console.error('❌ Erreur lors de la création du nouveau round:', error);
@@ -668,6 +774,11 @@
                         // Met à jour le currentRound si disponible
                         if (data.currentRound && data.currentRound.id) {
                             $('#currentRound').text('Round ' + data.currentRound.id);
+                        }
+                        
+                        // Met à jour les 3 derniers gagnants
+                        if (data.gameHistory) {
+                            afficherDerniersGagnants(data.gameHistory);
                         }
                         
                         // Synchronise le timer si nécessaire
@@ -752,26 +863,41 @@
                                 attendreFinDeCourse();
                                 break;
                                 
-                            case 'race_end':
+                            /* case 'race_end':
                                 console.log('🏆 Course terminée - synchronisation finish_screen');
                                 // Vérifie que movie_screen est actif avant de passer à finish_screen
                                 // Si on est déjà sur finish_screen ou game_screen, on ne change rien
                                 if ($('.movie_screen').hasClass('active')) {
                                     // Transition de movie_screen vers finish_screen
                                     $('.movie_screen').removeClass('active');
-                                    $('.finish_screen').addClass('active');
-                                    $('.new_game').css('visibility', 'visible');
+                                    //$('.finish_screen').addClass('active');
+                                    //$('.new_game').css('visibility', 'visible');
                                 } else {
                                     console.log('⚠️ race_end reçu mais movie_screen n\'est pas actif, état actuel:', 
                                         $('.screen.active').attr('class'));
                                 }
-                                break;
+                                break; */
                                 
                             case 'new_round':
                                 console.log('🆕 Nouveau round - synchronisation');
                                 // Met à jour le currentRound si disponible
                                 if (data.game && data.game.id) {
                                     $('#currentRound').text('Round ' + data.game.id);
+                                }
+                                // Met à jour les gagnants si l'historique est fourni
+                                if (data.gameHistory) {
+                                    afficherDerniersGagnants(data.gameHistory);
+                                } else {
+                                    // Récupère l'historique depuis l'API
+                                    $.ajax({
+                                        url: '/api/v1/rounds/status',
+                                        method: 'GET',
+                                        success: function(statusData) {
+                                            if (statusData.gameHistory) {
+                                                afficherDerniersGagnants(statusData.gameHistory);
+                                            }
+                                        }
+                                    });
                                 }
                                 // Retourne à game_screen si nécessaire
                                 if (!data.timer || data.timer.timeLeft <= 0) {

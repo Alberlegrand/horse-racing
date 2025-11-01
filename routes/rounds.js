@@ -60,7 +60,7 @@ export default function createRoundsRouter(broadcast) {
      */
     router.get("/status", (req, res) => {
         const now = Date.now();
-        const MOVIE_SCREEN_DURATION_MS = 23000; // 20 secondes pour movie_screen (correspond à la durée côté client)
+        const MOVIE_SCREEN_DURATION_MS = 25000; // 25 secondes pour movie_screen (correspond à la durée côté client)
         const FINISH_DURATION_MS = 5000; // 5 secondes pour finish_screen
         const TOTAL_RACE_TIME_MS = MOVIE_SCREEN_DURATION_MS + FINISH_DURATION_MS; // 25 secondes total
 
@@ -104,7 +104,8 @@ export default function createRoundsRouter(broadcast) {
             timerTimeLeft: gameState.nextRoundStartTime && gameState.nextRoundStartTime > now 
                 ? gameState.nextRoundStartTime - now 
                 : 0,
-            timerTotalDuration: ROUND_WAIT_DURATION_MS
+            timerTotalDuration: ROUND_WAIT_DURATION_MS,
+            gameHistory: gameState.gameHistory || []
         });
     });
 

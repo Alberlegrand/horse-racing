@@ -1,7 +1,7 @@
 let GameParams = {
     START_OFFSET: -80,
     TRACK_LENGTH: 10000,
-    TRACK_WIDTH: 700
+    TRACK_WIDTH: 500
 };
 
 let ViewportUpdater = function (viewport, onFinish) {
@@ -71,8 +71,8 @@ let Movie = function (context, onStart, onFinish) {
     });
 };
 
-Movie.WIDTH = 1366;
-Movie.HEIGHT = 700;
+Movie.WIDTH = 800;
+Movie.HEIGHT = 500;
 
 Movie.prototype._createLoadingScene = function () {
     let builder = new LoadingSceneBuilder(this._context);
