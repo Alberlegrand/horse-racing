@@ -159,6 +159,9 @@
         </div>
     </section>
 
+    <!-- Configuration WebSocket centralisée (chargée en premier) -->
+    <script src="/js/websocket-config.js"></script>
+    
     <script src="/js/print.min.js?v=33054"></script>
     <script src="/js/jquery_min.js?v=33054"></script>
     <script src="/js/big_min.js?v=33054"></script>
@@ -186,8 +189,29 @@
     <script src="/js/main.js?v=33054"></script>
     <link rel="stylesheet" href="/css/jackpots.css?v=33054">
     <script>
+        // Fonction helper pour démarrer un round (utilise wsConfig centralisé)
+        function startRound() {
+            fetch("/api/v1/rounds/", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify({ action: "finish" })
+            });
+        }
+
+        // Connexion WebSocket utilisant la config centralisée
         function connectWebSocket() {
-            const ws = new WebSocket(wsConfig.connectionString);
+            if (!window.wsConfig || !window.wsConfig.connectionString) {
+                console.error("Configuration WebSocket non trouvée. Assurez-vous que websocket-config.js est chargé.");
+                return;
+            }
+
+            const ws = new WebSocket(window.wsConfig.connectionString);
+
+            ws.onopen = () => {
+                console.log("✅ WebSocket connecté:", window.wsConfig.connectionString);
+            };
 
             ws.onmessage = (event) => {
                 const data = JSON.parse(event.data);
@@ -200,7 +224,6 @@
                             if (timeUntilStart > 0) {
                                 console.log(`⏰ Course programmée dans ${timeUntilStart}ms`);
                                 setTimeout(() => {
-                                    // Démarrer automatiquement
                                     if (window.gameConfig?.autoStartEnabled) {
                                         startRound();
                                     }
@@ -209,23 +232,32 @@
                         }
                         break;
 
-                    // ...existing cases...
+                    case "race_start":
+                        console.log("🏁 Course démarrée");
+                        break;
+
+                    case "race_end":
+                        console.log("🏆 Course terminée");
+                        break;
                 }
+            };
+
+            ws.onerror = (error) => {
+                console.error("❌ Erreur WebSocket:", error);
+            };
+
+            ws.onclose = () => {
+                console.warn("⚠️ WebSocket fermé, tentative de reconnexion dans 3s...");
+                setTimeout(connectWebSocket, 3000);
             };
         }
 
-        // Fonction helper pour démarrer un round
-        function startRound() {
-            fetch("/api/v1/rounds/", {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json"
-                },
-                body: JSON.stringify({ action: "finish" })
-            });
+        // Connexion automatique au chargement
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', connectWebSocket);
+        } else {
+            connectWebSocket();
         }
-
-
     </script>
 
 </body>

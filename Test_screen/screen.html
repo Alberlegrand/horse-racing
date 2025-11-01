@@ -1,11 +1,11 @@
-<html lang="ru">
+<html lang="en">
 
 <head>
     <meta charset="utf-8">
     <meta name="theme-color" content="#1C1C1C">
     <title>CSRacing</title>
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-    <link href="https://unpkg.com/tailwindcss@^2.0/dist/tailwindcss.min.css" rel="stylesheet">
+    <link href="https://unpkg.com/tailwindcss@^2.0/dist/tailwind.min.css" rel="stylesheet">
     <style>
         @keyframes loading {
             0% {
@@ -57,45 +57,114 @@
         }
 
         /* Overlay d'exigence de rotation */
-.rotation-overlay {
-    display: none; /* Caché par défaut */
-    position: fixed;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    background-color: rgba(0, 0, 0, 0.9);
-    color: white;
-    z-index: 99999;
-    flex-direction: column;
-    justify-content: center;
-    align-items: center;
-    text-align: center;
-    padding: 20px;
-}
+        .rotation-overlay {
+            display: none;
+            /* Caché par défaut */
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.9);
+            color: white;
+            z-index: 99999;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            text-align: center;
+            padding: 20px;
+        }
 
-.rotation-overlay h2 {
-    margin-bottom: 20px;
-    font-size: 1.5em;
-}
+        .rotation-overlay h2 {
+            margin-bottom: 20px;
+            font-size: 1.5em;
+        }
 
-/* ⚠️ Affiche l'overlay UNIQUEMENT sur les écrans étroits ET en mode portrait */
-@media (max-width: 767px) and (orientation: portrait) {
-    .rotation-overlay {
-        display: flex;
-    }
-}
+        /* ⚠️ Affiche l'overlay UNIQUEMENT sur les écrans étroits ET en mode portrait */
+        @media (max-width: 767px) and (orientation: portrait) {
+            .rotation-overlay {
+                display: flex;
+            }
+        }
 
-/* Icône de téléphone tournant (CSS pur pour l'exemple) */
-.rotation-icon {
-    font-size: 60px;
-    animation: rotate-animation 1.5s ease-in-out infinite alternate;
-}
+        /* Icône de téléphone tournant (CSS pur pour l'exemple) */
+        .rotation-icon {
+            font-size: 60px;
+            animation: rotate-animation 1.5s ease-in-out infinite alternate;
+        }
 
-@keyframes rotate-animation {
-    0% { transform: rotate(0deg); }
-    100% { transform: rotate(90deg); }
-}
+        @keyframes rotate-animation {
+            0% {
+                transform: rotate(0deg);
+            }
+
+            100% {
+                transform: rotate(90deg);
+            }
+        }
+
+        /* Styles pour la barre de progression du lancement */
+        #countdownPanel {
+            position: fixed;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 10000;
+            min-width: 300px;
+            max-width: 600px;
+            width: 90%;
+            border: 2px solid rgba(255, 255, 255, 0.2);
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+        }
+
+        #countdownPanel .progress-container {
+            position: relative;
+            width: 100%;
+            height: 8px;
+            background-color: rgba(55, 65, 81, 0.8);
+            border-radius: 9999px;
+            overflow: hidden;
+            margin-top: 8px;
+        }
+
+        #progressBar {
+            height: 100%;
+            border-radius: 9999px;
+            transition: width 0.3s ease-out, background-color 0.3s ease;
+            position: relative;
+            box-shadow: 0 0 10px rgba(34, 197, 94, 0.5);
+        }
+
+        #progressBar.bg-green-500 {
+            background: linear-gradient(90deg, #22c55e, #16a34a);
+            box-shadow: 0 0 10px rgba(34, 197, 94, 0.5);
+        }
+
+        #progressBar.bg-yellow-500 {
+            background: linear-gradient(90deg, #eab308, #ca8a04);
+            box-shadow: 0 0 10px rgba(234, 179, 8, 0.5);
+        }
+
+        #progressBar.bg-red-500 {
+            background: linear-gradient(90deg, #ef4444, #dc2626);
+            box-shadow: 0 0 10px rgba(239, 68, 68, 0.5);
+            animation: pulse 1s ease-in-out infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% {
+                opacity: 1;
+            }
+            50% {
+                opacity: 0.8;
+            }
+        }
+
+        #timeRemainingDisplay {
+            font-weight: 700;
+            font-size: 1.1em;
+            letter-spacing: 0.5px;
+        }
     </style>
 </head>
 
@@ -115,18 +184,22 @@
                 <div class="title"></div>
                 <span id="currentRound" style="display:none;"></span>
                 <div class="btn_return_url" style="display: none;"></div>
-                <div class="limits">
-                    Min: 10 HTG<br>
-                    Max: 5000 HTG<br>
-                </div>
-
-                <div class="menu">
-                    <button class="toggle_menu"></button>
-                    <div class="menu_items">
-                        <span class="money"></span>
+                
+                <!-- Barre de progression et minuterie pour le prochain départ -->
+                <div id="countdownPanel" class="p-4 rounded-lg bg-gray-900 bg-opacity-95 shadow-xl hidden">
+                    <div class="text-white flex justify-between items-center mb-2">
+                        <span class="text-sm font-semibold uppercase tracking-wide">⏱️ Prochain Départ:</span>
+                        <span id="timeRemainingDisplay" class="text-yellow-400 text-lg font-bold">0.0s</span>
+                    </div>
+                    <div class="progress-container">
+                        <div id="progressBar"
+                            class="bg-green-500 rounded-full"
+                            style="width: 0%"></div>
+                    </div>
+                    <div class="text-center mt-2 text-xs text-gray-400">
+                        Le jeu se lancera automatiquement
                     </div>
                 </div>
-
             </div>
             <div class="screen game_screen active">
                 <div class="participants_container">
@@ -233,7 +306,7 @@
                                     Turbide
                                 </td>
                             </tr>
-                             <tr>
+                            <tr>
                                 <td class="round px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
                                     Round 1
                                 </td>
@@ -256,7 +329,7 @@
                                     Turbide
                                 </td>
                             </tr>
-                             <tr>
+                            <tr>
                                 <td class="round px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
                                     Round 1
                                 </td>
@@ -353,72 +426,341 @@
     <script src="/js/jackpots.ws.js?v=33054"></script>
     <script src="/js/main.js?v=33054"></script>
     <link rel="stylesheet" href="/css/jackpots.css?v=33054">
+
     <script>
         $(document).ready(function () {
 
-            // 1. Délai entre la fin d'une course et le début de la suivante (en millisecondes)
-            // ATTENTION : Ce délai est maintenant le temps d'attente AVANT de recharger la page.
-            var delaiAvantRechargement = 25000;
+            // --- Variables pour le minuteur ---
+            var totalDelayMs = 30000; // Délai total par défaut (30 secondes), mis à jour par l'API
+            var countdownInterval = null; // ID de l'intervalle pour la mise à jour de la barre
+            var targetEndTime = 0; // Timestamp exact de la fin du compte à rebours
+            var ws = null; // WebSocket pour la synchronisation en temps réel
+
+            // --- Configuration ---
+            var delaiApresFinCourse = 5000; // Délai local avant de nettoyer l'UI (5s)
+            var delaiRetryErreur = 10000; // Délai avant de retenter en cas d'erreur API
+            var delaiPoll = 2000; // Délai de re-vérification si le bouton .start n'est pas prêt
+            const RACE_DURATION_MS = 23000; // 23 secondes pour movie_screen
+            const FINISH_DURATION_MS = 5000; // 5 secondes pour finish_screen
 
             /**
-             * Fonction 1: Démarre la course
-             * (Reste inchangée)
+             * Met à jour la barre de progression et l'affichage du temps restant.
              */
-            function demarrerCourse() {
-                var $startButton = $('.start');
+            function mettreAJourProgressBar() {
+                const now = Date.now();
+                const timeLeft = targetEndTime - now;
+                const $progressBar = $('#progressBar');
 
-                if ($startButton.length > 0 && $startButton.is(':visible')) {
-                    console.log('Démarrage de la course...');
-                    $startButton.click();
+                if (timeLeft <= 0) {
+                    // Temps écoulé
+                    clearInterval(countdownInterval);
+                    countdownInterval = null;
+                    $('#countdownPanel').addClass('hidden');
+                    $('#timeRemainingDisplay').text('0s');
+                    $progressBar.css('width', '100%'); 
+                    return;
+                }
 
-                    // Une fois la course lancée, on se met en mode "attente de la fin"
-                    attendreFinDeCourse();
+                // Calcul du pourcentage de progression (pourcentage écoulé)
+                const elapsedTime = totalDelayMs - timeLeft;
+                const progressPercent = Math.min(100, (elapsedTime / totalDelayMs) * 100);
+
+                // Mise à jour de l'UI avec format amélioré
+                const secondsLeft = Math.ceil(timeLeft / 1000);
+                const minutes = Math.floor(secondsLeft / 60);
+                const seconds = secondsLeft % 60;
+                let timeDisplay = '';
+                
+                if (minutes > 0) {
+                    timeDisplay = minutes + 'm ' + seconds + 's';
                 } else {
-                    console.log('En attente du bouton "Start"...');
-                    setTimeout(demarrerCourse, 1000);
+                    timeDisplay = secondsLeft + 's';
+                }
+                
+                $('#timeRemainingDisplay').text(timeDisplay);
+                $progressBar.css('width', progressPercent + '%');
+
+                // Changement de couleur dynamique (vert -> jaune -> rouge)
+                $progressBar.removeClass('bg-green-500 bg-yellow-500 bg-red-500');
+                if (progressPercent < 30) {
+                    $progressBar.addClass('bg-green-500');
+                } else if (progressPercent < 80) {
+                    $progressBar.addClass('bg-yellow-500');
+                } else {
+                    $progressBar.addClass('bg-red-500');
                 }
             }
 
-            // ----------------------------------------------------------------------
-            // FONCTION CORRIGÉE POUR RECHARGER LA PAGE
-            // ----------------------------------------------------------------------
             /**
-             * Fonction 2: Attend la fin de la course, puis recharge la page après le délai
+             * Fonction 1: Point d'entrée et boucle principale (POLLING).
+             * Interroge le serveur pour savoir quoi faire.
+             */
+            function gererCycleDeJeu() {
+                console.log('Interrogation du serveur pour le temps de lancement...');
+
+                $.ajax({
+                    url: '/api/v1/rounds/launch-time',
+                    method: 'GET',
+                    success: function (data) {
+                        var tempsRestantServeur = data.timeLeft;
+                        var delaiTotalAttente = data.delaiTotalAttente; // Récupère le délai total du serveur
+                        
+                        // Met à jour la variable locale pour le calcul de la progression
+                        totalDelayMs = delaiTotalAttente;
+
+                        if (tempsRestantServeur > 0) {
+                            // Minuteur en cours, on attend qu'il se termine
+                            console.log(`⏰ Synchronisation - attente de ${Math.round(tempsRestantServeur / 1000)}s avant lancement automatique`);
+
+                            // 1. Affiche le panneau et configure le minuteur
+                            $('#countdownPanel').removeClass('hidden');
+                            targetEndTime = Date.now() + tempsRestantServeur;
+
+                            if (countdownInterval) {
+                                clearInterval(countdownInterval); 
+                            }
+                            mettreAJourProgressBar(); // Mise à jour immédiate
+                            countdownInterval = setInterval(mettreAJourProgressBar, 250); // Mettre à jour toutes les 250ms
+
+                            // 2. Programme la relance de la boucle principale après la fin du compte à rebours
+                            setTimeout(gererCycleDeJeu, tempsRestantServeur + 500);
+                        } else {
+                            // Pas de minuteur (timeLeft est 0).
+                            // 1. Cache le panneau et arrête l'intervalle
+                            $('#countdownPanel').addClass('hidden');
+                            if (countdownInterval) {
+                                clearInterval(countdownInterval);
+                                countdownInterval = null;
+                            }
+                            
+                            // 2. Tente de démarrer la course
+                            console.log(`⚡ Serveur prêt (ou course en cours). Tentative de démarrage.`);
+                            tenterDeDemarrer();
+                        }
+                    },
+                    error: function (xhr, status, error) {
+                        console.error("❌ Erreur API : Impossible de joindre le serveur de temps -", error);
+                        // On retente la boucle principale après un délai
+                        setTimeout(gererCycleDeJeu, delaiRetryErreur);
+                    }
+                });
+            }
+
+            /**
+             * Fonction 2: Tente de cliquer sur Start (ATTEMPT_START).
+             * Si ça marche, on passe en mode "surveillance".
+             * Si ça échoue, on retourne au polling.
+             */
+            function tenterDeDemarrer() {
+                var $startButton = $('.start');
+
+                if ($startButton.length > 0 && $startButton.is(':visible')) {
+                    console.log('🎯 Démarrage de la course... (clic sur .start)');
+                    $startButton.click();
+
+                    // Le clic a réussi, on passe en mode "surveillance de fin"
+                    attendreFinDeCourse();
+                } else {
+                    // Le bouton n'est pas prêt. On relance la boucle de polling.
+                    console.log(`⏳ Bouton "Start" non trouvé. Re-vérification de l'état dans ${delaiPoll / 1000}s...`);
+                    setTimeout(gererCycleDeJeu, delaiPoll);
+                }
+            }
+
+            /**
+             * Fonction 3: Attend la fin de la course (WAIT_FOR_END) et relance la boucle.
              */
             function attendreFinDeCourse() {
-                // On crée un "checker" qui s'exécute 1x par seconde
+                console.log('👀 Surveillance de la fin de course...');
+
                 var checkInterval = setInterval(function () {
-                    var $newGameButton = $('.new_game'); // Le bouton "New round"
+                    var $newGameButton = $('.new_game');
 
                     if ($newGameButton.length > 0 && $newGameButton.is(':visible')) {
-                        // On a trouvé le bouton de fin !
-                        clearInterval(checkInterval); // On arrête de vérifier
+                        clearInterval(checkInterval);
+
+                        console.log('🏁 Course terminée détectée, attente de ' + (delaiApresFinCourse / 1000) + 's avant nettoyage...');
+
                         setTimeout(function () {
-                            // 1. On clique quand même sur 'New Round' pour nettoyer l'état du jeu si nécessaire
-                            console.log('Course terminée. Clic sur "New round" (Nettoyage de l\'état du jeu).');
-                            $newGameButton.click();
+                            // 1. Appelle l'API pour créer un nouveau round côté serveur
+                            console.log('🔄 Création d\'un nouveau round côté serveur...');
+                            $.ajax({
+                                url: '/api/v1/rounds/',
+                                method: 'POST',
+                                contentType: 'application/json',
+                                data: JSON.stringify({ action: 'new_game' }),
+                                success: function (response) {
+                                    console.log('✅ Nouveau round créé:', response.data);
+                                    
+                                    // 2. Nettoyer l'interface (clic sur le bouton new_game)
+                                    console.log('🧹 Nettoyage - clic sur "New round"');
+                                    $newGameButton.click();
 
-                            // 2. On programme le rechargement de la page après le délai
-                            console.log('Rechargement de la page prévu dans ' + (delaiAvantRechargement / 1000) + ' secondes.');
+                                    // 3. Relancer la boucle de polling principale pour vérifier le timer
+                                    console.log('⏰ Vérification du timer de 30 secondes...');
+                                    setTimeout(gererCycleDeJeu, 1000); // Laisse 1s à l'UI pour se nettoyer
+                                },
+                                error: function (xhr, status, error) {
+                                    console.error('❌ Erreur lors de la création du nouveau round:', error);
+                                    // Relancer quand même pour réessayer
+                                    setTimeout(gererCycleDeJeu, 2000);
+                                }
+                            });
 
-
-                            console.log("Délai écoulé. Rechargement de la page...");
-                            // window.location.reload(true) force le rechargement depuis le serveur (non-cache)
-                            window.location.reload(true);
-                        }, 5000); // Petit délai avant rechargement pour s'assurer que l'état est propre
+                        }, delaiApresFinCourse);
                     }
-                }, 1000); // Vérification toutes les 1000ms
+                }, 1000);
             }
-            // ----------------------------------------------------------------------
 
-            // --- Lancement de la toute première course ---
-            // Vous aviez 5000ms (5s) pour le premier démarrage.
-            console.log('Lancement de la boucle automatique dans 5 secondes...');
-            setTimeout(demarrerCourse, delaiAvantRechargement);
+            /**
+             * Fonction de synchronisation au chargement de la page.
+             * Récupère l'état actuel du serveur et affiche le bon écran.
+             */
+            function synchroniserAuChargement() {
+                console.log('🔄 Synchronisation avec le serveur au chargement de la page...');
+                
+                $.ajax({
+                    url: '/api/v1/rounds/status',
+                    method: 'GET',
+                    success: function (data) {
+                        console.log('✅ État serveur récupéré:', data);
+                        
+                        // Synchronise le timer si nécessaire
+                        if (data.timerTimeLeft > 0) {
+                            totalDelayMs = data.timerTotalDuration;
+                            targetEndTime = Date.now() + data.timerTimeLeft;
+                            $('#countdownPanel').removeClass('hidden');
+                            mettreAJourProgressBar();
+                            if (countdownInterval) clearInterval(countdownInterval);
+                            countdownInterval = setInterval(mettreAJourProgressBar, 250);
+                        }
+                        
+                        // Affiche le bon écran selon l'état du serveur
+                        if (data.screen === 'movie_screen') {
+                            console.log(`🎬 Course en cours depuis ${Math.round(data.timeInRace / 1000)}s, affichage movie_screen`);
+                            // Active movie_screen et simule le temps écoulé
+                            $('.screen').removeClass('active');
+                            $('.movie_screen').addClass('active');
+                            
+                            // Si la course est presque terminée, on passe directement au finish
+                            if (data.timeRemaining < 2000) {
+                                setTimeout(function() {
+                                    $('.movie_screen').removeClass('active');
+                                    $('.finish_screen').addClass('active');
+                                }, data.timeRemaining);
+                            }
+                        } else if (data.screen === 'finish_screen') {
+                            console.log(`🏁 Finish screen actif, ${Math.round(data.timeRemaining / 1000)}s restantes`);
+                            $('.screen').removeClass('active');
+                            $('.finish_screen').addClass('active');
+                            $('.new_game').css('visibility', 'visible');
+                        } else {
+                            // game_screen
+                            console.log('📋 Affichage game_screen');
+                            $('.screen').removeClass('active');
+                            $('.game_screen').addClass('active');
+                        }
+                        
+                        // Démarre la connexion WebSocket pour la synchronisation en temps réel
+                        connecterWebSocket();
+                        
+                        // Lance la boucle principale
+                        gererCycleDeJeu();
+                    },
+                    error: function (xhr, status, error) {
+                        console.error('❌ Erreur lors de la synchronisation:', error);
+                        // Continue quand même avec la boucle normale
+                        connecterWebSocket();
+                        gererCycleDeJeu();
+                    }
+                });
+            }
+            
+            /**
+             * Connexion WebSocket pour la synchronisation en temps réel entre tous les clients.
+             */
+            function connecterWebSocket() {
+                try {
+                    // Détecte l'URL WebSocket depuis le serveur ou utilise la config par défaut
+                    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+                    const wsHost = window.location.hostname;
+                    const wsPort = '8081'; // Port WebSocket par défaut
+                    const wsPath = '/connection/websocket';
+                    const wsUrl = `${wsProtocol}//${wsHost}:${wsPort}${wsPath}`;
+                    
+                    ws = new WebSocket(wsUrl);
+                    
+                    ws.onopen = function() {
+                        console.log('✅ WebSocket connecté pour synchronisation temps réel');
+                    };
+                    
+                    ws.onmessage = function(event) {
+                        const data = JSON.parse(event.data);
+                        console.log('📨 Message WebSocket reçu:', data.event);
+                        
+                        switch(data.event) {
+                            case 'race_start':
+                                console.log('🏁 Course démarrée - synchronisation movie_screen');
+                                $('.screen').removeClass('active');
+                                $('.movie_screen').addClass('active');
+                                // Surveille la fin de la course
+                                attendreFinDeCourse();
+                                break;
+                                
+                            case 'race_end':
+                                console.log('🏆 Course terminée - synchronisation finish_screen');
+                                // Vérifie que movie_screen est actif avant de passer à finish_screen
+                                // Si on est déjà sur finish_screen ou game_screen, on ne change rien
+                                if ($('.movie_screen').hasClass('active')) {
+                                    // Transition de movie_screen vers finish_screen
+                                    $('.movie_screen').removeClass('active');
+                                    $('.finish_screen').addClass('active');
+                                    $('.new_game').css('visibility', 'visible');
+                                } else {
+                                    console.log('⚠️ race_end reçu mais movie_screen n\'est pas actif, état actuel:', 
+                                        $('.screen.active').attr('class'));
+                                }
+                                break;
+                                
+                            case 'new_round':
+                                console.log('🆕 Nouveau round - synchronisation');
+                                // Retourne à game_screen si nécessaire
+                                if (!data.timer || data.timer.timeLeft <= 0) {
+                                    $('.screen').removeClass('active');
+                                    $('.game_screen').addClass('active');
+                                }
+                                // Synchronise le timer si fourni
+                                if (data.timer && data.timer.timeLeft > 0) {
+                                    totalDelayMs = data.timer.totalDuration;
+                                    targetEndTime = Date.now() + data.timer.timeLeft;
+                                    $('#countdownPanel').removeClass('hidden');
+                                    mettreAJourProgressBar();
+                                    if (countdownInterval) clearInterval(countdownInterval);
+                                    countdownInterval = setInterval(mettreAJourProgressBar, 250);
+                                }
+                                break;
+                        }
+                    };
+                    
+                    ws.onerror = function(error) {
+                        console.error('❌ Erreur WebSocket:', error);
+                    };
+                    
+                    ws.onclose = function() {
+                        console.log('⚠️ WebSocket fermé, reconnexion dans 3s...');
+                        setTimeout(connecterWebSocket, 3000);
+                    };
+                    
+                } catch (error) {
+                    console.error('❌ Impossible de se connecter au WebSocket:', error);
+                }
+            }
+
+            // --- Lancement de la synchronisation au chargement ---
+            synchroniserAuChargement();
 
         });
     </script>
-
 </body>
 
 </html>

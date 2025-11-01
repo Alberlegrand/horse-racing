@@ -4,8 +4,13 @@ import express from "express";
 import { gameState, wrap } from "../game.js";
 import { escapeHtml } from "../utils.js";
 
-// Pas besoin de factory ici, car on n'injecte pas de dépendances externes
-const router = express.Router();
+/**
+ * Crée le routeur pour les "receipts" (tickets).
+ * @param {function} broadcast - La fonction de diffusion WebSocket (optionnelle).
+ * @returns {express.Router}
+ */
+export default function createReceiptsRouter(broadcast) {
+  const router = express.Router();
 
 // GET /api/v1/receipts/?action=print&id=...
 router.get("/", (req, res) => {
@@ -137,23 +142,58 @@ router.post("/", (req, res) => {
       });
     }
 
-    receipt.prize = prizeForThisReceipt;
-    // Mute gameState
-    gameState.currentRound.totalPrize = (gameState.currentRound.totalPrize || 0) + prizeForThisReceipt;
-    gameState.currentRound.receipts.push(receipt);
+    receipt.prize = prizeForThisReceipt;
+    // Ajout de la date de création si elle n'existe pas
+    if (!receipt.created_time) {
+      receipt.created_time = new Date().toISOString();
+    }
+    // Mute gameState
+    gameState.currentRound.totalPrize = (gameState.currentRound.totalPrize || 0) + prizeForThisReceipt;
+    gameState.currentRound.receipts.push(receipt);
 
-    console.log("Ticket ajouté ID :", receipt.id);
-    return res.json(wrap({ id: receipt.id, success: true }));
+    console.log("Ticket ajouté ID :", receipt.id);
+    
+    // Broadcast WebSocket pour notifier les clients
+    if (broadcast) {
+      broadcast({
+        event: "receipt_added",
+        receipt: JSON.parse(JSON.stringify(receipt)),
+        roundId: gameState.currentRound.id,
+        totalReceipts: gameState.currentRound.receipts.length
+      });
+    }
+    
+    return res.json(wrap({ id: receipt.id, success: true }));
   }
 
-  if (action === "delete") {
-    const id = parseInt(req.query.id, 10);
-    // Mute gameState
-    gameState.currentRound.receipts = gameState.currentRound.receipts.filter(r => r.id !== id);
-    return res.json(wrap({ success: true }));
-  }
+  if (action === "delete") {
+    const id = parseInt(req.query.id, 10);
+    const receipt = gameState.currentRound.receipts.find(r => r.id === id);
+    
+    // Mute gameState
+    gameState.currentRound.receipts = gameState.currentRound.receipts.filter(r => r.id !== id);
+    
+    // Recalculer le totalPrize si nécessaire
+    if (receipt && receipt.prize) {
+      gameState.currentRound.totalPrize = Math.max(0, (gameState.currentRound.totalPrize || 0) - receipt.prize);
+    }
+    
+    // Broadcast WebSocket pour notifier les clients
+    if (broadcast) {
+      broadcast({
+        event: "receipt_deleted",
+        receiptId: id,
+        roundId: gameState.currentRound.id,
+        totalReceipts: gameState.currentRound.receipts.length
+      });
+    }
+    
+    console.log("Ticket supprimé ID :", id);
+    return res.json(wrap({ success: true }));
+  }
 
-  return res.status(400).json({ error: "Unknown receipts action" });
+  return res.status(400).json({ error: "Unknown receipts action" });
 });
 
-export default router;
+  return router;
+}

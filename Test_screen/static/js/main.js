@@ -66,7 +66,6 @@ const pageContents = document.querySelectorAll('.page-content');
 const navLinks = document.querySelectorAll('.nav-link');
 const mobileOpenBtn = document.getElementById('mobileOpenBtn');
 const sidebar = document.getElementById('sidebar');
-const refreshBtn = document.getElementById('refreshBtn');
 const toastEl = document.getElementById('toast');
 
 /* -------------------------

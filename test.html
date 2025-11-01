@@ -325,13 +325,16 @@
         let minBet = 1000;
         let maxBet = 500000;
         let showDecimal = false;
+        // Configuration WebSocket pour les tests (peut être différente de la config standard)
+        // Note: Pour utiliser la config centralisée, remplacer par:
+        // <script src="/js/websocket-config.js"></script>
         window.wsConfig = {
             enableReceiptPrinting: "true",
-    connectionString: "ws://localhost:3000/connection/websocket",
-    token: "LOCAL_TEST_TOKEN",
-    userId: "local.6130290",
-    partnerId: "platform_horses"
-}
+            connectionString: "ws://localhost:3000/connection/websocket",
+            token: "LOCAL_TEST_TOKEN",
+            userId: "local.6130290",
+            partnerId: "platform_horses"
+        }
 
 
         if (showDecimal) Currency.changeDigits({ digits: 2, visibleDigits: 2 });

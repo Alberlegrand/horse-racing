@@ -20,12 +20,17 @@ let maxBet = 500000;
 let showDecimal = false;
 
 // Configuration WebSocket et jeu
-window.wsConfig = {
-  connectionString: "ws://localhost:8081/connection/websocket",
-  token: "LOCAL_TEST_TOKEN",
-  userId: "local.6130290",
-  partnerId: "platform_horses"
-};
+// Note: wsConfig devrait être défini par websocket-config.js
+// On ne définit une config par défaut que si elle n'existe pas déjà
+if (!window.wsConfig) {
+  window.wsConfig = {
+    connectionString: "ws://localhost:8081/connection/websocket",
+    token: "LOCAL_TEST_TOKEN",
+    userId: "local.6130290",
+    partnerId: "platform_horses"
+  };
+  console.warn("⚠️ wsConfig non trouvé, utilisation de la config par défaut. Assurez-vous que websocket-config.js est chargé.");
+}
 
 window.gameConfig = {
   enableReceiptPrinting: true,
@@ -53,26 +58,11 @@ let ticketToVoid = null;
 let wsRetryDelay = 1000;
 const wsRetryMax = 30000;
 
-const currentRoundEl = document.getElementById('currentRound');
-const totalBetsAmountEl = document.getElementById('totalBetsAmount');
-const activeTicketsCountEl = document.getElementById('activeTicketsCount');
-const ticketsTableEl = document.getElementById('ticketsTable');
-const voidModal = document.getElementById('voidModal');
-const modalTicketIdEl = document.getElementById('modalTicketId');
-const cancelVoidBtn = document.getElementById('cancelVoidBtn');
-const confirmVoidBtn = document.getElementById('confirmVoidBtn');
-const pageTitleEl = document.getElementById('pageTitle');
-const pageContents = document.querySelectorAll('.page-content');
-const navLinks = document.querySelectorAll('.nav-link');
-const mobileOpenBtn = document.getElementById('mobileOpenBtn');
-const sidebar = document.getElementById('sidebar');
-const refreshBtn = document.getElementById('refreshBtn');
-const toastEl = document.getElementById('toast');
-
 /* -------------------------
    Helpers
 ------------------------- */
 function showToast(message, duration = 3000) {
+  const toastEl = el('toast');
   if (!toastEl) return console.warn('Toast element missing');
   toastEl.innerHTML = `<div class="bg-slate-800 text-white px-4 py-2 rounded shadow">${message}</div>`;
   toastEl.classList.remove('hidden');
@@ -94,6 +84,83 @@ function formatStatus(status) {
   const st = (status || 'pending').toLowerCase();
   const info = statusMap[st] || statusMap.pending;
   return `<span class="px-2 py-1 rounded-full text-xs font-medium ${info.class}">${info.text}</span>`;
+}
+
+/* -------------------------
+   Helpers pour bet_frame
+------------------------- */
+let _launchCountdownInterval = null;
+let _launchCountdownStart = 0;
+let _launchCountdownDuration = 0;
+
+function _formatSeconds(s) {
+  return `${s}s`;
+}
+
+function startLaunchCountdown(durationMs) {
+  cancelLaunchCountdown();
+  if (!durationMs || durationMs <= 0) return;
+  const progressBar = document.getElementById('betLaunchProgressBar');
+  const timerEl = document.getElementById('betLaunchTimer');
+  if (!progressBar || !timerEl) return;
+
+  _launchCountdownStart = Date.now();
+  _launchCountdownDuration = durationMs;
+  progressBar.style.width = '0%';
+  timerEl.textContent = _formatSeconds(Math.ceil(durationMs / 1000));
+
+  _launchCountdownInterval = setInterval(() => {
+    const elapsed = Date.now() - _launchCountdownStart;
+    const pct = Math.min(100, (elapsed / _launchCountdownDuration) * 100);
+    progressBar.style.width = pct + '%';
+    const remainingSec = Math.max(0, Math.ceil((_launchCountdownDuration - elapsed) / 1000));
+    timerEl.textContent = _formatSeconds(remainingSec);
+
+    if (elapsed >= _launchCountdownDuration) {
+      cancelLaunchCountdown();
+      // Unlock iframe and reload when countdown finishes
+      setBetFrameDisabled(false);
+      reloadBetFrame();
+    }
+  }, 100);
+}
+
+function cancelLaunchCountdown() {
+  if (_launchCountdownInterval) {
+    clearInterval(_launchCountdownInterval);
+    _launchCountdownInterval = null;
+  }
+  const progressBar = document.getElementById('betLaunchProgressBar');
+  const timerEl = document.getElementById('betLaunchTimer');
+  if (progressBar) progressBar.style.width = '0%';
+  if (timerEl) timerEl.textContent = '';
+}
+
+function setBetFrameDisabled(disabled = true, message, durationMs) {
+  const overlay = document.getElementById('betFrameOverlay');
+  const textEl = document.getElementById('betFrameOverlayText');
+  if (!overlay) return;
+  if (message && textEl) textEl.textContent = message;
+  if (disabled) {
+    cancelLaunchCountdown(); // reset previous if any
+    overlay.classList.remove('hidden');
+    overlay.classList.remove('opacity-0');
+    overlay.classList.add('opacity-100');
+    if (durationMs && durationMs > 0) startLaunchCountdown(durationMs);
+  } else {
+    // fade out then hide to keep transition smooth
+    cancelLaunchCountdown();
+    overlay.classList.remove('opacity-100');
+    overlay.classList.add('opacity-0');
+    setTimeout(() => overlay.classList.add('hidden'), 300);
+  }
+}
+
+function reloadBetFrame() {
+  const iframe = document.getElementById('betFrame');
+  if (!iframe) return;
+  const base = iframe.getAttribute('src')?.split('?')[0] || '/bet_frame';
+  iframe.setAttribute('src', base + '?t=' + Date.now());
 }
 
 /* -------------------------
@@ -144,16 +211,50 @@ function scheduleWsReconnect() {
 
 function handleWebSocketMessage(data) {
   const activePage = document.querySelector('.page-content:not(.hidden)')?.id || 'page-dashboard';
-  if (!['page-course-chevaux', 'page-dashboard'].includes(activePage)) return;
+  if (!['page-course-chevaux', 'page-dashboard', 'page-cashier'].includes(activePage)) return;
+
+  console.log('📨 main.js WebSocket:', data.event);
 
   if (data.event === 'new_round') {
     if (data.game?.id) {
+      const currentRoundEl = document.getElementById('currentRound');
       if (currentRoundEl) currentRoundEl.textContent = data.game.id;
-      else console.warn("⚠️ Élément #currentRound introuvable au moment de la mise à jour.");
     }
-    refreshTickets();
-  } else if (['race_end', 'ticket_update'].includes(data.event)) {
-    refreshTickets();
+    // read duration if present (ms) or fallback to 10s
+    const durationMs = data.game?.launchDurationMs ?? data.game?.startInMs ?? 10000;
+    setBetFrameDisabled(true, data.game?.id ? `Jeu lancé — round ${data.game.id}` : 'Jeu en cours — veuillez patienter...', durationMs);
+    if (typeof refreshTickets === 'function') {
+      refreshTickets();
+    }
+    // Notifier app.js si disponible
+    if (window.app && window.app.handleWebSocketMessage) {
+      window.app.handleWebSocketMessage(data);
+    }
+  } else if (data.event === 'race_end') {
+    // stop countdown, enable and reload iframe
+    cancelLaunchCountdown();
+    setBetFrameDisabled(false);
+    reloadBetFrame();
+    if (typeof refreshTickets === 'function') {
+      refreshTickets();
+    }
+    // Notifier app.js si disponible
+    if (window.app && window.app.handleWebSocketMessage) {
+      window.app.handleWebSocketMessage(data);
+    }
+  } else if (data.event === 'ticket_update' || data.event === 'receipt_added' || data.event === 'receipt_deleted') {
+    if (typeof refreshTickets === 'function') {
+      refreshTickets();
+    }
+    // Notifier app.js si disponible
+    if (window.app && window.app.handleWebSocketMessage) {
+      window.app.handleWebSocketMessage(data);
+    }
+  } else {
+    // Transférer les autres événements à app.js si disponible
+    if (window.app && window.app.handleWebSocketMessage) {
+      window.app.handleWebSocketMessage(data);
+    }
   }
 }
 
@@ -214,6 +315,10 @@ async function refreshTickets() {
 function updateStats(round) {
   const receipts = round?.receipts || [];
   const total = receipts.reduce((sum, r) => sum + (r.bets||[]).reduce((s,b)=> s + Number(b.value||0),0), 0);
+
+  const totalBetsAmountEl = el('totalBetsAmount');
+  const activeTicketsCountEl = el('activeTicketsCount');
+  const currentRoundEl = el('currentRound');
 
   if (totalBetsAmountEl) totalBetsAmountEl.textContent = `${total.toFixed(2)} HTG`;
   if (activeTicketsCountEl) activeTicketsCountEl.textContent = receipts.length;
