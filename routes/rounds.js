@@ -6,8 +6,8 @@ import { gameState, startNewRound, wrap } from "../game.js";
 
 // --- CONFIGURATION ---
 // La valeur fixe que vous voulez pour l'intervalle d'attente.
-// Nous utilisons directement cette valeur (30000 ms) et non un minuteur externe.
-const ROUND_WAIT_DURATION_MS = 30000; // 30 secondes 
+// Nous utilisons directement cette valeur (120000 ms = 2 minutes) et non un minuteur externe.
+const ROUND_WAIT_DURATION_MS = 120000; // 2 minutes (120000 ms) 
 
 // --- INITIALISATION DE L'ÉTAT ---
 // Stocke le timestamp exact du début du prochain round.

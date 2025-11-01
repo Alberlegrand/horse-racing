@@ -77,9 +77,9 @@ export function startNewRound(broadcast) {
 
     console.log(`🚀 Nouveau tour #${gameState.currentRound.id} prêt à commencer !`);
 
-    // 3️⃣ Démarre le timer de 30 secondes pour le prochain lancement
+    // 3️⃣ Démarre le timer de 2 minutes pour le prochain lancement
     // Le timer commence MAINTENANT, après que le client ait cliqué sur "new_game"
-    const ROUND_WAIT_DURATION_MS = 30000; // 30 secondes
+    const ROUND_WAIT_DURATION_MS = 120000; // 2 minutes (120000 ms)
     const now = Date.now();
     gameState.nextRoundStartTime = now + ROUND_WAIT_DURATION_MS;
     

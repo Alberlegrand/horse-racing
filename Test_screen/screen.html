@@ -165,6 +165,39 @@
             font-size: 1.1em;
             letter-spacing: 0.5px;
         }
+
+        /* Styles pour le panel principal avec timer */
+        .panel-timer {
+            background-color: rgba(17, 24, 39, 0.95); /* bg-gray-900 bg-opacity-95 */
+            width: 100%;
+            padding: 16px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+        }
+
+        .panel-content {
+            width: 100%;
+        }
+
+        .panel-top {
+            margin-bottom: 8px;
+        }
+
+        .panel-text {
+            color: white;
+            font-weight: 700;
+            font-size: 1.1em;
+            letter-spacing: 0.5px;
+        }
+
+        .panel-timer .progress-container {
+            position: relative;
+            width: 100%;
+            height: 8px;
+            background-color: rgba(55, 65, 81, 0.8);
+            border-radius: 9999px;
+            overflow: hidden;
+            margin-top: 8px;
+        }
     </style>
 </head>
 
@@ -180,26 +213,37 @@
 
     <section class="money-horse-section js-money-horse-section">
         <div class="content">
-            <div class="panel">
-                <div class="title"></div>
-                <span id="currentRound" style="display:none;"></span>
+            <div class="panel panel-timer">
+                <!-- <div class="title"></div> -->
                 <div class="btn_return_url" style="display: none;"></div>
                 
                 <!-- Barre de progression et minuterie pour le prochain départ -->
-                <div id="countdownPanel" class="p-4 rounded-lg bg-gray-900 bg-opacity-95 shadow-xl hidden">
-                    <div class="text-white flex justify-between items-center mb-2">
-                        <span class="text-sm font-semibold uppercase tracking-wide">⏱️ Prochain Départ:</span>
-                        <span id="timeRemainingDisplay" class="text-yellow-400 text-lg font-bold">0.0s</span>
+                <div class="panel-content">
+                    <div class="panel-top flex justify-between items-center">
+                        <span id="currentRound" class="panel-text">Round 0</span>
+                        <span id="timeRemainingDisplay" class="panel-text">00:00</span>
                     </div>
                     <div class="progress-container">
                         <div id="progressBar"
                             class="bg-green-500 rounded-full"
                             style="width: 0%"></div>
                     </div>
+                </div>
+                
+                <!-- Ancien countdownPanel gardé pour compatibilité -->
+               <!--  <div id="countdownPanel" class="p-4 rounded-lg bg-gray-900 bg-opacity-95 shadow-xl hidden">
+                    <div class="text-white flex justify-between items-center mb-2">
+                        <span class="text-sm font-semibold uppercase tracking-wide">⏱️ Prochain Départ:</span>
+                        <span class="text-yellow-400 text-lg font-bold">0.0s</span>
+                    </div>
+                    <div class="progress-container">
+                        <div class="bg-green-500 rounded-full"
+                            style="width: 0%"></div>
+                    </div>
                     <div class="text-center mt-2 text-xs text-gray-400">
                         Le jeu se lancera automatiquement
                     </div>
-                </div>
+                </div> -->
             </div>
             <div class="screen game_screen active">
                 <div class="participants_container">
@@ -431,7 +475,7 @@
         $(document).ready(function () {
 
             // --- Variables pour le minuteur ---
-            var totalDelayMs = 30000; // Délai total par défaut (30 secondes), mis à jour par l'API
+            var totalDelayMs = 120000; // Délai total par défaut (2 minutes), mis à jour par l'API
             var countdownInterval = null; // ID de l'intervalle pour la mise à jour de la barre
             var targetEndTime = 0; // Timestamp exact de la fin du compte à rebours
             var ws = null; // WebSocket pour la synchronisation en temps réel
@@ -456,7 +500,7 @@
                     clearInterval(countdownInterval);
                     countdownInterval = null;
                     $('#countdownPanel').addClass('hidden');
-                    $('#timeRemainingDisplay').text('0s');
+                    $('#timeRemainingDisplay').text('00:00');
                     $progressBar.css('width', '100%'); 
                     return;
                 }
@@ -465,17 +509,11 @@
                 const elapsedTime = totalDelayMs - timeLeft;
                 const progressPercent = Math.min(100, (elapsedTime / totalDelayMs) * 100);
 
-                // Mise à jour de l'UI avec format amélioré
+                // Mise à jour de l'UI avec format 00:00 (MM:SS)
                 const secondsLeft = Math.ceil(timeLeft / 1000);
                 const minutes = Math.floor(secondsLeft / 60);
                 const seconds = secondsLeft % 60;
-                let timeDisplay = '';
-                
-                if (minutes > 0) {
-                    timeDisplay = minutes + 'm ' + seconds + 's';
-                } else {
-                    timeDisplay = secondsLeft + 's';
-                }
+                const timeDisplay = String(minutes).padStart(2, '0') + ':' + String(seconds).padStart(2, '0');
                 
                 $('#timeRemainingDisplay').text(timeDisplay);
                 $progressBar.css('width', progressPercent + '%');
@@ -596,9 +634,11 @@
                                     console.log('🧹 Nettoyage - clic sur "New round"');
                                     $newGameButton.click();
 
-                                    // 3. Relancer la boucle de polling principale pour vérifier le timer
-                                    console.log('⏰ Vérification du timer de 30 secondes...');
-                                    setTimeout(gererCycleDeJeu, 1000); // Laisse 1s à l'UI pour se nettoyer
+                                    // 3. Recharger la page après un court délai
+                                    console.log('🔄 Rechargement de la page dans 1 seconde...');
+                                    setTimeout(function() {
+                                        window.location.reload();
+                                    }, 1000);
                                 },
                                 error: function (xhr, status, error) {
                                     console.error('❌ Erreur lors de la création du nouveau round:', error);
@@ -624,6 +664,11 @@
                     method: 'GET',
                     success: function (data) {
                         console.log('✅ État serveur récupéré:', data);
+                        
+                        // Met à jour le currentRound si disponible
+                        if (data.currentRound && data.currentRound.id) {
+                            $('#currentRound').text('Round ' + data.currentRound.id);
+                        }
                         
                         // Synchronise le timer si nécessaire
                         if (data.timerTimeLeft > 0) {
@@ -653,7 +698,7 @@
                             console.log(`🏁 Finish screen actif, ${Math.round(data.timeRemaining / 1000)}s restantes`);
                             $('.screen').removeClass('active');
                             $('.finish_screen').addClass('active');
-                            $('.new_game').css('visibility', 'visible');
+                            //$('.new_game').css('visibility', 'visible');
                         } else {
                             // game_screen
                             console.log('📋 Affichage game_screen');
@@ -724,6 +769,10 @@
                                 
                             case 'new_round':
                                 console.log('🆕 Nouveau round - synchronisation');
+                                // Met à jour le currentRound si disponible
+                                if (data.game && data.game.id) {
+                                    $('#currentRound').text('Round ' + data.game.id);
+                                }
                                 // Retourne à game_screen si nécessaire
                                 if (!data.timer || data.timer.timeLeft <= 0) {
                                     $('.screen').removeClass('active');
