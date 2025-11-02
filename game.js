@@ -89,13 +89,19 @@ export function startNewRound(broadcast) {
     if (broadcast) {
         broadcast({ 
             event: "new_round", 
+            roundId: newRoundId,
             game: JSON.parse(JSON.stringify(gameState.currentRound)),
+            currentRound: JSON.parse(JSON.stringify(gameState.currentRound)),
             timer: {
                 timeLeft: ROUND_WAIT_DURATION_MS,
                 totalDuration: ROUND_WAIT_DURATION_MS,
                 startTime: now,
                 endTime: gameState.nextRoundStartTime
-            }
+            },
+            nextRoundStartTime: gameState.nextRoundStartTime,
+            isRaceRunning: false,
+            raceStartTime: null,
+            raceEndTime: null
         });
     } else {
         console.warn("startNewRound: 'broadcast' function non fournie.");

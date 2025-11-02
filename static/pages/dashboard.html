@@ -1,4 +1,91 @@
 <div class="page-content active" id="page-dashboard">
+    <style>
+        /* Styles pour la barre de progression du lancement - Identique à screen.html */
+        .panel-timer .progress-container {
+            position: relative;
+            width: 100%;
+            height: 8px;
+            background-color: rgba(55, 65, 81, 0.8);
+            border-radius: 9999px;
+            overflow: hidden;
+            margin-top: 8px;
+        }
+
+        #progressBar {
+            height: 100%;
+            border-radius: 9999px;
+            transition: width 0.3s ease-out, background-color 0.3s ease;
+            position: relative;
+            box-shadow: 0 0 10px rgba(34, 197, 94, 0.5);
+        }
+
+        #progressBar.bg-green-500 {
+            background: linear-gradient(90deg, #22c55e, #16a34a);
+            box-shadow: 0 0 10px rgba(34, 197, 94, 0.5);
+        }
+
+        #progressBar.bg-yellow-500 {
+            background: linear-gradient(90deg, #eab308, #ca8a04);
+            box-shadow: 0 0 10px rgba(234, 179, 8, 0.5);
+        }
+
+        #progressBar.bg-red-500 {
+            background: linear-gradient(90deg, #ef4444, #dc2626);
+            box-shadow: 0 0 10px rgba(239, 68, 68, 0.5);
+            animation: pulse 1s ease-in-out infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% {
+                opacity: 1;
+            }
+            50% {
+                opacity: 0.8;
+            }
+        }
+
+        #timeRemainingDisplay {
+            font-weight: 700;
+            font-size: 1.1em;
+            letter-spacing: 0.5px;
+        }
+    </style>
+
+    <!-- Overlay Course en cours -->
+    <div id="raceOverlay" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center hidden">
+        <div class="bg-slate-900 rounded-2xl p-8 border-2 border-yellow-500 shadow-2xl max-w-md w-full mx-4">
+            <div class="text-center">
+                <div class="mb-6">
+                    <div class="inline-block animate-spin text-6xl mb-4">🏇</div>
+                    <h2 class="text-3xl font-bold text-yellow-400 mb-2">COURSE EN COURS</h2>
+                    <p class="text-slate-300 text-lg">Veuillez patienter pendant la course</p>
+                </div>
+                <div class="bg-slate-800 rounded-lg p-4 mb-4">
+                    <p class="text-sm text-slate-400 mb-2">Les paris sont temporairement désactivés</p>
+                    <div id="raceTimer" class="text-2xl font-bold text-green-400">--s</div>
+                </div>
+                <div class="text-xs text-slate-500">
+                    Le dashboard sera réactivé à la fin de la course
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Panel Timer pour le lancement de la course -->
+    <section class="mb-6">
+        <div class="panel-timer bg-slate-800/95 rounded-xl p-4 shadow-xl border border-slate-700">
+            <div class="panel-content">
+                <div class="panel-top flex justify-between items-center mb-2">
+                    <span id="currentRoundTimer" class="panel-text text-white font-bold text-lg">Round 0</span>
+                    <span id="timeRemainingDisplay" class="panel-text text-white font-bold text-lg">00:00</span>
+                </div>
+                <div class="progress-container">
+                    <div id="progressBar" class="bg-green-500 rounded-full" style="width: 0%;"></div>
+                </div>
+            </div>
+        </div>
+    </section>
+
     <!-- Stats Cards -->
     <section class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
         <div class="bg-slate-800 rounded-xl p-5 shadow">

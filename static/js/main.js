@@ -210,50 +210,43 @@ function scheduleWsReconnect() {
 }
 
 function handleWebSocketMessage(data) {
+  console.log('📨 main.js WebSocket:', data.event, 'Round:', data.roundId);
+
+  // TOUJOURS transférer à app.js en premier pour une synchronisation complète
+  if (window.app && window.app.handleWebSocketMessage) {
+    window.app.handleWebSocketMessage(data);
+  }
+
   const activePage = document.querySelector('.page-content:not(.hidden)')?.id || 'page-dashboard';
   if (!['page-course-chevaux', 'page-dashboard', 'page-cashier'].includes(activePage)) return;
 
-  console.log('📨 main.js WebSocket:', data.event);
-
   if (data.event === 'new_round') {
-    if (data.game?.id) {
+    const roundId = data.roundId || data.game?.id || data.currentRound?.id;
+    if (roundId) {
       const currentRoundEl = document.getElementById('currentRound');
-      if (currentRoundEl) currentRoundEl.textContent = data.game.id;
+      if (currentRoundEl) currentRoundEl.textContent = roundId;
     }
     // read duration if present (ms) or fallback to 10s
-    const durationMs = data.game?.launchDurationMs ?? data.game?.startInMs ?? 10000;
-    setBetFrameDisabled(true, data.game?.id ? `Jeu lancé — round ${data.game.id}` : 'Jeu en cours — veuillez patienter...', durationMs);
+    const durationMs = data.timer?.totalDuration || data.game?.launchDurationMs || data.game?.startInMs || 10000;
+    setBetFrameDisabled(true, roundId ? `Jeu lancé — round ${roundId}` : 'Jeu en cours — veuillez patienter...', durationMs);
     if (typeof refreshTickets === 'function') {
-      refreshTickets();
+      setTimeout(() => refreshTickets(), 300);
     }
-    // Notifier app.js si disponible
-    if (window.app && window.app.handleWebSocketMessage) {
-      window.app.handleWebSocketMessage(data);
-    }
+  } else if (data.event === 'race_start') {
+    // Désactiver le bet_frame pendant la course avec le roundId
+    const roundId = data.roundId || 'N/A';
+    setBetFrameDisabled(true, `Course en cours — Round ${roundId}`, 25000);
   } else if (data.event === 'race_end') {
     // stop countdown, enable and reload iframe
     cancelLaunchCountdown();
     setBetFrameDisabled(false);
     reloadBetFrame();
     if (typeof refreshTickets === 'function') {
-      refreshTickets();
+      setTimeout(() => refreshTickets(), 800);
     }
-    // Notifier app.js si disponible
-    if (window.app && window.app.handleWebSocketMessage) {
-      window.app.handleWebSocketMessage(data);
-    }
-  } else if (data.event === 'ticket_update' || data.event === 'receipt_added' || data.event === 'receipt_deleted') {
+  } else if (data.event === 'ticket_update' || data.event === 'receipt_added' || data.event === 'receipt_deleted' || data.event === 'receipt_paid') {
     if (typeof refreshTickets === 'function') {
-      refreshTickets();
-    }
-    // Notifier app.js si disponible
-    if (window.app && window.app.handleWebSocketMessage) {
-      window.app.handleWebSocketMessage(data);
-    }
-  } else {
-    // Transférer les autres événements à app.js si disponible
-    if (window.app && window.app.handleWebSocketMessage) {
-      window.app.handleWebSocketMessage(data);
+      setTimeout(() => refreshTickets(), 200);
     }
   }
 }
@@ -274,18 +267,21 @@ function updateTicketsTable(tickets) {
 
   tickets.forEach(t => {
     const total = (t.bets || []).reduce((s, b) => s + Number(b.value || 0), 0).toFixed(2);
+    // Les tickets dans le dashboard proviennent du round actuel
+    const createdTime = t.created_time || t.created_at || Date.now();
+    
     const tr = document.createElement('tr');
     tr.innerHTML = `
       <td class="p-2">#${t.id}</td>
-      <td class="p-2 text-slate-400 text-sm">${new Date(t.created_at||Date.now()).toLocaleString()}</td>
-      <td class="p-2 text-sm">${t.race||'-'}</td>
+      <td class="p-2 text-slate-400 text-sm">${new Date(createdTime).toLocaleString('fr-FR')}</td>
+      <td class="p-2 text-sm">${t.race || '-'}</td>
       <td class="p-2 text-green-300">${total} HTG</td>
-      <td class="p-2 text-sm">${t.odds ?? '-'}</td>
-      <td class="p-2">${formatStatus(t.status)}</td>
+      <td class="p-2 text-sm">${t.odds || '-'}</td>
+      <td class="p-2">${formatStatus(t.status || 'pending')}</td>
       <td class="p-2">
-        <button data-action="print" data-id="${t.id}" class="mr-2 text-green-300">Imprimer</button>
+        <button data-action="print" data-id="${t.id}" class="mr-2 text-green-300 hover:text-green-200">Imprimer</button>
         ${ (t.status||'').toLowerCase() === 'pending'
-            ? `<button data-action="void" data-id="${t.id}" class="text-rose-300">Annuler</button>`
+            ? `<button data-action="void" data-id="${t.id}" class="text-rose-300 hover:text-rose-200">Annuler</button>`
             : '' }
       </td>
     `;
@@ -298,17 +294,30 @@ function updateTicketsTable(tickets) {
 ------------------------- */
 async function refreshTickets() {
   try {
-    const res = await fetch('/api/v1/rounds/?action=get', { method: 'POST', headers: { 'Accept': 'application/json' }});
+    const res = await fetch('/api/v1/rounds/', { 
+      method: 'POST', 
+      headers: { 
+        'Content-Type': 'application/json',
+        'Accept': 'application/json' 
+      },
+      body: JSON.stringify({ action: 'get' })
+    });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
     const round = data?.data || {};
     const receipts = round.receipts || [];
 
+    // S'assurer que le roundId est synchronisé
+    if (round.id) {
+      const currentRoundEl = document.getElementById('currentRound');
+      if (currentRoundEl) currentRoundEl.textContent = round.id;
+    }
+
     updateTicketsTable(receipts);
     updateStats(round);
   } catch (err) {
     console.error('Erreur refreshTickets:', err);
-    showToast('Erreur de connexion à l’API.');
+    showToast('Erreur de connexion à l\'API.');
   }
 }
 

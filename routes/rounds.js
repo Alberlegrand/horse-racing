@@ -124,9 +124,16 @@ export default function createRoundsRouter(broadcast) {
             req.query.action ||
             null;
 
-        // === GET === (INCHANGÉ)
+        // === GET === Retourne le round actuel avec toutes les infos de synchronisation
         if (action === "get") {
-            return res.json(wrap(gameState.currentRound));
+            const roundData = {
+                ...gameState.currentRound,
+                isRaceRunning: gameState.isRaceRunning,
+                raceStartTime: gameState.raceStartTime,
+                raceEndTime: gameState.raceEndTime,
+                nextRoundStartTime: gameState.nextRoundStartTime
+            };
+            return res.json(wrap(roundData));
         }
 
         // === FINISH === (Logique de course et minuteur)
@@ -134,11 +141,19 @@ export default function createRoundsRouter(broadcast) {
             res.json(wrap({ success: true }));
 
             // Marque le début de la course pour la synchronisation
+            const raceStartTime = Date.now();
             gameState.isRaceRunning = true;
-            gameState.raceStartTime = Date.now();
+            gameState.raceStartTime = raceStartTime;
             gameState.raceEndTime = null;
 
-            broadcast({ event: "race_start", roundId: gameState.currentRound.id });
+            // Broadcast complet avec toutes les informations de synchronisation
+            broadcast({ 
+                event: "race_start", 
+                roundId: gameState.currentRound.id,
+                raceStartTime: raceStartTime,
+                currentRound: JSON.parse(JSON.stringify(gameState.currentRound)),
+                isRaceRunning: true
+            });
 
             // IMPORTANT: La durée réelle du movie_screen côté client est ~20 secondes
             // On doit attendre 20 secondes avant d'envoyer race_end pour que movie_screen se termine
@@ -186,12 +201,17 @@ export default function createRoundsRouter(broadcast) {
                 // Marque la fin de la course (fin du movie_screen, début du finish_screen)
                 gameState.raceEndTime = Date.now();
 
+                // Broadcast complet avec toutes les informations
                 broadcast({
                     event: "race_end",
+                    roundId: gameState.currentRound.id,
                     winner: winnerWithPlace,
                     receipts: JSON.parse(JSON.stringify(receipts)),
-                    roundId: gameState.currentRound.id,
                     prize: gameState.currentRound.totalPrize,
+                    totalPrize: gameState.currentRound.totalPrize,
+                    raceEndTime: gameState.raceEndTime,
+                    currentRound: JSON.parse(JSON.stringify(gameState.currentRound)),
+                    participants: JSON.parse(JSON.stringify(gameState.currentRound.participants))
                 });
                 
                 // --- FIN DE VOTRE LOGIQUE DE JEU ORIGINALE ---

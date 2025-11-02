@@ -3,48 +3,62 @@
 import express from "express";
 import { gameState, wrap } from "../game.js";
 
-const router = express.Router();
+/**
+ * Crée le routeur pour "my-bets" (Mes Paris).
+ * @param {function} broadcast - La fonction de diffusion WebSocket (optionnelle).
+ * @returns {express.Router}
+ */
+export default function createMyBetsRouter(broadcast) {
+  const router = express.Router();
 
 /**
  * Formate un ticket (receipt) pour la réponse API "my-bets".
  * Calcule le montant total, la cote moyenne, et le gain potentiel.
  */
 function formatTicket(receipt, roundId, defaultStatus = 'pending') {
-  let totalAmount = 0;
-  let totalCoeff = 0;
-  let totalPotentialWinnings = 0;
-  const betCount = receipt.bets?.length || 0;
+  let totalAmount = 0;
+  let totalCoeff = 0;
+  let totalPotentialWinnings = 0;
+  const betCount = receipt.bets?.length || 0;
 
-  if (betCount > 0) {
-    receipt.bets.forEach(bet => {
-      const mise = parseFloat(bet.value) || 0;
-      const coeff = parseFloat(bet.participant?.coeff) || 1; // 1 pour éviter division par 0
-      
-      totalAmount += mise;
-      totalCoeff += coeff;
-      totalPotentialWinnings += mise * coeff;
-    });
-  }
+  if (betCount > 0) {
+    receipt.bets.forEach(bet => {
+      const mise = parseFloat(bet.value) || 0;
+      const coeff = parseFloat(bet.participant?.coeff) || 1; // 1 pour éviter division par 0
+      
+      totalAmount += mise;
+      totalCoeff += coeff;
+      totalPotentialWinnings += mise * coeff;
+    });
+  }
 
-  // Détermine le statut final
-  let status = defaultStatus;
-  if (defaultStatus !== 'pending') {
-    // Pour les tickets de l'historique, le 'prize' est déjà calculé
-    status = (receipt.prize > 0) ? 'won' : 'lost';
-  }
-  
-  // (Note: 'cancelled' n'est pas géré par la logique actuelle)
+  // Détermine le statut final
+  let status = defaultStatus;
+  if (defaultStatus !== 'pending') {
+    // Pour les tickets de l'historique, le 'prize' est déjà calculé
+    status = (receipt.prize > 0) ? 'won' : 'lost';
+  }
+  
+  // Si le ticket est payé, mettre à jour le statut
+  if (receipt.isPaid === true) {
+    status = 'paid';
+  }
+  
+  // (Note: 'cancelled' n'est pas géré par la logique actuelle)
 
-  return {
-    id: receipt.id,
-    date: receipt.created_time || new Date().toISOString(),
-    roundId: roundId,
-    totalAmount: totalAmount,
-    avgCoeff: (betCount > 0) ? (totalCoeff / betCount) : 0,
-    potentialWinnings: totalPotentialWinnings,
-    status: status,
-    prize: receipt.prize || 0
-  };
+  return {
+    id: receipt.id,
+    date: receipt.created_time || new Date().toISOString(),
+    roundId: roundId,
+    totalAmount: totalAmount,
+    avgCoeff: (betCount > 0) ? (totalCoeff / betCount) : 0,
+    potentialWinnings: totalPotentialWinnings,
+    status: status,
+    prize: receipt.prize || 0,
+    isPaid: receipt.isPaid || false,
+    paidAt: receipt.paid_at || null,
+    isInCurrentRound: defaultStatus === 'pending' // Indique si le ticket est dans le round actuel
+  };
 }
 
 
@@ -66,15 +80,24 @@ router.get("/", (req, res) => {
     // 2. Agréger tous les tickets (historique + en cours)
     let allTickets = [];
 
-    // Tickets en cours (pending)
-    const pendingTickets = (gameState.currentRound.receipts || []).map(r => 
-      formatTicket(r, gameState.currentRound.id, 'pending')
-    );
-    
-    // Tickets de l'historique (won/lost)
-    const historicalTickets = gameState.gameHistory.flatMap(round => 
-      (round.receipts || []).map(r => formatTicket(r, round.id, 'historical'))
-    );
+    // Tickets en cours (pending) - round actuel
+    const pendingTickets = (gameState.currentRound.receipts || []).map(r => {
+      const ticket = formatTicket(r, gameState.currentRound.id, 'pending');
+      // Vérifier si le round actuel est terminé (a un gagnant)
+      const hasWinner = Array.isArray(gameState.currentRound.participants) && 
+                       gameState.currentRound.participants.some(p => p.place === 1);
+      ticket.isRoundFinished = hasWinner || gameState.isRaceRunning || gameState.raceEndTime !== null;
+      return ticket;
+    });
+    
+    // Tickets de l'historique (won/lost) - rounds terminés
+    const historicalTickets = gameState.gameHistory.flatMap(round => 
+      (round.receipts || []).map(r => {
+        const ticket = formatTicket(r, round.id, 'historical');
+        ticket.isRoundFinished = true; // Les rounds dans l'historique sont toujours terminés
+        return ticket;
+      })
+    );
     
     // Fusionner et trier par date (plus récent en premier)
     allTickets = [...pendingTickets, ...historicalTickets].sort((a, b) => 
@@ -113,12 +136,22 @@ router.get("/", (req, res) => {
       ? (wonTickets / (wonTickets + lostTickets)) 
       : 0;
 
-    const stats = {
-      totalBetAmount,
-      potentialWinnings,
-      activeTicketsCount,
-      winRate: (winRate * 100).toFixed(0) // En pourcentage
-    };
+    // Calculer les gains payés
+    const paidWinnings = filteredTickets
+      .filter(t => t.status === 'paid')
+      .reduce((sum, t) => sum + t.prize, 0);
+    const pendingPayments = filteredTickets
+      .filter(t => t.status === 'won')
+      .reduce((sum, t) => sum + t.prize, 0);
+
+    const stats = {
+      totalBetAmount,
+      potentialWinnings,
+      activeTicketsCount,
+      winRate: (winRate * 100).toFixed(0), // En pourcentage
+      paidWinnings,
+      pendingPayments
+    };
 
     // 5. Paginer les résultats
     const totalItems = filteredTickets.length;
@@ -141,10 +174,77 @@ router.get("/", (req, res) => {
       tickets: paginatedTickets
     }));
 
-  } catch (error) {
-    console.error("Erreur sur /api/v1/my-bets/:", error);
-    return res.status(500).json({ error: "Erreur interne du serveur" });
-  }
+  } catch (error) {
+    console.error("Erreur sur /api/v1/my-bets/:", error);
+    return res.status(500).json({ error: "Erreur interne du serveur" });
+  }
 });
 
-export default router;
+// POST /api/v1/my-bets/pay/:id - Marquer un ticket comme payé
+router.post("/pay/:id", (req, res) => {
+  try {
+    const ticketId = parseInt(req.params.id, 10);
+    
+    if (isNaN(ticketId)) {
+      return res.status(400).json({ error: "ID de ticket invalide" });
+    }
+
+    // Chercher le ticket dans le round actuel
+    let receipt = gameState.currentRound.receipts.find(r => r.id === ticketId);
+    let foundInCurrentRound = true;
+    
+    // Si pas trouvé dans le round actuel, chercher dans l'historique
+    if (!receipt) {
+      foundInCurrentRound = false;
+      for (const round of gameState.gameHistory) {
+        receipt = (round.receipts || []).find(r => r.id === ticketId);
+        if (receipt) break;
+      }
+    }
+
+    if (!receipt) {
+      return res.status(404).json({ error: "Ticket non trouvé" });
+    }
+
+    // Vérifier que le ticket a gagné (prize > 0)
+    if (!receipt.prize || receipt.prize <= 0) {
+      return res.status(400).json({ error: "Ce ticket n'a pas gagné, aucun paiement à effectuer" });
+    }
+
+    // Vérifier que le ticket n'est pas déjà payé
+    if (receipt.isPaid === true) {
+      return res.status(400).json({ error: "Ce ticket a déjà été payé" });
+    }
+
+    // Marquer comme payé
+    receipt.isPaid = true;
+    receipt.paid_at = new Date().toISOString();
+
+    console.log(`💰 Ticket #${ticketId} marqué comme payé (gain: ${receipt.prize} HTG)`);
+
+    // Notifier via WebSocket
+    if (broadcast) {
+      broadcast({
+        event: "receipt_paid",
+        receiptId: ticketId,
+        prize: receipt.prize,
+        paidAt: receipt.paid_at,
+        roundId: foundInCurrentRound ? gameState.currentRound.id : null
+      });
+    }
+
+    return res.json(wrap({
+      success: true,
+      ticketId: ticketId,
+      prize: receipt.prize,
+      paidAt: receipt.paid_at
+    }));
+
+  } catch (error) {
+    console.error("Erreur sur /api/v1/my-bets/pay/:id:", error);
+    return res.status(500).json({ error: "Erreur interne du serveur" });
+  }
+});
+
+  return router;
+}

@@ -8,7 +8,7 @@ import { fileURLToPath } from "url";
 import { gameState, startNewRound, wrap } from "./game.js";
 import createRoundsRouter from "./routes/rounds.js";
 import createReceiptsRouter from "./routes/receipts.js";
-import myBetsRouter from "./routes/my_bets.js";
+import createMyBetsRouter from "./routes/my_bets.js";
 import keepaliveRouter from "./routes/keepalive.js";
 import moneyRouter from "./routes/money.js";
 import { SERVER_WEBSOCKET_CONFIG } from "./config/websocket.js";
@@ -81,15 +81,19 @@ wss.on("connection", (ws) => {
   // Envoie l'état complet au nouveau client pour synchronisation
   ws.send(JSON.stringify({ 
     event: "connected", 
-    roundId: gameState.currentRound.id,
+    roundId: gameState.currentRound?.id || null,
     screen: screen,
     isRaceRunning: gameState.isRaceRunning,
     raceStartTime: gameState.raceStartTime,
+    raceEndTime: gameState.raceEndTime,
     timeInRace: timeInRace,
     nextRoundStartTime: gameState.nextRoundStartTime,
     timerTimeLeft: gameState.nextRoundStartTime && gameState.nextRoundStartTime > now 
       ? gameState.nextRoundStartTime - now 
-      : 0
+      : 0,
+    currentRound: JSON.parse(JSON.stringify(gameState.currentRound || {})),
+    totalReceipts: (gameState.currentRound?.receipts || []).length,
+    totalPrize: gameState.currentRound?.totalPrize || 0
   }));
 });
 
@@ -114,8 +118,8 @@ const roundsRouter = createRoundsRouter(broadcast);
 app.use("/api/v1/rounds/", roundsRouter);
 // On injecte aussi 'broadcast' dans le routeur des receipts pour les notifications temps réel
 app.use("/api/v1/receipts/", createReceiptsRouter(broadcast));
-// Le nouveau routeur pour "Mes Paris"
-app.use("/api/v1/my-bets/", myBetsRouter); // <-- NOUVELLE ROUTE
+// Le nouveau routeur pour "Mes Paris" - avec broadcast pour les notifications
+app.use("/api/v1/my-bets/", createMyBetsRouter(broadcast));
 app.use("/api/v1/money/", moneyRouter);
 
 // Keepalive route centralisée

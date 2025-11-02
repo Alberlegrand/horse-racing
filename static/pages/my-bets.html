@@ -9,7 +9,8 @@
                     class="px-3 py-1.5 bg-slate-900/50 rounded-md text-sm border border-slate-700">
                     <option value="">Tous les statuts</option>
                     <option value="pending">En attente</option>
-                    <option value="won">Gagné</option>
+                    <option value="won">Gagné (non payé)</option>
+                    <option value="paid">Payé</option>
                     <option value="lost">Perdu</option>
                     <option value="cancelled">Annulé</option>
                 </select>
@@ -24,7 +25,7 @@
     </div>
 
     <!-- Statistiques -->
-    <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+    <div class="grid grid-cols-1 md:grid-cols-5 gap-4 mb-6">
         <div class="bg-slate-900/50 rounded-lg p-4">
             <div class="text-sm text-slate-400">Total Misé</div>
             <div id="myTotalBetAmount" class="text-xl font-bold text-green-400 mt-1">0 HTG</div>
@@ -34,8 +35,12 @@
             <div id="myPotentialWinnings" class="text-xl font-bold text-yellow-400 mt-1">0 HTG</div>
         </div>
         <div class="bg-slate-900/50 rounded-lg p-4">
-            <div class="text-sm text-slate-400">Tickets Actifs</div>
-            <div id="myActiveTicketsCount" class="text-xl font-bold text-blue-400 mt-1">0</div>
+            <div class="text-sm text-slate-400">En Attente Paiement</div>
+            <div id="myPendingPayments" class="text-xl font-bold text-orange-400 mt-1">0 HTG</div>
+        </div>
+        <div class="bg-slate-900/50 rounded-lg p-4">
+            <div class="text-sm text-slate-400">Gains Payés</div>
+            <div id="myPaidWinnings" class="text-xl font-bold text-blue-400 mt-1">0 HTG</div>
         </div>
         <div class="bg-slate-900/50 rounded-lg p-4">
             <div class="text-sm text-slate-400">Taux de Réussite</div>
@@ -69,13 +74,14 @@
                         <th class="p-2">Course</th>
                         <th class="p-2">Montant</th>
                         <th class="p-2">Cote</th>
+                        <th class="p-2">Gain</th>
                         <th class="p-2">Statut</th>
                         <th class="p-2">Actions</th>
                     </tr>
                 </thead>
                 <tbody id="ticketsTable" class="divide-y divide-slate-700">
                     <tr>
-                        <td colspan="7" class="p-4 text-center text-slate-400">Chargement...</td>
+                        <td colspan="8" class="p-4 text-center text-slate-400">Chargement...</td>
                     </tr>
                 </tbody>
             </table>
