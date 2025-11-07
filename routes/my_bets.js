@@ -2,6 +2,7 @@
 
 import express from "express";
 import { gameState, wrap } from "../game.js";
+import { systemToPublic } from "../utils.js";
 
 /**
  * Crée le routeur pour "my-bets" (Mes Paris).
@@ -15,7 +16,7 @@ export default function createMyBetsRouter(broadcast) {
  * Formate un ticket (receipt) pour la réponse API "my-bets".
  * Calcule le montant total, la cote moyenne, et le gain potentiel.
  */
-function formatTicket(receipt, roundId, defaultStatus = 'pending') {
+function formatTicket(receipt, roundId, defaultStatus = 'pending', isRoundFinished = false) {
   let totalAmount = 0;
   let totalCoeff = 0;
   let totalPotentialWinnings = 0;
@@ -23,21 +24,33 @@ function formatTicket(receipt, roundId, defaultStatus = 'pending') {
 
   if (betCount > 0) {
     receipt.bets.forEach(bet => {
-      const mise = parseFloat(bet.value) || 0;
+      // Les valeurs bet.value sont en système (×100), convertir en publique pour l'affichage
+      const miseSystem = parseFloat(bet.value) || 0;
+      const misePublic = systemToPublic(miseSystem);
       const coeff = parseFloat(bet.participant?.coeff) || 1; // 1 pour éviter division par 0
       
-      totalAmount += mise;
+      totalAmount += misePublic;
       totalCoeff += coeff;
-      totalPotentialWinnings += mise * coeff;
+      // Calcul en système puis conversion en publique pour cohérence
+      totalPotentialWinnings += systemToPublic(miseSystem * coeff);
     });
   }
 
   // Détermine le statut final
   let status = defaultStatus;
-  if (defaultStatus !== 'pending') {
-    // Pour les tickets de l'historique, le 'prize' est déjà calculé
-    status = (receipt.prize > 0) ? 'won' : 'lost';
+  
+  // IMPORTANT: Pour les tickets du round actuel, ne déterminer le statut que si le round est terminé
+  if (defaultStatus === 'pending' && isRoundFinished) {
+    // Le round est terminé, on peut déterminer le statut basé sur le prize
+    // Le prize est en système, convertir en publique pour la comparaison
+    const prizePublic = systemToPublic(receipt.prize || 0);
+    status = (prizePublic > 0) ? 'won' : 'lost';
+  } else if (defaultStatus !== 'pending') {
+    // Pour les tickets de l'historique, le 'prize' est déjà calculé (en système)
+    const prizePublic = systemToPublic(receipt.prize || 0);
+    status = (prizePublic > 0) ? 'won' : 'lost';
   }
+  // Sinon, le statut reste 'pending' (round actuel non terminé)
   
   // Si le ticket est payé, mettre à jour le statut
   if (receipt.isPaid === true) {
@@ -50,14 +63,14 @@ function formatTicket(receipt, roundId, defaultStatus = 'pending') {
     id: receipt.id,
     date: receipt.created_time || new Date().toISOString(),
     roundId: roundId,
-    totalAmount: totalAmount,
+    totalAmount: totalAmount, // Valeur publique (convertie)
     avgCoeff: (betCount > 0) ? (totalCoeff / betCount) : 0,
-    potentialWinnings: totalPotentialWinnings,
+    potentialWinnings: totalPotentialWinnings, // Valeur publique (convertie)
     status: status,
-    prize: receipt.prize || 0,
+    prize: systemToPublic(receipt.prize || 0), // Convertir prize de système à publique
     isPaid: receipt.isPaid || false,
     paidAt: receipt.paid_at || null,
-    isInCurrentRound: defaultStatus === 'pending' // Indique si le ticket est dans le round actuel
+    isInCurrentRound: defaultStatus === 'pending' && !isRoundFinished // Indique si le ticket est dans le round actuel non terminé
   };
 }
 
@@ -81,12 +94,21 @@ router.get("/", (req, res) => {
     let allTickets = [];
 
     // Tickets en cours (pending) - round actuel
+    // IMPORTANT: Vérifier si le round est terminé pour déterminer correctement le statut
+    // Un round est terminé SEULEMENT si la course a été lancée ET terminée
+    const hasWinner = Array.isArray(gameState.currentRound.participants) && 
+                     gameState.currentRound.participants.some(p => p.place === 1);
+    
+    // Un round est terminé si :
+    // 1. raceEndTime est défini (course lancée et terminée)
+    // OU 2. La course a été lancée (raceStartTime !== null) ET n'est plus en cours ET il y a un gagnant
+    // Cela garantit que les tickets restent en "pending" tant que la course n'a pas été lancée
+    const isRoundFinished = gameState.raceEndTime !== null || 
+                            (gameState.raceStartTime !== null && !gameState.isRaceRunning && hasWinner);
+    
     const pendingTickets = (gameState.currentRound.receipts || []).map(r => {
-      const ticket = formatTicket(r, gameState.currentRound.id, 'pending');
-      // Vérifier si le round actuel est terminé (a un gagnant)
-      const hasWinner = Array.isArray(gameState.currentRound.participants) && 
-                       gameState.currentRound.participants.some(p => p.place === 1);
-      ticket.isRoundFinished = hasWinner || gameState.isRaceRunning || gameState.raceEndTime !== null;
+      const ticket = formatTicket(r, gameState.currentRound.id, 'pending', isRoundFinished);
+      ticket.isRoundFinished = isRoundFinished;
       return ticket;
     });
     

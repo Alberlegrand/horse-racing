@@ -36,6 +36,16 @@ class App {
             this.currentPage = pageId;
             this.updateActiveNavLink(pageId);
 
+            // Attendre que le DOM soit prêt avant d'initialiser les composants
+            // Cela permet aux scripts dans dashboard.html de se charger et aux éléments DOM d'être disponibles
+            await new Promise(resolve => {
+                // Utiliser requestAnimationFrame pour s'assurer que le DOM est rendu
+                requestAnimationFrame(() => {
+                    // Petit délai supplémentaire pour laisser les scripts se charger
+                    setTimeout(resolve, 50);
+                });
+            });
+
             // Réinitialiser les gestionnaires d'événements après le chargement
             this.initPageComponents(pageId);
 
@@ -91,6 +101,13 @@ class App {
     initDashboard() {
         console.log('Initialisation de la page Dashboard');
 
+        // IMPORTANT: Nettoyer l'ancien intervalle AVANT de réinitialiser
+        // pour éviter les fuites mémoire et les conflits
+        if (this.timerCountdownInterval) {
+            clearInterval(this.timerCountdownInterval);
+            this.timerCountdownInterval = null;
+        }
+
         // Références aux fonctions de refresh pour WebSocket
         this.dashboardRefreshTickets = null;
         this.dashboardUpdateStats = null;
@@ -118,8 +135,12 @@ class App {
             }
 
             tickets.forEach(t => {
-                // Calculer le total des mises
-                const total = (t.bets || []).reduce((s, b) => s + Number(b.value || 0), 0).toFixed(2);
+                // Calculer le total des mises (les valeurs sont en système, convertir en publique)
+                const total = (t.bets || []).reduce((s, b) => {
+                    const valueSystem = Number(b.value || 0);
+                    const valuePublic = Currency.systemToPublic(valueSystem);
+                    return s + valuePublic;
+                }, 0).toFixed(Currency.visibleDigits);
                 // Récupérer le roundId - les tickets du dashboard proviennent du round actuel
                 // On peut le récupérer depuis le round actuel ou depuis le ticket lui-même
                 const roundId = t.roundId || '-'; // Le roundId devrait être dans le ticket depuis l'API
@@ -176,16 +197,82 @@ class App {
             }
         };
 
+        // Fonction pour synchroniser le timer depuis le serveur
+        const synchroniserTimer = async () => {
+            try {
+                const res = await fetch('/api/v1/rounds/status', { 
+                    method: 'GET',
+                    headers: { 
+                        'Accept': 'application/json' 
+                    }
+                });
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                const data = await res.json();
+                
+                console.log('📊 État serveur récupéré:', data);
+
+                // Mettre à jour le round actuel si disponible
+                if (data.currentRound && data.currentRound.id) {
+                    const currentRoundEl = document.getElementById('currentRound');
+                    const currentRoundTimerEl = document.getElementById('currentRoundTimer');
+                    if (currentRoundEl) currentRoundEl.textContent = data.currentRound.id;
+                    if (currentRoundTimerEl) currentRoundTimerEl.textContent = `Round ${data.currentRound.id}`;
+                }
+
+                // Attendre que dashboardDemarrerTimer soit disponible
+                if (!this.dashboardDemarrerTimer) {
+                    console.warn('⚠️ dashboardDemarrerTimer non encore disponible, réessai dans 100ms...');
+                    setTimeout(() => synchroniserTimer(), 100);
+                    return;
+                }
+
+                // Synchroniser le timer si un timer est actif
+                if (data.timerTimeLeft && data.timerTimeLeft > 0) {
+                    console.log('⏰ Synchronisation du timer depuis le serveur:', {
+                        timeLeft: data.timerTimeLeft,
+                        totalDuration: data.timerTotalDuration
+                    });
+                    this.dashboardDemarrerTimer(data.timerTimeLeft, data.timerTotalDuration || 120000);
+                } else if (data.nextRoundStartTime) {
+                    // Calculer le temps restant depuis nextRoundStartTime
+                    const timeLeft = Math.max(0, data.nextRoundStartTime - Date.now());
+                    if (timeLeft > 0) {
+                        console.log('⏰ Synchronisation du timer depuis nextRoundStartTime:', {
+                            timeLeft,
+                            totalDuration: data.timerTotalDuration || 120000
+                        });
+                        this.dashboardDemarrerTimer(timeLeft, data.timerTotalDuration || 120000);
+                    }
+                } else if (data.isRaceRunning) {
+                    // Si une course est en cours, arrêter le timer
+                    if (this.dashboardArreterTimer) {
+                        this.dashboardArreterTimer();
+                    }
+                }
+            } catch (err) {
+                console.error('Erreur synchroniserTimer:', err);
+                // Ne pas afficher de toast pour cette erreur, c'est silencieux
+            }
+        };
+
         const updateStats = (round) => {
             const receipts = round?.receipts || [];
-            const total = receipts.reduce((sum, r) => sum + (r.bets || []).reduce((s, b) => s + Number(b.value || 0), 0), 0);
+            // Les valeurs bet.value sont en système, convertir en publique pour l'affichage
+            const total = receipts.reduce((sum, r) => {
+                const receiptsSum = (r.bets || []).reduce((s, b) => {
+                    const valueSystem = Number(b.value || 0);
+                    const valuePublic = Currency.systemToPublic(valueSystem);
+                    return s + valuePublic;
+                }, 0);
+                return sum + receiptsSum;
+            }, 0);
 
             // lookup DOM elements lazily (page injectée dynamiquement par App)
             const totalBetsAmountEl = document.getElementById('totalBetsAmount');
             const activeTicketsCountEl = document.getElementById('activeTicketsCount');
             const currentRoundEl = document.getElementById('currentRound');
 
-            if (totalBetsAmountEl) totalBetsAmountEl.textContent = `${total.toFixed(2)} HTG`;
+            if (totalBetsAmountEl) totalBetsAmountEl.textContent = `${total.toFixed(Currency.visibleDigits)} HTG`;
             if (activeTicketsCountEl) activeTicketsCountEl.textContent = receipts.length;
             if (currentRoundEl && round?.id) currentRoundEl.textContent = round.id;
         }
@@ -245,6 +332,18 @@ class App {
                 this.timerCountdownInterval = null;
             }
 
+            // Vérifier que les éléments DOM sont disponibles
+            const progressBar = el('progressBar');
+            const timeDisplay = el('timeRemainingDisplay');
+            if (!progressBar || !timeDisplay) {
+                console.warn('⚠️ Éléments DOM du timer non disponibles, réessai dans 100ms...');
+                // Réessayer après un court délai pour laisser le DOM se charger
+                setTimeout(() => {
+                    demarrerTimer(timeLeft, totalDuration);
+                }, 100);
+                return;
+            }
+
             // Mettre à jour les variables
             this.timerTotalDelayMs = totalDuration || 120000;
             this.timerTargetEndTime = Date.now() + (timeLeft || 0);
@@ -256,6 +355,8 @@ class App {
             this.timerCountdownInterval = setInterval(() => {
                 mettreAJourProgressBar();
             }, 250);
+            
+            console.log('✅ Timer démarré:', { timeLeft, totalDuration, targetEndTime: this.timerTargetEndTime });
         };
 
         const arreterTimer = () => {
@@ -278,14 +379,24 @@ class App {
         this.dashboardDemarrerTimer = demarrerTimer;
         this.dashboardArreterTimer = arreterTimer;
         this.dashboardMettreAJourProgressBar = mettreAJourProgressBar;
+        this.dashboardSynchroniserTimer = synchroniserTimer;
 
         // Rafraîchir immédiatement
         refreshTickets();
 
+        // Synchroniser le timer depuis le serveur après un court délai
+        // pour s'assurer que les éléments DOM sont disponibles
+        setTimeout(() => {
+            synchroniserTimer();
+        }, 200);
+
         // Configurer le bouton de rafraîchissement
         const refreshBtn = document.getElementById('refreshBtn');
         if (refreshBtn) {
-            refreshBtn.addEventListener('click', () => refreshTickets());
+            refreshBtn.addEventListener('click', () => {
+                refreshTickets();
+                synchroniserTimer();
+            });
         }
 
         // Le WebSocket mettra à jour automatiquement via handleWebSocketMessage
@@ -752,18 +863,23 @@ class App {
                 if (this.currentPage === 'dashboard' && data.timerTimeLeft && data.timerTimeLeft > 0) {
                     const totalDuration = data.timerTotalDuration || 120000;
                     if (this.dashboardDemarrerTimer) {
-                        this.dashboardDemarrerTimer(data.timerTimeLeft, totalDuration);
+                        // Petit délai pour s'assurer que initDashboard est terminé
+                        setTimeout(() => {
+                            if (this.dashboardDemarrerTimer) {
+                                this.dashboardDemarrerTimer(data.timerTimeLeft, totalDuration);
+                            }
+                        }, 100);
+                    } else {
+                        console.warn('⚠️ dashboardDemarrerTimer non disponible, initDashboard pas encore terminé');
                     }
                 }
                 // Synchroniser l'état de la course si elle est en cours
+                // Note: betFrameOverlay est géré par main.js
                 if (this.currentPage === 'dashboard' && data.isRaceRunning && data.raceStartTime) {
-                    this.showRaceOverlay(data.raceStartTime);
                     // Arrêter le timer pendant la course
                     if (this.dashboardArreterTimer) {
                         this.dashboardArreterTimer();
                     }
-                } else if (this.currentPage === 'dashboard') {
-                    this.hideRaceOverlay();
                 }
                 // Rafraîchir immédiatement pour avoir les données à jour
                 if (this.currentPage === 'dashboard' && this.dashboardRefreshTickets) {
@@ -777,10 +893,7 @@ class App {
             case 'new_round':
                 console.log('🆕 Nouveau tour:', data.roundId || data.game?.id);
                 const newRoundId = data.roundId || data.game?.id || data.currentRound?.id;
-                // Cacher l'overlay de course
-                if (this.currentPage === 'dashboard') {
-                    this.hideRaceOverlay();
-                }
+                // Note: betFrameOverlay est caché par main.js quand nouveau round différent
                 // Mettre à jour le round actuel immédiatement
                 const currentRoundEl = document.getElementById('currentRound');
                 const currentRoundTimerEl = document.getElementById('currentRoundTimer');
@@ -793,14 +906,28 @@ class App {
                 // Démarrer le timer si disponible dans les données
                 if (this.currentPage === 'dashboard' && data.timer && data.timer.timeLeft > 0) {
                     if (this.dashboardDemarrerTimer) {
-                        this.dashboardDemarrerTimer(data.timer.timeLeft, data.timer.totalDuration || 120000);
+                        // Petit délai pour s'assurer que initDashboard est terminé
+                        setTimeout(() => {
+                            if (this.dashboardDemarrerTimer) {
+                                this.dashboardDemarrerTimer(data.timer.timeLeft, data.timer.totalDuration || 120000);
+                            }
+                        }, 100);
+                    } else {
+                        console.warn('⚠️ dashboardDemarrerTimer non disponible, initDashboard pas encore terminé');
                     }
                 } else if (this.currentPage === 'dashboard' && data.nextRoundStartTime) {
                     // Calculer le temps restant depuis nextRoundStartTime
                     const timeLeft = Math.max(0, data.nextRoundStartTime - Date.now());
                     if (timeLeft > 0 && this.dashboardDemarrerTimer) {
                         const totalDuration = data.timer?.totalDuration || 120000;
-                        this.dashboardDemarrerTimer(timeLeft, totalDuration);
+                        // Petit délai pour s'assurer que initDashboard est terminé
+                        setTimeout(() => {
+                            if (this.dashboardDemarrerTimer) {
+                                this.dashboardDemarrerTimer(timeLeft, totalDuration);
+                            }
+                        }, 100);
+                    } else if (timeLeft > 0) {
+                        console.warn('⚠️ dashboardDemarrerTimer non disponible, initDashboard pas encore terminé');
                     }
                 }
                 // Rafraîchir les données avec un petit délai pour laisser le serveur finaliser
@@ -828,20 +955,14 @@ class App {
                 if (this.currentPage === 'dashboard' && this.dashboardArreterTimer) {
                     this.dashboardArreterTimer();
                 }
-                // Afficher l'overlay de course si on est sur le dashboard
-                if (this.currentPage === 'dashboard') {
-                    this.showRaceOverlay(data.raceStartTime || Date.now());
-                }
+                // Note: betFrameOverlay est géré par main.js
                 // Notification
                 this.showToast(`🏁 Course démarrée - Round #${data.roundId || 'N/A'}`, 'info');
                 break;
 
             case 'race_end':
                 console.log('🏆 Course terminée - Round:', data.roundId, 'Gagnant:', data.winner);
-                // Cacher l'overlay de course
-                if (this.currentPage === 'dashboard') {
-                    this.hideRaceOverlay();
-                }
+                // Note: betFrameOverlay reste visible jusqu'à new_round (géré par main.js)
                 // Mettre à jour le round si nécessaire
                 if (data.roundId) {
                     const currentRoundEl = document.getElementById('currentRound');
@@ -888,73 +1009,8 @@ class App {
         }
     }
 
-    showRaceOverlay(raceStartTime) {
-        const overlay = document.getElementById('raceOverlay');
-        if (!overlay) return;
-
-        overlay.classList.remove('hidden');
-        overlay.style.pointerEvents = 'auto';
-
-        // Désactiver les interactions dans le dashboard
-        const dashboardContent = document.getElementById('page-dashboard');
-        if (dashboardContent) {
-            dashboardContent.style.pointerEvents = 'none';
-            dashboardContent.style.opacity = '0.6';
-        }
-
-        // Timer pour afficher le temps écoulé
-        const MOVIE_SCREEN_DURATION_MS = 20000; // 20 secondes
-        const FINISH_DURATION_MS = 5000; // 5 secondes
-        const TOTAL_RACE_TIME_MS = MOVIE_SCREEN_DURATION_MS + FINISH_DURATION_MS;
-
-        const timerEl = document.getElementById('raceTimer');
-        if (!timerEl) return;
-
-        let animationFrameId;
-        function updateTimer() {
-            const now = Date.now();
-            const elapsed = (now - raceStartTime) / 1000;
-            const remaining = Math.max(0, (TOTAL_RACE_TIME_MS / 1000) - elapsed);
-
-            if (remaining > 0 && overlay && !overlay.classList.contains('hidden')) {
-                timerEl.textContent = Math.ceil(remaining) + 's';
-                animationFrameId = requestAnimationFrame(updateTimer);
-            } else {
-                timerEl.textContent = 'Fin imminente...';
-                if (animationFrameId) cancelAnimationFrame(animationFrameId);
-            }
-        }
-
-        // Stocker l'animation frame pour pouvoir l'annuler
-        this.raceTimerAnimation = updateTimer;
-        updateTimer();
-    }
-
-    hideRaceOverlay() {
-        const overlay = document.getElementById('raceOverlay');
-        if (overlay) {
-            overlay.classList.add('hidden');
-            overlay.style.pointerEvents = 'none';
-        }
-
-        // Réactiver les interactions dans le dashboard
-        const dashboardContent = document.getElementById('page-dashboard');
-        if (dashboardContent) {
-            dashboardContent.style.pointerEvents = 'auto';
-            dashboardContent.style.opacity = '1';
-        }
-
-        const timerEl = document.getElementById('raceTimer');
-        if (timerEl) {
-            timerEl.textContent = '--s';
-        }
-
-        // Annuler l'animation du timer
-        if (this.raceTimerAnimation) {
-            cancelAnimationFrame(this.raceTimerAnimation);
-            this.raceTimerAnimation = null;
-        }
-    }
+    // Note: showRaceOverlay et hideRaceOverlay supprimées
+    // betFrameOverlay est maintenant géré uniquement par main.js
 
     init() {
         this.setupEventListeners();

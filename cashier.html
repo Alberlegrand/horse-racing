@@ -212,122 +212,12 @@
         function handleCashierWebSocketMessage(data) {
             console.log('📨 Cashier WebSocket:', data.event, 'Round:', data.roundId);
 
-            switch (data.event) {
-                case 'connected':
-                    // Synchroniser l'état initial complet
-                    console.log('🔌 Cashier connecté - Round:', data.roundId);
-                    if (data.isRaceRunning && data.raceStartTime) {
-                        showRaceOverlay(data.raceStartTime);
-                    } else {
-                        hideRaceOverlay();
-                    }
-                    // Notifier app.js si disponible pour synchronisation
-                    if (window.app && window.app.handleWebSocketMessage) {
-                        window.app.handleWebSocketMessage(data);
-                    }
-                    break;
-
-                case 'race_start':
-                    console.log('🏁 Course démarrée dans cashier - Round:', data.roundId);
-                    showRaceOverlay(data.raceStartTime || Date.now());
-                    // Notifier app.js
-                    if (window.app && window.app.handleWebSocketMessage) {
-                        window.app.handleWebSocketMessage(data);
-                    }
-                    break;
-
-                case 'race_end':
-                    console.log('🏆 Course terminée dans cashier - Round:', data.roundId, 'Gagnant:', data.winner?.name);
-                    hideRaceOverlay();
-                    // Notifier app.js
-                    if (window.app && window.app.handleWebSocketMessage) {
-                        window.app.handleWebSocketMessage(data);
-                    }
-                    break;
-
-                case 'new_round':
-                    console.log('🆕 Nouveau tour dans cashier - Round:', data.roundId || data.game?.id);
-                    hideRaceOverlay();
-                    // Notifier app.js
-                    if (window.app && window.app.handleWebSocketMessage) {
-                        window.app.handleWebSocketMessage(data);
-                    }
-                    break;
-
-                case 'receipt_added':
-                case 'receipt_deleted':
-                case 'receipt_paid':
-                    console.log('🎫 Ticket modifié dans cashier - Round:', data.roundId, 'Événement:', data.event);
-                    // Notifier app.js pour synchronisation
-                    if (window.app && window.app.handleWebSocketMessage) {
-                        window.app.handleWebSocketMessage(data);
-                    }
-                    break;
-
-                default:
-                    // Transférer tous les autres événements à app.js
-                    if (window.app && window.app.handleWebSocketMessage) {
-                        window.app.handleWebSocketMessage(data);
-                    }
-                    break;
-            }
-        }
-
-        function showRaceOverlay(raceStartTime) {
-            const overlay = document.getElementById('raceOverlay');
-            if (!overlay) return;
-
-            overlay.classList.remove('hidden');
-            overlay.style.pointerEvents = 'auto';
-
-            // Désactiver les interactions dans le dashboard
-            const dashboardContent = document.getElementById('page-dashboard');
-            if (dashboardContent) {
-                dashboardContent.style.pointerEvents = 'none';
-                dashboardContent.style.opacity = '0.6';
-            }
-
-            // Timer pour afficher le temps écoulé
-            const MOVIE_SCREEN_DURATION_MS = 20000; // 20 secondes
-            const FINISH_DURATION_MS = 5000; // 5 secondes
-            const TOTAL_RACE_TIME_MS = MOVIE_SCREEN_DURATION_MS + FINISH_DURATION_MS;
-
-            function updateTimer() {
-                const timerEl = document.getElementById('raceTimer');
-                if (!timerEl) return;
-
-                const now = Date.now();
-                const elapsed = (now - raceStartTime) / 1000;
-                const remaining = Math.max(0, (TOTAL_RACE_TIME_MS / 1000) - elapsed);
-
-                if (remaining > 0) {
-                    timerEl.textContent = Math.ceil(remaining) + 's';
-                    requestAnimationFrame(updateTimer);
-                } else {
-                    timerEl.textContent = 'Fin imminente...';
-                }
-            }
-
-            updateTimer();
-        }
-
-        function hideRaceOverlay() {
-            const overlay = document.getElementById('raceOverlay');
-            if (overlay) {
-                overlay.classList.add('hidden');
-                overlay.style.pointerEvents = 'none';
-            }
-
-            // Réactiver les interactions dans le dashboard
-            const dashboardContent = document.getElementById('page-dashboard');
-            if (dashboardContent) {
-                dashboardContent.style.pointerEvents = 'auto';
-                dashboardContent.style.opacity = '1';
-            }
-
-            const timerEl = document.getElementById('raceTimer');
-            if (timerEl) {
-                timerEl.textContent = '--s';
+            // DÉLÉGATION COMPLÈTE À app.js pour éviter les conflits d'overlays
+            // app.js est le gestionnaire central unique pour raceOverlay
+            if (window.app && window.app.handleWebSocketMessage) {
+                window.app.handleWebSocketMessage(data);
+            } else {
+                console.warn('⚠️ app.js non disponible, délégation impossible');
             }
         }
 

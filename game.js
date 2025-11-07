@@ -20,6 +20,7 @@ export const gameState = {
     raceStartTime: null, // Timestamp du début de la course actuelle (pour synchronisation)
     raceEndTime: null, // Timestamp de la fin de la course actuelle
     isRaceRunning: false, // Indique si une course est actuellement en cours
+    runningRoundData: null, // Sauvegarde de l'ancien round pendant qu'une course est en cours
 };
 
 function generateRoundId() {
@@ -79,7 +80,7 @@ export function startNewRound(broadcast) {
 
     // 3️⃣ Démarre le timer de 2 minutes pour le prochain lancement
     // Le timer commence MAINTENANT, après que le client ait cliqué sur "new_game"
-    const ROUND_WAIT_DURATION_MS = 120000; // 2 minutes (120000 ms)
+    const ROUND_WAIT_DURATION_MS = 180000; // 3 minutes (180000 ms)
     const now = Date.now();
     gameState.nextRoundStartTime = now + ROUND_WAIT_DURATION_MS;
     

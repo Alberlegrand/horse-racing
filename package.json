@@ -7,7 +7,17 @@
   "type": "module",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node server.js",
+    "dev": "nodemon server.js",
+    "build": "echo \"Aucun build spécifique requis : les assets statiques sont déjà prêts\"",
+    "vercel-build": "npm run build",
+    "deploy:vercel": "vercel deploy --prod --yes",
+    "deploy:netlify": "netlify deploy --prod --dir=static --functions=netlify/functions"
+  },
+  "engines": {
+    "node": ">=18.18.0",
+    "npm": ">=9.0.0"
   },
   "dependencies": {
     "body-parser": "^2.2.0",
@@ -18,5 +28,34 @@
     "pg": "^8.16.3",
     "uuid": "^13.0.0",
     "ws": "^8.18.3"
+  },
+  "devDependencies": {
+    "netlify-cli": "^17.22.0",
+    "vercel": "^33.2.0"
+  },
+  "netlify": {
+    "build": {
+      "command": "npm run build",
+      "publish": "static",
+      "functions": "netlify/functions"
+    },
+    "dev": {
+      "command": "npm run dev",
+      "targetPort": 8080,
+      "port": 8888,
+      "framework": "#static"
+    }
+  },
+  "vercel": {
+    "buildCommand": "npm run vercel-build",
+    "installCommand": "npm install",
+    "devCommand": "npm run dev",
+    "outputDirectory": "static",
+    "rewrites": [
+      {
+        "source": "/api/(.*)",
+        "destination": "/api/$1"
+      }
+    ]
   }
 }

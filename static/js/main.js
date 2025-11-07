@@ -57,6 +57,7 @@ let ws;
 let ticketToVoid = null;
 let wsRetryDelay = 1000;
 const wsRetryMax = 30000;
+let currentRoundId = null; // Track current round for overlay management
 
 /* -------------------------
    Helpers
@@ -212,43 +213,69 @@ function scheduleWsReconnect() {
 function handleWebSocketMessage(data) {
   console.log('📨 main.js WebSocket:', data.event, 'Round:', data.roundId);
 
-  // TOUJOURS transférer à app.js en premier pour une synchronisation complète
+  // TOUJOURS transférer à app.js EN PREMIER pour une synchronisation complète
   if (window.app && window.app.handleWebSocketMessage) {
     window.app.handleWebSocketMessage(data);
   }
 
+  // main.js gère UNIQUEMENT betFrameOverlay (overlay de l'iframe)
+  // Logique : afficher à race_start, cacher à new_round (round différent) pour permettre les paris
   const activePage = document.querySelector('.page-content:not(.hidden)')?.id || 'page-dashboard';
   if (!['page-course-chevaux', 'page-dashboard', 'page-cashier'].includes(activePage)) return;
 
-  if (data.event === 'new_round') {
-    const roundId = data.roundId || data.game?.id || data.currentRound?.id;
-    if (roundId) {
-      const currentRoundEl = document.getElementById('currentRound');
-      if (currentRoundEl) currentRoundEl.textContent = roundId;
+  if (data.event === 'connected') {
+    // Synchroniser l'état initial : si une course est en cours, afficher l'overlay
+    if (data.isRaceRunning && data.raceStartTime) {
+      const roundId = data.roundId || 'N/A';
+      currentRoundId = roundId;
+      const elapsed = Date.now() - data.raceStartTime;
+      const remaining = Math.max(0, 10000 - elapsed); // 10s max pour l'overlay
+      if (remaining > 0) {
+        setBetFrameDisabled(true, `Course en cours — Round ${roundId}`, remaining);
+      } else {
+        // L'overlay devrait déjà être terminé, permettre les paris
+        setBetFrameDisabled(false);
+      }
+    } else if (data.roundId) {
+      currentRoundId = data.roundId;
     }
-    // read duration if present (ms) or fallback to 10s
-    const durationMs = data.timer?.totalDuration || data.game?.launchDurationMs || data.game?.startInMs || 10000;
-    setBetFrameDisabled(true, roundId ? `Jeu lancé — round ${roundId}` : 'Jeu en cours — veuillez patienter...', durationMs);
-    if (typeof refreshTickets === 'function') {
-      setTimeout(() => refreshTickets(), 300);
-    }
+    
   } else if (data.event === 'race_start') {
-    // Désactiver le bet_frame pendant la course avec le roundId
+    // Afficher l'overlay quand la course démarre (empêcher les paris)
+    // L'overlay dure 10 secondes maximum, après quoi le nouveau round sera disponible
     const roundId = data.roundId || 'N/A';
-    setBetFrameDisabled(true, `Course en cours — Round ${roundId}`, 25000);
+    currentRoundId = roundId;
+    setBetFrameDisabled(true, `Course en cours — Round ${roundId}`, 10000); // 10 secondes max
+    
+  } else if (data.event === 'new_round') {
+    // Nouveau round disponible : permettre les paris même si la course précédente continue
+    const newRoundId = data.roundId || data.game?.id || data.currentRound?.id;
+    
+    if (newRoundId && newRoundId !== currentRoundId) {
+      // Nouveau round différent : cacher overlay et permettre les paris
+      // Ceci peut arriver pendant que la course précédente continue (isRaceRunning: true)
+      console.log(`✅ Nouveau round #${newRoundId} disponible pour les paris (course précédente: ${currentRoundId})`);
+      cancelLaunchCountdown();
+      setBetFrameDisabled(false);
+      reloadBetFrame();
+      currentRoundId = newRoundId;
+    } else if (!currentRoundId) {
+      // Premier round ou roundId initial
+      currentRoundId = newRoundId;
+      // Si la course n'est pas en cours, afficher l'overlay avec le timer du round
+      if (!data.isRaceRunning) {
+        const durationMs = data.timer?.totalDuration || data.game?.launchDurationMs || data.game?.startInMs || 10000;
+        setBetFrameDisabled(true, newRoundId ? `Jeu lancé — round ${newRoundId}` : 'Jeu en cours — veuillez patienter...', durationMs);
+      }
+    }
+    
   } else if (data.event === 'race_end') {
-    // stop countdown, enable and reload iframe
-    cancelLaunchCountdown();
-    setBetFrameDisabled(false);
-    reloadBetFrame();
-    if (typeof refreshTickets === 'function') {
-      setTimeout(() => refreshTickets(), 800);
-    }
-  } else if (data.event === 'ticket_update' || data.event === 'receipt_added' || data.event === 'receipt_deleted' || data.event === 'receipt_paid') {
-    if (typeof refreshTickets === 'function') {
-      setTimeout(() => refreshTickets(), 200);
-    }
+    // La course est terminée, mais l'overlay devrait déjà être caché (après 10s)
+    // Le nouveau round devrait déjà être disponible
+    console.log('🏆 Course terminée');
   }
+  
+  // Note: refreshTickets est déjà géré par app.js, pas besoin de le refaire ici
 }
 
 /* -------------------------
@@ -266,7 +293,12 @@ function updateTicketsTable(tickets) {
   }
 
   tickets.forEach(t => {
-    const total = (t.bets || []).reduce((s, b) => s + Number(b.value || 0), 0).toFixed(2);
+    // Calculer le total des mises (les valeurs sont en système, convertir en publique)
+    const total = (t.bets || []).reduce((s, b) => {
+      const valueSystem = Number(b.value || 0);
+      const valuePublic = Currency.systemToPublic(valueSystem);
+      return s + valuePublic;
+    }, 0).toFixed(Currency.visibleDigits);
     // Les tickets dans le dashboard proviennent du round actuel
     const createdTime = t.created_time || t.created_at || Date.now();
     
@@ -323,13 +355,21 @@ async function refreshTickets() {
 
 function updateStats(round) {
   const receipts = round?.receipts || [];
-  const total = receipts.reduce((sum, r) => sum + (r.bets||[]).reduce((s,b)=> s + Number(b.value||0),0), 0);
+  // Les valeurs bet.value sont en système, convertir en publique pour l'affichage
+  const total = receipts.reduce((sum, r) => {
+    const receiptsSum = (r.bets || []).reduce((s, b) => {
+      const valueSystem = Number(b.value || 0);
+      const valuePublic = Currency.systemToPublic(valueSystem);
+      return s + valuePublic;
+    }, 0);
+    return sum + receiptsSum;
+  }, 0);
 
   const totalBetsAmountEl = el('totalBetsAmount');
   const activeTicketsCountEl = el('activeTicketsCount');
   const currentRoundEl = el('currentRound');
 
-  if (totalBetsAmountEl) totalBetsAmountEl.textContent = `${total.toFixed(2)} HTG`;
+  if (totalBetsAmountEl) totalBetsAmountEl.textContent = `${total.toFixed(Currency.visibleDigits)} HTG`;
   if (activeTicketsCountEl) activeTicketsCountEl.textContent = receipts.length;
   if (currentRoundEl && round.id) currentRoundEl.textContent = round.id;
 }

@@ -4,10 +4,24 @@ import express from "express";
 // On suppose que gameState est un objet partagé que nous pouvons modifier
 import { gameState, startNewRound, wrap } from "../game.js";
 
+// Import des fonctions et constantes nécessaires pour créer un nouveau round
+const BASE_PARTICIPANTS = [
+    { number: 6, name: "De Bruyne", coeff: 5.5, family: 0, place: 0 },
+    { number: 7, name: "Ronaldo", coeff: 4.7, family: 1 },
+    { number: 8, name: "Mbappe", coeff: 7.2, family: 2 },
+    { number: 9, name: "Halland", coeff: 5.8, family: 3 },
+    { number: 10, name: "Messi", coeff: 8.1, family: 4 },
+    { number: 54, name: "Vinicius", coeff: 4.5, family: 5 }
+];
+
+function generateRoundId() {
+    return Math.floor(96908000 + Math.random() * 1000);
+}
+
 // --- CONFIGURATION ---
 // La valeur fixe que vous voulez pour l'intervalle d'attente.
 // Nous utilisons directement cette valeur (120000 ms = 2 minutes) et non un minuteur externe.
-const ROUND_WAIT_DURATION_MS = 120000; // 2 minutes (120000 ms) 
+const ROUND_WAIT_DURATION_MS = 180000; // 3 minutes (180000 ms) 
 
 // --- INITIALISATION DE L'ÉTAT ---
 // Stocke le timestamp exact du début du prochain round.
@@ -158,12 +172,75 @@ export default function createRoundsRouter(broadcast) {
             // IMPORTANT: La durée réelle du movie_screen côté client est ~20 secondes
             // On doit attendre 20 secondes avant d'envoyer race_end pour que movie_screen se termine
             const MOVIE_SCREEN_DURATION_MS = 20000; // 20 secondes pour movie_screen
+            const NEW_ROUND_PREPARE_DELAY_MS = 10000; // 10 secondes : créer le nouveau round pour permettre les paris
+            
+            // Créer le nouveau round après 10 secondes pour permettre aux caissiers de placer des paris
+            // même si la course précédente continue
+            setTimeout(() => {
+                console.log('🆕 Préparation du nouveau round (10s après le début de la course)');
+                
+                // Sauvegarder l'ancien round pour la fin de course
+                const oldRoundId = gameState.currentRound.id;
+                gameState.runningRoundData = JSON.parse(JSON.stringify(gameState.currentRound));
+                
+                // Créer le nouveau round maintenant
+                const newRoundId = generateRoundId();
+                const basePlaces = Array.from({ length: BASE_PARTICIPANTS.length }, (_, i) => i + 1);
+                
+                // Mélange Fisher-Yates
+                for (let i = basePlaces.length - 1; i > 0; i--) {
+                    const j = Math.floor(Math.random() * (i + 1));
+                    [basePlaces[i], basePlaces[j]] = [basePlaces[j], basePlaces[i]];
+                }
+                
+                // Créer le nouveau round et le mettre dans currentRound (les nouveaux tickets iront dans ce round)
+                const newRound = {
+                    id: newRoundId,
+                    participants: BASE_PARTICIPANTS.map((p, i) => ({
+                        ...p,
+                        place: basePlaces[i],
+                    })),
+                    receipts: [],
+                    lastReceiptId: 3,
+                    totalPrize: 0
+                };
+                
+                // Remplacer currentRound par le nouveau round (les tickets iront maintenant dans le nouveau round)
+                gameState.currentRound = newRound;
+                
+                // Démarre le timer de 2 minutes pour le prochain lancement
+                const ROUND_WAIT_DURATION_MS = 120000; // 2 minutes
+                const now = Date.now();
+                gameState.nextRoundStartTime = now + ROUND_WAIT_DURATION_MS;
+                
+                // Broadcast le nouveau round pour que les caissiers puissent commencer à placer des paris
+                broadcast({
+                    event: "new_round",
+                    roundId: newRoundId,
+                    game: JSON.parse(JSON.stringify(newRound)),
+                    currentRound: JSON.parse(JSON.stringify(newRound)),
+                    timer: {
+                        timeLeft: ROUND_WAIT_DURATION_MS,
+                        totalDuration: ROUND_WAIT_DURATION_MS,
+                        startTime: now,
+                        endTime: gameState.nextRoundStartTime
+                    },
+                    nextRoundStartTime: gameState.nextRoundStartTime,
+                    isRaceRunning: true, // La course précédente continue
+                    raceStartTime: gameState.raceStartTime,
+                    raceEndTime: null
+                });
+                
+                console.log(`✅ Nouveau round #${newRoundId} activé et disponible pour les paris (course précédente #${oldRoundId} continue)`);
+            }, NEW_ROUND_PREPARE_DELAY_MS);
             
             // Simule la durée de la course (20 secondes pour correspondre à movie_screen)
             setTimeout(() => {
                 
                 // --- VOTRE LOGIQUE DE JEU ORIGINALE (Règlement de la course) ---
-                const participants = Array.isArray(gameState.currentRound.participants) ? gameState.currentRound.participants : [];
+                // Utiliser les données de l'ancien round sauvegardé
+                const finishedRoundData = gameState.runningRoundData || gameState.currentRound;
+                const participants = Array.isArray(finishedRoundData.participants) ? finishedRoundData.participants : [];
                 if (participants.length === 0) {
                     console.error("finish: aucun participant -> annulation.");
                     return;
@@ -173,12 +250,13 @@ export default function createRoundsRouter(broadcast) {
                 
                 const winnerWithPlace = { ...winner, place: 1, family: winner.family ?? 0 };
 
-                gameState.currentRound.participants = participants.map(p =>
+                // Mettre à jour les participants dans finishedRoundData
+                finishedRoundData.participants = participants.map(p =>
                     (p.number === winner.number ? winnerWithPlace : p)
                 );
 
                 let totalPrizeAll = 0;
-                const receipts = Array.isArray(gameState.currentRound.receipts) ? gameState.currentRound.receipts : [];
+                const receipts = Array.isArray(finishedRoundData.receipts) ? finishedRoundData.receipts : [];
 
                 receipts.forEach(receipt => {
                     let totalPrizeForReceipt = 0;
@@ -196,23 +274,45 @@ export default function createRoundsRouter(broadcast) {
                     totalPrizeAll += totalPrizeForReceipt;
                 });
 
-                gameState.currentRound.totalPrize = totalPrizeAll;
+                // Utiliser les données de l'ancien round sauvegardé (avant qu'il soit remplacé par le nouveau round)
+                finishedRoundData.totalPrize = totalPrizeAll;
 
                 // Marque la fin de la course (fin du movie_screen, début du finish_screen)
                 gameState.raceEndTime = Date.now();
 
-                // Broadcast complet avec toutes les informations
+                // Archiver l'ancien round
+                const finishedRoundId = finishedRoundData.id;
+                if (finishedRoundId) {
+                    const finishedRound = {
+                        id: finishedRoundId,
+                        receipts: finishedRoundData.receipts || [],
+                        participants: finishedRoundData.participants || [],
+                        totalPrize: totalPrizeAll,
+                        winner: winnerWithPlace,
+                    };
+                    gameState.gameHistory.push(finishedRound);
+                    // Garde seulement les 10 derniers tours
+                    if (gameState.gameHistory.length > 10) gameState.gameHistory.shift();
+                }
+
+                // Nettoyer la sauvegarde de l'ancien round
+                gameState.runningRoundData = null;
+
+                // Broadcast complet avec toutes les informations de fin de course (utilise l'ancien round ID)
                 broadcast({
                     event: "race_end",
-                    roundId: gameState.currentRound.id,
+                    roundId: finishedRoundId, // Utilise l'ancien round ID pour la fin de course
                     winner: winnerWithPlace,
                     receipts: JSON.parse(JSON.stringify(receipts)),
-                    prize: gameState.currentRound.totalPrize,
-                    totalPrize: gameState.currentRound.totalPrize,
+                    prize: totalPrizeAll,
+                    totalPrize: totalPrizeAll,
                     raceEndTime: gameState.raceEndTime,
-                    currentRound: JSON.parse(JSON.stringify(gameState.currentRound)),
-                    participants: JSON.parse(JSON.stringify(gameState.currentRound.participants))
+                    currentRound: JSON.parse(JSON.stringify(finishedRoundData)), // Utilise les données de l'ancien round
+                    participants: finishedRoundData.participants || []
                 });
+                
+                // Le nouveau round est déjà dans currentRound et disponible pour les paris
+                console.log(`✅ Course #${finishedRoundId} terminée, nouveau round #${gameState.currentRound.id} actif`);
                 
                 // --- FIN DE VOTRE LOGIQUE DE JEU ORIGINALE ---
                 
@@ -222,11 +322,6 @@ export default function createRoundsRouter(broadcast) {
                     gameState.raceStartTime = null;
                     gameState.raceEndTime = null;
                 }, 5000); // Après 5 secondes de finish_screen
-                
-                // IMPORTANT: On ne démarre PAS le timer ici !
-                // Le timer sera démarré dans startNewRound() qui sera appelé APRÈS que le client
-                // ait terminé movie_screen (~20s) + finish_screen (~5s) et cliqué sur "new_game".
-                // Cela garantit que le timer de 30 secondes commence au bon moment.
 
             }, MOVIE_SCREEN_DURATION_MS); // 20s pour correspondre à la durée réelle du movie_screen
                                           // + 5s de finish_screen = 25s total

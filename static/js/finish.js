@@ -46,6 +46,20 @@ FinishScreenView.prototype.update = function (game) {
     this._updateTitle(game.id);
     this._updateWinner(game.getWinner());
     this._updateReceipts(game);
+    try {
+        var winner = game.getWinner();
+        // Émet un événement global pour que l'historique local se mette à jour
+        $(document).trigger('round_winner', [{
+            id: game.id,
+            winner: {
+                number: winner && winner.number,
+                name: winner && winner.name,
+                family: winner && winner.family
+            }
+        }]);
+    } catch (e) {
+        // silencieux
+    }
 };
 
 FinishScreenView.prototype._updateTitle = function (gameId) {

@@ -109,6 +109,8 @@ app.get("/course-chevaux", (req, res) => res.sendFile(path.join(__dirname, "./pa
 app.get("/dashboard", (req, res) => res.sendFile(path.join(__dirname, "./dashboard.html")));
 app.get("/bet_frame", (req, res) => res.sendFile(path.join(__dirname, "bet_frame.html")));
 app.get("/my-bets", (req, res) => res.sendFile(path.join(__dirname, "./static/pages", "my-bets.html")));
+app.get("/landing", (req, res) => res.sendFile(path.join(__dirname, "landing.html")));
+app.get("/screen", (req, res) => res.sendFile(path.join(__dirname, "screen.html")));
 
 
 

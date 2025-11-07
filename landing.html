@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>HIT Gambling - Jeux de paris en direct et virtuels</title>
+  <meta name="description" content="HIT Gambling - Création de jeux de paris, Live & Virtuels. Courses de chevaux, Keno, Bingo, Roulette et plus. Démo gratuite, assistance 24/7.">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="/fonts/Scada-Regular.ttf" as="font" type="font/ttf" crossorigin>
+  <link rel="stylesheet" href="/css/styles.css">
+  <link rel="stylesheet" href="/css/responsive.css">
+  <style>
+    /* Minimal overrides to ensure the page looks good even without bespoke CSS */
+    :root { --primary:#0f6; --dark:#0b0d12; --light:#f5f7fa; --muted:#aab2bd; }
+    body { margin:0; font-family: Arial, Helvetica, sans-serif; color:#e9ecf1; background:#0a0c10; }
+    a { color: var(--primary); text-decoration:none; }
+    header { position:sticky; top:0; z-index:50; background:rgba(7,9,13,0.9); border-bottom:1px solid rgba(255,255,255,0.06); backdrop-filter: blur(6px); }
+    .nav { max-width:1200px; margin:0 auto; display:flex; align-items:center; justify-content:space-between; padding:14px 20px; }
+    .brand { display:flex; align-items:center; gap:10px; font-weight:700; font-size:18px; color:#fff; }
+    .brand .dot { width:10px; height:10px; border-radius:50%; background:var(--primary); display:inline-block; box-shadow:0 0 12px var(--primary); }
+    .menu { display:flex; gap:18px; flex-wrap:wrap; }
+    .menu a { color:#dfe6ee; font-size:14px; opacity:.9; }
+    .menu a:hover { color:#fff; opacity:1; }
+    .cta { display:flex; gap:10px; }
+    .btn { padding:10px 14px; border:1px solid rgba(255,255,255,0.15); border-radius:8px; color:#fff; font-size:14px; background:transparent; }
+    .btn.primary { background:linear-gradient(135deg, #00cc66, #00ff88); color:#07110c; border:none; font-weight:700; }
+    .hero { background: linear-gradient(180deg, rgba(0,0,0,.35), rgba(0,0,0,.75)), url('/img/game_background.jpg') center/cover no-repeat; padding:80px 20px; text-align:center; }
+    .hero .wrap { max-width:980px; margin:0 auto; }
+    .hero h1 { margin:0 0 10px; font-size:42px; line-height:1.15; letter-spacing:.2px; }
+    .hero p { margin:0 auto 24px; max-width:800px; color:#ccd6e2; font-size:16px; }
+    .grid { max-width:1200px; margin:0 auto; padding:60px 20px; }
+    .section-title { font-size:26px; margin:0 0 12px; }
+    .section-sub { color:#9fb0c5; margin:0 0 26px; font-size:14px; }
+    .cards { display:grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap:16px; }
+    .card { background:#0e1218; border:1px solid rgba(255,255,255,0.06); border-radius:12px; padding:16px; }
+    .card h3 { margin:0 0 6px; font-size:16px; }
+    .card p { margin:0; color:#aab7c4; font-size:13px; }
+    .pill { display:inline-block; padding:6px 10px; border-radius:999px; border:1px solid rgba(255,255,255,0.12); font-size:12px; color:#cfe9da; background:rgba(0,255,136,0.06); }
+    .gallery { display:grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap:16px; }
+    .figure { position:relative; overflow:hidden; border-radius:12px; border:1px solid rgba(255,255,255,0.06); background:#0e1218; }
+    .figure img { width:100%; height:180px; object-fit:cover; display:block; opacity:.9; }
+    .figure .cap { position:absolute; left:0; right:0; bottom:0; padding:10px 12px; font-size:13px; background:linear-gradient(180deg, transparent, rgba(0,0,0,.7)); }
+    .cols { display:grid; grid-template-columns: 1fr; gap:18px; }
+    @media (min-width: 920px) { .cols { grid-template-columns: 1.2fr .8fr; } }
+    footer { border-top:1px solid rgba(255,255,255,0.06); background:#0b0f15; color:#9fb0c5; padding:26px 20px; font-size:13px; }
+    .foot { max-width:1200px; margin:0 auto; display:flex; flex-wrap:wrap; gap:10px; align-items:center; justify-content:space-between; }
+    .links { display:flex; gap:14px; flex-wrap:wrap; }
+    .downloads a { display:inline-block; margin-right:8px; margin-bottom:8px; }
+    .downloads .btn { border-color:#1d2a36; }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="nav">
+      <div class="brand">
+        <span class="dot"></span>
+        <span>HIT Gambling</span>
+      </div>
+      <nav class="menu">
+        <a href="#about">À propos</a>
+        <a href="#games">Jeux</a>
+        <a href="#clients">Nos clients</a>
+        <a href="#examples">Bet Shop</a>
+        <a href="#why">Pourquoi nous</a>
+        <a href="#downloads">Téléchargements</a>
+        <a href="#contact">Contact</a>
+      </nav>
+      <div class="cta">
+        <a class="btn" href="#contact">Demander une démo</a>
+        <a class="btn primary" href="/course-chevaux">Course de chevaux</a>
+      </div>
+    </div>
+  </header>
+
+  <section class="hero">
+    <div class="wrap">
+      <span class="pill">Création de jeux de paris</span>
+      <h1>Logiciels de jeux de paris pour des marchés mondiaux</h1>
+      <p>
+        Nous concevons des solutions clé en main pour les boutiques de paris, casinos et bars.
+        Offrez à vos clients des jeux en direct et virtuels, dont notre vedette&nbsp;: la
+        Course de Chevaux Virtuelle.
+      </p>
+      <div style="display:flex; gap:10px; justify-content:center; flex-wrap:wrap; margin-top:10px;">
+        <a class="btn primary" href="#games">Découvrir les jeux</a>
+        <a class="btn" href="#why">Pourquoi HIT Gambling</a>
+      </div>
+    </div>
+  </section>
+
+  <main>
+    <section id="about" class="grid">
+      <h2 class="section-title">À propos de nous</h2>
+      <p class="section-sub">Des solutions efficaces et rentables pour propriétaires de Betting Shops.</p>
+      <div class="cols">
+        <div>
+          <p>
+            HIT Gambling est une entreprise innovante de logiciels de jeux de paris. Notre objectif est de
+            maximiser rapidement et efficacement vos profits grâce à des jeux en direct et virtuels,
+            un déploiement rapide, une formation dédiée et une assistance <strong>24/7</strong>.
+          </p>
+          <p>
+            Nous proposons une période d'essai gratuite afin que vous puissiez comparer notre solution et
+            constater la différence.
+          </p>
+        </div>
+        <div class="card">
+          <h3>Notre schéma de travail</h3>
+          <p>Installation complète, formation, support permanent et optimisation continue.</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="games" class="grid">
+      <h2 class="section-title">Jeux Live et Virtuels</h2>
+      <p class="section-sub">Pariez simultanément sur plusieurs jeux avec une interface unifiée.</p>
+      <div class="cards">
+        <div class="card">
+          <h3>Course de Chevaux (Virtuel)</h3>
+          <p>Expérience immersive, cycles rapides, animations fluides. Intégré à notre système de tickets.</p>
+        </div>
+        <div class="card">
+          <h3>Keno</h3>
+          <p>Sessions fréquentes, résultats instantanés, idéal pour maximiser l'activité.</p>
+        </div>
+        <div class="card">
+          <h3>Bingo</h3>
+          <p>Ambiance conviviale et engagement social, configurable pour vos horaires.</p>
+        </div>
+        <div class="card">
+          <h3>Roulette</h3>
+          <p>Versions live et virtuelles, RTP configurable, rapports détaillés.</p>
+        </div>
+        <div class="card">
+          <h3>Fortune</h3>
+          <p>Jeu rapide et accessible avec forte rotation pour les bars et lounges.</p>
+        </div>
+      </div>
+      <div style="margin-top:16px;">
+        <a class="btn" href="/course-chevaux">Essayer la Course de Chevaux</a>
+      </div>
+    </section>
+
+    <section id="clients" class="grid">
+      <h2 class="section-title">Nos clients</h2>
+      <p class="section-sub">Betting Shops, Bars & Lounges, Casinos & Sportsbooks.</p>
+      <div class="cards">
+        <div class="card"><h3>Betting Shops</h3><p>Faible empreinte au sol, gestion des mises optimisée.</p></div>
+        <div class="card"><h3>Bars & Lounges</h3><p>Paris passifs pendant le service, fidélisation accrue.</p></div>
+        <div class="card"><h3>Casinos & Sportsbooks</h3><p>Parfait en intermatchs : courses de chevaux et lévriers virtuels.</p></div>
+      </div>
+    </section>
+
+    <section id="examples" class="grid">
+      <h2 class="section-title">Exemples de Bet Shops</h2>
+      <p class="section-sub">Nous opérons dans le monde entier et adaptons l'interface à votre clientèle.</p>
+      <div class="gallery">
+        <figure class="figure">
+          <img src="/img/1.png" alt="Exemple 1" />
+          <figcaption class="cap">Exemple d'implantation</figcaption>
+        </figure>
+        <figure class="figure">
+          <img src="/img/2.png" alt="Exemple 2" />
+          <figcaption class="cap">Espace compact pour petits shops</figcaption>
+        </figure>
+        <figure class="figure">
+          <img src="/img/3.png" alt="Exemple 3" />
+          <figcaption class="cap">Intégration multi-écrans</figcaption>
+        </figure>
+        <figure class="figure">
+          <img src="/img/4.png" alt="Exemple 4" />
+          <figcaption class="cap">Affichage des courses virtuelles</figcaption>
+        </figure>
+      </div>
+    </section>
+
+    <section id="why" class="grid">
+      <h2 class="section-title">Pourquoi nous choisir</h2>
+      <p class="section-sub">Service de proximité, meilleurs rendements, expertise marché.</p>
+      <div class="cols">
+        <div class="card">
+          <h3>Ce que nous faisons pour vous</h3>
+          <p>Essai gratuit, interface personnalisée, accès marchand pour gestion des fonds.</p>
+        </div>
+        <div class="card">
+          <h3>Notre différence</h3>
+          <p>Entreprise agile, support réactif, compréhension des tendances et de leur évolution.</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="downloads" class="grid">
+      <h2 class="section-title">Téléchargements</h2>
+      <p class="section-sub">Outils pour caisse, affichage TV et assistance distante.</p>
+      <div class="downloads">
+        <a class="btn" href="#">Cashier (~65 Mb)</a>
+        <a class="btn" href="#">Video TV (~110 Mb)</a>
+        <a class="btn" href="#">Game Terminal (~65 Mb)</a>
+        <a class="btn" href="#">Assistance Aspia (~10 Mb)</a>
+        <a class="btn" href="#">TeamViewer QS (~30 Mb)</a>
+      </div>
+    </section>
+
+    <section id="contact" class="grid">
+      <h2 class="section-title">Contact</h2>
+      <p class="section-sub">WhatsApp et e-mail disponibles 24/7.</p>
+      <div class="cards">
+        <div class="card">
+          <h3>WhatsApp</h3>
+          <p>+51 912 363 839</p>
+          <p>+44 7925 788863</p>
+        </div>
+        <div class="card">
+          <h3>E-mail</h3>
+          <p>contact@hit-gambling.example</p>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="foot">
+      <div>© <span id="year"></span> HIT Gambling. Tous droits réservés.</div>
+      <div class="links">
+        <a href="#about">À propos</a>
+        <a href="#games">Jeux</a>
+        <a href="#contact">Contact</a>
+      </div>
+    </div>
+  </footer>
+
+  <script>
+    document.getElementById('year').textContent = new Date().getFullYear();
+  </script>
+</body>
+</html>
+
+

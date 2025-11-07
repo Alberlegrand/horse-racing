@@ -2,7 +2,7 @@
 
 import express from "express";
 import { gameState, wrap } from "../game.js";
-import { escapeHtml } from "../utils.js";
+import { escapeHtml, systemToPublic } from "../utils.js";
 
 /**
  * Crée le routeur pour les "receipts" (tickets).
@@ -37,8 +37,10 @@ export default function createReceiptsRouter(broadcast) {
         const participant = bet.participant || {};
         const name = escapeHtml(participant.name || `N°${participant.number || "?"}`);
         const coeff = parseFloat(participant.coeff || 0);
-        const mise = parseFloat(bet.value || 0);
-        const gainPot = mise * coeff;
+        // Les valeurs bet.value sont en système, convertir en publique pour l'affichage
+        const miseSystem = parseFloat(bet.value || 0);
+        const mise = systemToPublic(miseSystem);
+        const gainPot = systemToPublic(miseSystem * coeff);
         totalMise += mise;
         totalGainPotentiel += gainPot;
         
@@ -272,8 +274,9 @@ export default function createReceiptsRouter(broadcast) {
         ? new Date(receipt.created_time).toLocaleString('fr-FR')
         : new Date().toLocaleString('fr-FR');
 
-      // Déterminer le résultat
-      const prize = parseFloat(receipt.prize || 0);
+      // Déterminer le résultat (receipt.prize est en système, convertir en publique)
+      const prizeSystem = parseFloat(receipt.prize || 0);
+      const prize = systemToPublic(prizeSystem);
       const hasWon = prize > 0;
       const status = hasWon ? 'GAGNÉ' : 'PERDU';
       const payoutAmount = hasWon ? prize : 0;
@@ -282,10 +285,11 @@ export default function createReceiptsRouter(broadcast) {
       const winner = (round.participants || []).find(p => p.place === 1);
       const winnerName = winner ? `${winner.name} (N°${winner.number})` : 'Non disponible';
 
-      // Calculer les totaux
+      // Calculer les totaux (les valeurs bet.value sont en système, convertir en publique)
       let totalMise = 0;
       receipt.bets.forEach(bet => {
-        totalMise += parseFloat(bet.value || 0);
+        const miseSystem = parseFloat(bet.value || 0);
+        totalMise += systemToPublic(miseSystem);
       });
 
       // Générer le HTML du décaissement
@@ -495,10 +499,19 @@ export default function createReceiptsRouter(broadcast) {
       }).filter(Boolean);
 
       // Utilise gameState
+      // IMPORTANT: Ne calculer le prize que si la course est terminée
+      // Un ticket ajouté pendant le round actuel doit rester en "pending" jusqu'à la fin de la course
       let prizeForThisReceipt = 0;
       const winner = Array.isArray(gameState.currentRound.participants) ? gameState.currentRound.participants.find(p => p.place === 1) : null;
-
-      if (Array.isArray(receipt.bets) && winner) {
+      
+      // Vérifier si la course est terminée
+      // Un round est terminé SEULEMENT si la course a été lancée ET terminée
+      // Cela garantit que les nouveaux tickets restent en "pending" tant que la course n'a pas été lancée
+      const isRaceFinished = gameState.raceEndTime !== null || 
+                             (gameState.raceStartTime !== null && !gameState.isRaceRunning && winner !== null);
+      
+      // Ne calculer le prize que si la course est terminée
+      if (isRaceFinished && Array.isArray(receipt.bets) && winner) {
         receipt.bets.forEach(bet => {
           if (Number(bet.number) === Number(winner.number)) {
             const betValue = Number(bet.value) || 0;
@@ -514,7 +527,11 @@ export default function createReceiptsRouter(broadcast) {
         receipt.created_time = new Date().toISOString();
       }
       // Mute gameState
-      gameState.currentRound.totalPrize = (gameState.currentRound.totalPrize || 0) + prizeForThisReceipt;
+      // IMPORTANT: Ne mettre à jour totalPrize que si la course est terminée
+      // Sinon, le totalPrize sera recalculé à la fin de la course
+      if (isRaceFinished) {
+        gameState.currentRound.totalPrize = (gameState.currentRound.totalPrize || 0) + prizeForThisReceipt;
+      }
       gameState.currentRound.receipts.push(receipt);
 
       console.log("Ticket ajouté ID :", receipt.id);
