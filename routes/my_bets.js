@@ -70,10 +70,54 @@ function formatTicket(receipt, roundId, defaultStatus = 'pending', isRoundFinish
     prize: systemToPublic(receipt.prize || 0), // Convertir prize de système à publique
     isPaid: receipt.isPaid || false,
     paidAt: receipt.paid_at || null,
-    isInCurrentRound: defaultStatus === 'pending' && !isRoundFinished // Indique si le ticket est dans le round actuel non terminé
+    isInCurrentRound: defaultStatus === 'pending' && !isRoundFinished, // Indique si le ticket est dans le round actuel non terminé
+    bets: receipt.bets || [] // Inclure les bets pour le rebet
   };
 }
 
+// GET /api/v1/my-bets/:id - Récupérer un ticket spécifique avec ses bets
+// IMPORTANT: Cette route doit être définie AVANT la route GET "/" pour éviter les conflits
+router.get("/:id", (req, res) => {
+  try {
+    const ticketId = parseInt(req.params.id, 10);
+    
+    if (isNaN(ticketId)) {
+      return res.status(400).json({ error: "ID de ticket invalide" });
+    }
+
+    // Chercher dans le round actuel
+    let receipt = gameState.currentRound.receipts.find(r => r.id === ticketId);
+    let roundId = gameState.currentRound.id;
+    let isRoundFinished = gameState.raceEndTime !== null || 
+                         (gameState.raceStartTime !== null && !gameState.isRaceRunning && 
+                          Array.isArray(gameState.currentRound.participants) && 
+                          gameState.currentRound.participants.some(p => p.place === 1));
+    
+    // Si pas trouvé, chercher dans l'historique
+    if (!receipt) {
+      for (const historicalRound of gameState.gameHistory) {
+        receipt = (historicalRound.receipts || []).find(r => r.id === ticketId);
+        if (receipt) {
+          roundId = historicalRound.id;
+          isRoundFinished = true;
+          break;
+        }
+      }
+    }
+
+    if (!receipt) {
+      return res.status(404).json({ error: "Ticket non trouvé" });
+    }
+
+    const ticket = formatTicket(receipt, roundId, isRoundFinished ? 'historical' : 'pending', isRoundFinished);
+    
+    return res.json(wrap(ticket));
+
+  } catch (error) {
+    console.error("Erreur sur /api/v1/my-bets/:id:", error);
+    return res.status(500).json({ error: "Erreur interne du serveur" });
+  }
+});
 
 // GET /api/v1/my-bets/
 router.get("/", (req, res) => {

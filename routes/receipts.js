@@ -554,26 +554,45 @@ export default function createReceiptsRouter(broadcast) {
 
     if (action === "delete") {
       const id = parseInt(req.query.id, 10);
-      const receipt = gameState.currentRound.receipts.find(r => r.id === id);
+      
+      // Chercher le ticket dans le round actuel
+      let receipt = gameState.currentRound.receipts.find(r => r.id === id);
+      let foundInCurrentRound = true;
+      
+      // Si pas trouvé dans le round actuel, chercher dans l'historique
+      if (!receipt) {
+        foundInCurrentRound = false;
+        for (const historicalRound of gameState.gameHistory) {
+          receipt = (historicalRound.receipts || []).find(r => r.id === id);
+          if (receipt) {
+            // On ne peut pas annuler un ticket de l'historique
+            return res.status(400).json({ 
+              error: "Impossible d'annuler un ticket d'un round terminé" 
+            });
+          }
+        }
+      }
       
       if (!receipt) {
-        return res.status(404).json({ error: "Ticket non trouvé dans le round actuel" });
+        return res.status(404).json({ error: "Ticket non trouvé" });
       }
 
-      // Vérifier si le round est terminé (si une course est en cours ou terminée)
-      const isRoundFinished = gameState.isRaceRunning || gameState.raceEndTime !== null;
-      
-      // Vérifier si le round a un gagnant (course terminée avec résultats)
-      const hasWinner = Array.isArray(gameState.currentRound.participants) && 
-                       gameState.currentRound.participants.some(p => p.place === 1);
-      
-      if (isRoundFinished || hasWinner) {
-        return res.status(400).json({ 
-          error: "Impossible d'annuler un ticket une fois le round terminé" 
+      // Vérifier si le round est réellement terminé (course lancée ET terminée)
+      // On ne doit bloquer l'annulation que si la course est terminée avec un gagnant.
+      const hasWinner = Array.isArray(gameState.currentRound.participants) &&
+                        gameState.currentRound.participants.some(p => p.place === 1);
+
+      const isRaceFinished = gameState.raceEndTime !== null ||
+                             (gameState.raceStartTime !== null && !gameState.isRaceRunning && hasWinner);
+
+      // Bloquer l'annulation uniquement si la course est réellement terminée
+      if (isRaceFinished) {
+        return res.status(400).json({
+          error: "Impossible d'annuler un ticket une fois la course terminée avec résultats"
         });
       }
       
-      // Mute gameState
+      // Supprimer le ticket du round actuel
       gameState.currentRound.receipts = gameState.currentRound.receipts.filter(r => r.id !== id);
       
       // Recalculer le totalPrize si nécessaire

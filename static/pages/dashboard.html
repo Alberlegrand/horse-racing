@@ -87,13 +87,13 @@
         </div>
     </div>
 
-    <!-- Panel Timer pour le lancement de la course -->
-    <section class="mb-6">
-        <div class="panel-timer bg-slate-800/95 rounded-xl p-4 shadow-xl border border-slate-700">
+    <!-- Panel Timer pour le lancement de la course - Compact -->
+    <section class="mb-4">
+        <div class="panel-timer bg-slate-800/95 rounded-lg p-3 shadow-xl border border-slate-700">
             <div class="panel-content">
-                <div class="panel-top flex justify-between items-center mb-2">
-                    <span id="currentRoundTimer" class="panel-text text-white font-bold text-lg">Round 0</span>
-                    <span id="timeRemainingDisplay" class="panel-text text-white font-bold text-lg">00:00</span>
+                <div class="panel-top flex justify-between items-center mb-1.5">
+                    <span id="currentRoundTimer" class="panel-text text-white font-bold text-base">Round 0</span>
+                    <span id="timeRemainingDisplay" class="panel-text text-white font-bold text-base">00:00</span>
                 </div>
                 <div class="progress-container">
                     <div id="progressBar" class="bg-green-500 rounded-full" style="width: 0%;"></div>
@@ -102,75 +102,62 @@
         </div>
     </section>
 
-    <!-- Stats Cards -->
-    <section class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
-        <div class="bg-slate-800 rounded-xl p-5 shadow">
-            <div class="text-xs text-slate-400 uppercase">Tour actuel</div>
-            <div id="currentRound" class="text-3xl font-bold mt-2">-</div>
+    <!-- Stats Cards - Compact -->
+    <section class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4 hidden">
+        <div class="bg-slate-800 rounded-lg p-3 shadow">
+            <div class="text-xs text-slate-400 uppercase mb-1">Tour actuel</div>
+            <div id="currentRound" class="text-2xl font-bold">-</div>
         </div>
-        <div class="bg-slate-800 rounded-xl p-5 shadow">
-            <div class="text-xs text-slate-400 uppercase">Total mises du jour</div>
-            <div id="totalBetsAmount" class="text-3xl font-bold mt-2 text-green-400">0 HTG</div>
+        <div class="bg-slate-800 rounded-lg p-3 shadow">
+            <div class="text-xs text-slate-400 uppercase mb-1">Total mises</div>
+            <div id="totalBetsAmount" class="text-2xl font-bold text-green-400">0 HTG</div>
         </div>
-        <div class="bg-slate-800 rounded-xl p-5 shadow">
-            <div class="text-xs text-slate-400 uppercase">Tickets actifs</div>
-            <div id="activeTicketsCount" class="text-3xl font-bold mt-2 text-yellow-400">0</div>
+        <div class="bg-slate-800 rounded-lg p-3 shadow">
+            <div class="text-xs text-slate-400 uppercase mb-1">Tickets actifs</div>
+            <div id="activeTicketsCount" class="text-2xl font-bold text-yellow-400">0</div>
         </div>
     </section>
 
-    <!-- Game Visualization -->
+    <!-- Game Visualization - Réduit pour éviter débordements -->
     <section class="grid grid-cols-1 mb-6">
-        <div class="bg-slate-800 rounded-xl p-6 min-h-[520px] flex flex-col overflow-hidden">
+        <div class="bg-slate-800 rounded-xl p-4 min-h-[500px] max-h-[600px] flex flex-col overflow-hidden">
             <div id="betFrameContainer" class="relative w-full flex-1 min-h-0 overflow-hidden">
                 <iframe id="betFrame" class="w-full h-full" src="/bet_frame" frameborder="0" allowfullscreen></iframe>
-                <div id="betFrameOverlay" class="absolute inset-0 bg-black/60 flex items-center justify-center text-white text-lg hidden pointer-events-auto transition-opacity duration-300 z-10">
-                  <div class="flex flex-col items-center gap-4">
-                    <div id="betFrameOverlayText" class="bg-black/50 px-4 py-2 rounded">Jeu en cours — veuillez patienter...</div>
-
-                    <!-- Progress bar + timer -->
-                    <div id="betLaunchProgress" class="w-11/12 max-w-lg bg-white/10 rounded-full h-3 overflow-hidden">
+                <div id="betFrameOverlay" class="absolute inset-0 bg-black/60 flex items-center justify-center text-white text-sm hidden pointer-events-auto transition-opacity duration-300 z-10">
+                  <div class="flex flex-col items-center gap-3">
+                    <div id="betFrameOverlayText" class="bg-black/50 px-3 py-1.5 rounded text-sm">Jeu en cours...</div>
+                    <div id="betLaunchProgress" class="w-11/12 max-w-md bg-white/10 rounded-full h-2 overflow-hidden">
                       <div id="betLaunchProgressBar" class="bg-green-400 h-full w-0" style="transition: width 0.2s linear;"></div>
                     </div>
-                    <div id="betLaunchTimer" class="text-sm opacity-80">--s</div>
+                    <div id="betLaunchTimer" class="text-xs opacity-80">--s</div>
                   </div>
                 </div>
             </div>
         </div>
     </section>
 
-    <!-- Tickets Table -->
-    <section class="bg-slate-800 rounded-xl p-4">
-        <div class="flex items-center justify-between mb-3">
-            <h3 class="font-semibold">Liste des tickets</h3>
-            <div class="flex items-center gap-2">
-                <input id="searchTicket" placeholder="Rechercher ID..."
-                    class="px-3 py-1 rounded-md bg-slate-900/50 text-sm" />
-                <select id="filterStatus" class="px-2 py-1 rounded-md bg-slate-900/50 text-sm">
-                    <option value="">Tous</option>
-                    <option value="pending">En attente</option>
-                    <option value="won">Gagné</option>
-                    <option value="lost">Perdu</option>
-                    <option value="cancelled">Annulé</option>
-                </select>
-            </div>
+    <!-- Tickets Table - Simplifié -->
+    <section class="bg-slate-800 rounded-xl p-3">
+        <div class="mb-3">
+            <h3 class="font-semibold text-sm">10 derniers tickets</h3>
         </div>
 
         <div class="overflow-x-auto">
-            <table class="w-full text-left">
-                <thead class="text-slate-400 text-xs uppercase">
+            <table class="w-full text-left text-sm">
+                <thead class="text-slate-400 text-xs uppercase border-b border-slate-700">
                     <tr>
-                        <th class="p-2">ID</th>
-                        <th class="p-2">Date</th>
-                        <th class="p-2">Course</th>
-                        <th class="p-2">Montant</th>
-                        <th class="p-2">Cote</th>
-                        <th class="p-2">Statut</th>
-                        <th class="p-2">Actions</th>
+                        <th class="p-1.5">ID</th>
+                        <th class="p-1.5">Date</th>
+                        <th class="p-1.5">Round</th>
+                        <th class="p-1.5">Montant</th>
+                        <th class="p-1.5">Cote</th>
+                        <th class="p-1.5">Statut</th>
+                        <th class="p-1.5">Actions</th>
                     </tr>
                 </thead>
                 <tbody id="ticketsTable" class="divide-y divide-slate-700">
                     <tr>
-                        <td colspan="7" class="p-4 text-slate-400">Chargement...</td>
+                        <td colspan="7" class="p-3 text-slate-400 text-center">Chargement...</td>
                     </tr>
                 </tbody>
             </table>
