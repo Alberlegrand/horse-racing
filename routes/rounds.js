@@ -20,7 +20,7 @@ function generateRoundId() {
 
 // --- CONFIGURATION ---
 // La valeur fixe que vous voulez pour l'intervalle d'attente.
-// Nous utilisons directement cette valeur (120000 ms = 2 minutes) et non un minuteur externe.
+// Nous utilisons directement cette valeur (180000 ms = 2 minutes) et non un minuteur externe.
 const ROUND_WAIT_DURATION_MS = 180000; // 3 minutes (180000 ms) 
 
 // --- INITIALISATION DE L'ÉTAT ---
@@ -207,9 +207,9 @@ export default function createRoundsRouter(broadcast) {
                 
                 // Remplacer currentRound par le nouveau round (les tickets iront maintenant dans le nouveau round)
                 gameState.currentRound = newRound;
-                
-                // Démarre le timer de 2 minutes pour le prochain lancement
-                const ROUND_WAIT_DURATION_MS = 120000; // 2 minutes
+
+                // Démarre le timer de 3 minutes pour le prochain lancement
+                const ROUND_WAIT_DURATION_MS = 180000; // 3 minutes
                 const now = Date.now();
                 gameState.nextRoundStartTime = now + ROUND_WAIT_DURATION_MS;
                 

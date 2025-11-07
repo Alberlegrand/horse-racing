@@ -128,7 +128,7 @@ class App {
         this.dashboardUpdateStats = null;
 
         // Variables pour le timer de lancement (identique à screen.html)
-        this.timerTotalDelayMs = 120000; // 2 minutes par défaut
+        this.timerTotalDelayMs = 180000; // 2 minutes par défaut
         this.timerTargetEndTime = 0; // Timestamp exact de la fin du compte à rebours
         this.timerCountdownInterval = null; // ID de l'intervalle pour la mise à jour de la barre
 
@@ -298,8 +298,8 @@ class App {
             }
         };
         
-        // Rendre la fonction accessible globalement
-        window.rebetTicket = rebetTicket;
+    // Rendre la fonction accessible globalement (délègue vers App)
+    window.rebetTicket = (id) => this.rebetTicket(id);
 
         /* -------------------------
            Fonction payTicket pour le dashboard
@@ -370,9 +370,9 @@ class App {
             );
         };
 
-        // Rendre les fonctions accessibles globalement
-        window.payTicket = payTicket;
-        window.cancelTicket = cancelTicket;
+    // Rendre les fonctions accessibles globalement
+    window.payTicket = payTicket;
+    window.cancelTicket = (id) => this.cancelTicket(id);
 
         /* -------------------------
            Rafraîchissement
@@ -448,16 +448,16 @@ class App {
                         timeLeft: data.timerTimeLeft,
                         totalDuration: data.timerTotalDuration
                     });
-                    this.dashboardDemarrerTimer(data.timerTimeLeft, data.timerTotalDuration || 120000);
+                    this.dashboardDemarrerTimer(data.timerTimeLeft, data.timerTotalDuration || 180000);
                 } else if (data.nextRoundStartTime) {
                     // Calculer le temps restant depuis nextRoundStartTime
                     const timeLeft = Math.max(0, data.nextRoundStartTime - Date.now());
                     if (timeLeft > 0) {
                         console.log('⏰ Synchronisation du timer depuis nextRoundStartTime:', {
                             timeLeft,
-                            totalDuration: data.timerTotalDuration || 120000
+                            totalDuration: data.timerTotalDuration
                         });
-                        this.dashboardDemarrerTimer(timeLeft, data.timerTotalDuration || 120000);
+                        this.dashboardDemarrerTimer(timeLeft, data.timerTotalDuration || 180000);
                     }
                 } else if (data.isRaceRunning) {
                     // Si une course est en cours, arrêter le timer
@@ -571,7 +571,7 @@ class App {
             }
 
             // Mettre à jour les variables
-            this.timerTotalDelayMs = totalDuration || 120000;
+            this.timerTotalDelayMs = totalDuration || 180000;
             this.timerTargetEndTime = Date.now() + (timeLeft || 0);
 
             // Mise à jour immédiate
@@ -923,9 +923,9 @@ class App {
             );
         }
 
-        // Rendre les fonctions accessibles globalement pour les onclick inline
-        window.payTicket = payTicket;
-        window.cancelTicket = cancelTicket;
+    // Rendre les fonctions accessibles globalement pour les onclick inline
+    window.payTicket = payTicket;
+    window.cancelTicket = (id) => this.cancelTicket(id);
 
         function updatePagination(p) {
             totalPages = p.totalPages || 1;
@@ -1022,14 +1022,16 @@ class App {
                 return;
             }
 
-            // Annuler
+            // Annuler (optionnel: un handler custom 'showVoidModal' peut être défini ailleurs)
             if (e.target.matches('[data-action="void"]') || e.target.closest('[data-action="void"]')) {
                 e.preventDefault();
                 const ticketId = e.target.dataset.id || e.target.closest('[data-action="void"]').dataset.id;
                 if (typeof showVoidModal === 'function') {
+                    // Si une fonction showVoidModal existe, déléguer et arrêter la propagation
                     showVoidModal(ticketId);
+                    return;
                 }
-                return;
+                // Sinon, laisser le gestionnaire global suivant prendre en charge (pas de return)
             }
 
             // Rebet
@@ -1256,6 +1258,186 @@ class App {
         });
     }
 
+        // Centralized cancel ticket method available across pages
+        async cancelTicket(ticketId) {
+            this.confirmModal(
+                `Confirmer l'annulation du ticket #${ticketId} ?`,
+                async () => {
+                    try {
+                        const res = await fetch(`/api/v1/receipts/?action=delete&id=${ticketId}`, { method: 'POST' });
+                        let data = null;
+                        try { data = await res.json(); } catch (e) { /* ignore */ }
+
+                        if (!res.ok) {
+                            const msg = data?.error || data?.message || `HTTP ${res.status}`;
+                            this.alertModal(msg, 'error');
+                            return;
+                        }
+
+                        this.alertModal(`✅ Ticket #${ticketId} annulé avec succès`, 'success');
+
+                        // Refresh currently visible list if available
+                        if (this.currentPage === 'dashboard' && typeof this.dashboardRefreshTickets === 'function') {
+                            this.dashboardRefreshTickets();
+                        }
+                        if (this.currentPage === 'my-bets' && typeof this.myBetsFetchMyBets === 'function') {
+                            this.myBetsFetchMyBets(1);
+                        }
+                    } catch (err) {
+                        console.error('Erreur cancelTicket:', err);
+                        this.alertModal(err.message || 'Impossible d\'annuler ce ticket.', 'error');
+                    }
+                }
+            );
+        }
+
+        // Centralized rebet method available across pages
+        async rebetTicket(ticketId) {
+            try {
+                // Récupérer le ticket original
+                const ticketRes = await fetch(`/api/v1/my-bets/${ticketId}`);
+                if (!ticketRes.ok) throw new Error(`Ticket #${ticketId} non trouvé`);
+                const ticketPayload = await ticketRes.json();
+                const originalTicket = ticketPayload?.data || ticketPayload;
+                const originalBets = originalTicket?.bets || [];
+
+                if (originalBets.length === 0) {
+                    this.alertModal('Ce ticket ne contient pas de paris réutilisables.', 'error');
+                    return;
+                }
+
+                // Récupérer le round actuel pour obtenir les participants
+                const roundRes = await fetch('/api/v1/rounds/', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ action: 'get' })
+                });
+                if (!roundRes.ok) throw new Error('Impossible de récupérer le round actuel');
+                const roundData = await roundRes.json();
+                const currentRound = roundData?.data || {};
+
+                // Ne pas rebet pendant une course en cours
+                if (currentRound.isRaceRunning) {
+                    this.alertModal('Impossible de rejouer ce ticket pendant que la course est en cours.', 'error');
+                    return;
+                }
+
+                const participants = currentRound.participants || [];
+
+                // Construire le formulaire HTML pour permettre à l'utilisateur d'ajuster les montants
+                const formHtml = originalBets.map((b, idx) => {
+                    // Use the original participant info (number, name, coeff) so rebet preserves the same participants and odds
+                    const origPart = b.participant || { number: b.number };
+                    const num = origPart.number ?? '';
+                    const participantLabel = origPart.name ? `${origPart.name} (N°${num})` : `N°${num}`;
+                    const coeffLabel = (typeof origPart.coeff !== 'undefined') ? ` — cote: x${Number(origPart.coeff).toFixed(2)}` : '';
+
+                    // Valeur publique par défaut (si value est en système)
+                    const defaultValue = (typeof window.Currency !== 'undefined' && typeof window.Currency.systemToPublic === 'function')
+                        ? window.Currency.systemToPublic(b.value || 0)
+                        : (b.value || 0);
+
+                    // Show the original public value as a placeholder, but reinitialize the field (empty value)
+                    const placeholderVal = (typeof defaultValue === 'object' && typeof defaultValue.toString === 'function') ? defaultValue.toString() : (Number(defaultValue || 0).toFixed((window.Currency && window.Currency.visibleDigits) || 2));
+                    return `
+                        <div class="mb-2">
+                            <label style="display:block;font-weight:600;margin-bottom:4px;">Pari ${idx+1}: ${participantLabel}${coeffLabel}</label>
+                            <input data-bet-index="${idx}" class="rebet-amount" type="number" step="0.01" min="0" value="" placeholder="${placeholderVal}" style="width:100%;padding:6px;border-radius:4px;border:1px solid #333;background:#0f1724;color:#fff;" />
+                        </div>
+                    `;
+                }).join('');
+
+                // Afficher le modal pour saisir les montants
+                this.showModal({
+                    title: `Rejouer le ticket #${ticketId}`,
+                    message: `<div id="rebetForm">${formHtml}</div>`,
+                    type: 'confirm',
+                    confirmText: 'Valider & Imprimer',
+                    cancelText: 'Annuler',
+                    confirmColor: 'bg-green-600 hover:bg-green-700',
+                    cancelColor: 'bg-slate-700 hover:bg-slate-600',
+                    onConfirm: async () => {
+                        try {
+                            // Récupérer les montants saisis
+                            const modalEl = document.getElementById('appModal');
+                            const inputs = modalEl.querySelectorAll('.rebet-amount');
+                            const newBets = [];
+                            inputs.forEach((inp, i) => {
+                                // Read user input; if empty, fall back to placeholder
+                                let raw = inp.value;
+                                if (!raw || raw === '') raw = inp.placeholder || '0';
+                                const userVal = Number(raw || 0);
+
+                                // Preserve the original participant object (number, name, coeff)
+                                const origPart = originalBets[i].participant || { number: originalBets[i].number };
+                                const participant = { number: origPart.number };
+                                if (typeof origPart.coeff !== 'undefined') participant.coeff = origPart.coeff;
+                                if (origPart.name) participant.name = origPart.name;
+
+                                // Multiply user input by 10^2 (×100) to produce the system value (cents)
+                                // Use Big if available for precise arithmetic
+                                let systemValue = 0;
+                                try {
+                                    if (typeof window.Big !== 'undefined') {
+                                        // scaled = round(userVal * 100)
+                                        const scaled = new Big(userVal).times(100).round(0, 0);
+                                        systemValue = (typeof scaled.toNumber === 'function') ? scaled.toNumber() : Number(scaled);
+                                    } else {
+                                        systemValue = Math.round(userVal * 100);
+                                    }
+                                } catch (err) {
+                                    console.warn('Currency scaling failed, falling back to Math.round:', err);
+                                    systemValue = Math.round(userVal * 100);
+                                }
+
+                                newBets.push({ participant, value: systemValue, prize: 0 });
+                            });
+
+                            if (newBets.length === 0) {
+                                this.alertModal('Aucun pari valide fourni pour le rebet.', 'error');
+                                return;
+                            }
+
+                            // Envoyer la requête de création de ticket
+                            const addRes = await fetch('/api/v1/receipts/?action=add', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ bets: newBets })
+                            });
+                            const addData = await addRes.json().catch(() => null);
+                            if (!addRes.ok) {
+                                throw new Error(addData?.error || addData?.message || `HTTP ${addRes.status}`);
+                            }
+
+                            const newId = addData?.data?.id || addData?.id || null;
+                            this.showToast(`✅ Ticket #${newId} créé avec succès (rebet de #${ticketId})`, 'success');
+
+                            // Ouvrir l'impression du ticket (même logique que le reste)
+                            if (newId) {
+                                window.open(`/api/v1/receipts/?action=print&id=${newId}`, '_blank');
+                            }
+
+                            // Rafraîchir les listes
+                            if (this.currentPage === 'dashboard' && typeof this.dashboardRefreshTickets === 'function') {
+                                this.dashboardRefreshTickets();
+                            }
+                            if (this.currentPage === 'my-bets' && typeof this.myBetsFetchMyBets === 'function') {
+                                this.myBetsFetchMyBets(1);
+                            }
+
+                        } catch (err) {
+                            console.error('Erreur lors du rebet (modal confirm):', err);
+                            this.alertModal(err.message || 'Erreur lors du rebet', 'error');
+                        }
+                    }
+                });
+
+            } catch (err) {
+                console.error('Erreur rebetTicket:', err);
+                this.alertModal(err.message || 'Erreur lors du rebet', 'error');
+            }
+        }
+
     logout() {
         this.confirmModal(
             'Êtes-vous sûr de vouloir vous déconnecter ?',
@@ -1336,7 +1518,7 @@ class App {
                 }
                 // Synchroniser le timer si disponible
                 if (this.currentPage === 'dashboard' && data.timerTimeLeft && data.timerTimeLeft > 0) {
-                    const totalDuration = data.timerTotalDuration || 120000;
+                    const totalDuration = data.timerTotalDuration || 180000;
                     if (this.dashboardDemarrerTimer) {
                         // Petit délai pour s'assurer que initDashboard est terminé
                         setTimeout(() => {
@@ -1384,7 +1566,7 @@ class App {
                         // Petit délai pour s'assurer que initDashboard est terminé
                         setTimeout(() => {
                             if (this.dashboardDemarrerTimer) {
-                                this.dashboardDemarrerTimer(data.timer.timeLeft, data.timer.totalDuration || 120000);
+                                this.dashboardDemarrerTimer(data.timer.timeLeft, data.timer.totalDuration || 180000);
                             }
                         }, 100);
                     } else {
@@ -1394,7 +1576,7 @@ class App {
                     // Calculer le temps restant depuis nextRoundStartTime
                     const timeLeft = Math.max(0, data.nextRoundStartTime - Date.now());
                     if (timeLeft > 0 && this.dashboardDemarrerTimer) {
-                        const totalDuration = data.timer?.totalDuration || 120000;
+                        const totalDuration = data.timer?.totalDuration || 180000;
                         // Petit délai pour s'assurer que initDashboard est terminé
                         setTimeout(() => {
                             if (this.dashboardDemarrerTimer) {
@@ -1490,6 +1672,10 @@ class App {
     init() {
         this.setupEventListeners();
         this.loadPage('dashboard');
+
+        // Exposer les helpers globaux pour qu'ils soient disponibles quel que soit la page
+        window.rebetTicket = (id) => this.rebetTicket(id);
+        window.cancelTicket = (id) => this.cancelTicket(id);
 
         // Initialiser WebSocket
         this.connectWebSocket();
