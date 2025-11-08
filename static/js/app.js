@@ -13,6 +13,7 @@ class App {
 
     constructor() {
         this.currentPage = 'dashboard';
+        this.isRaceRunning = false; // État de la course pour contrôler les boutons d'annulation
         this.pages = {
             // Use absolute paths to avoid relative-fetch issues when the app is loaded
             // from a nested route (e.g. /dashboard). Leading slash ensures fetch() hits
@@ -310,7 +311,7 @@ class App {
                 async () => {
                     try {
                         // 1. Ouvrir la fenêtre d'impression du décaissement
-                        const payoutWindow = window.open(`/api/v1/receipts/?action=payout&id=${ticketId}`, '_blank', 'width=800,height=600');
+                        //const payoutWindow = window.open(`/api/v1/receipts/?action=payout&id=${ticketId}`, '_blank', 'width=800,height=600');
                         
                         // Attendre un court délai pour que la fenêtre se charge
                         await new Promise(resolve => setTimeout(resolve, 500));
@@ -682,7 +683,20 @@ class App {
                     <td class="p-2">${ticket.id}</td>
                     <td class="p-2">${new Date(ticket.date).toLocaleString('fr-FR')}</td>
                     <td class="p-2">${ticket.roundId}</td>
-                    <td class="p-2">${ticket.totalAmount.toFixed(2)} HTG</td>
+                    <td class="p-2">
+                        ${ticket.bets.map(bet => `
+                            <div class="text-sm mb-1">
+                                <span title="Participant">#${bet.participant.number} ${bet.participant.name}</span>
+                                <span class="text-slate-400"> - </span>
+                                <span title="Mise">${(parseFloat(bet.value)/100).toFixed(2)} HTG</span>
+                                <span class="text-slate-400">×</span>
+                                <span title="Cote">${bet.participant.coeff}x</span>
+                                <span class="text-slate-400">=</span>
+                                <span title="Gain potentiel">${((parseFloat(bet.value)/100) * bet.participant.coeff).toFixed(2)} HTG</span>
+                            </div>
+                        `).join('')}
+                        <div class="text-xs text-slate-400 mt-1">Total: ${ticket.totalAmount.toFixed(2)} HTG</div>
+                    </td>
                     <td class="p-2">${ticket.avgCoeff.toFixed(2)}x</td>
                     <td class="p-2">${ticket.potentialWinnings.toFixed(2)} HTG</td>
                     <td class="p-2">${this.formatStatus(ticket.status)}</td>
@@ -859,19 +873,16 @@ class App {
                 `Confirmer le paiement du ticket #${id} ?<br><br>Le décaissement sera imprimé, puis le ticket sera marqué comme payé.`,
                 async () => {
                     try {
-                        // 1. Ouvrir la fenêtre d'impression du décaissement
-                        const payoutWindow = window.open(`/api/v1/receipts/?action=payout&id=${id}`, '_blank', 'width=800,height=600');
-                        
-                        // Attendre un court délai pour que la fenêtre se charge
-                        await new Promise(resolve => setTimeout(resolve, 500));
+                        // 1. Récupérer et imprimer le décaissement avec printJS
+                        const payoutRes = await fetch(`/api/v1/receipts/?action=payout&id=${id}`);
+                        const payoutHtml = await payoutRes.text();
+                        printJS({ printable: payoutHtml, type: 'raw-html' });
                         
                         // 2. Effectuer le paiement
-                        const res = await fetch(`/api/v1/my-bets/pay/${id}`, { method: 'POST' });
-                        const data = await res.json();
+                        const payRes = await fetch(`/api/v1/my-bets/pay/${id}`, { method: 'POST' });
+                        const data = await payRes.json();
                         
-                        if (!res.ok) {
-                            // Fermer la fenêtre d'impression si le paiement échoue
-                            if (payoutWindow) payoutWindow.close();
+                        if (!payRes.ok) {
                             throw new Error(data.error || data.message || "Erreur lors du paiement");
                         }
                         
@@ -880,7 +891,7 @@ class App {
                         
                         // 4. Message de confirmation
                         window.app.alertModal(
-                            `✅ Ticket #${id} payé avec succès (${data.data?.prize?.toFixed(2) || 'N/A'} HTG).<br><br>Le décaissement a été ouvert dans une nouvelle fenêtre pour impression.`,
+                            `✅ Ticket #${id} payé avec succès (${data.data?.prize?.toFixed(2) || 'N/A'} HTG).<br><br>Le décaissement a été envoyé à l'imprimante.`,
                             'success'
                         );
                         
@@ -1260,6 +1271,12 @@ class App {
 
         // Centralized cancel ticket method available across pages
         async cancelTicket(ticketId) {
+            // Vérifier si la course est en cours
+            if (this.isRaceRunning) {
+                this.alertModal('⚠️ Impossible d\'annuler un ticket pendant une course.', 'error');
+                return;
+            }
+
             this.confirmModal(
                 `Confirmer l'annulation du ticket #${ticketId} ?`,
                 async () => {
@@ -1549,6 +1566,8 @@ class App {
 
             case 'new_round':
                 console.log('🆕 Nouveau tour:', data.roundId || data.game?.id);
+                // Réinitialiser l'état de la course
+                this.isRaceRunning = false;
                 const newRoundId = data.roundId || data.game?.id || data.currentRound?.id;
                 // Note: betFrameOverlay est caché par main.js quand nouveau round différent
                 // Mettre à jour le round actuel immédiatement
@@ -1601,6 +1620,8 @@ class App {
 
             case 'race_start':
                 console.log('🏁 Course démarrée - Round:', data.roundId);
+                // Mettre à jour l'état de la course
+                this.isRaceRunning = true;
                 // Mettre à jour le round si nécessaire
                 if (data.roundId) {
                     const currentRoundEl = document.getElementById('currentRound');
@@ -1612,6 +1633,13 @@ class App {
                 if (this.currentPage === 'dashboard' && this.dashboardArreterTimer) {
                     this.dashboardArreterTimer();
                 }
+                // Rafraîchir les tickets pour masquer les boutons d'annulation
+                if (this.currentPage === 'dashboard' && this.dashboardRefreshTickets) {
+                    this.dashboardRefreshTickets();
+                }
+                if (this.currentPage === 'my-bets' && this.myBetsFetchMyBets) {
+                    this.myBetsFetchMyBets(1);
+                }
                 // Note: betFrameOverlay est géré par main.js
                 // Notification
                 this.showToast(`🏁 Course démarrée - Round #${data.roundId || 'N/A'}`, 'info');
@@ -1620,6 +1648,8 @@ class App {
             case 'race_end':
                 console.log('🏆 Course terminée - Round:', data.roundId, 'Gagnant:', data.winner);
                 // Note: betFrameOverlay reste visible jusqu'à new_round (géré par main.js)
+                // Réinitialiser l'état de la course
+                this.isRaceRunning = false;
                 // Mettre à jour le round si nécessaire
                 if (data.roundId) {
                     const currentRoundEl = document.getElementById('currentRound');
