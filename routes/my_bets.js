@@ -21,6 +21,7 @@ function formatTicket(receipt, roundId, defaultStatus = 'pending', isRoundFinish
   let totalCoeff = 0;
   let totalPotentialWinnings = 0;
   const betCount = receipt.bets?.length || 0;
+  const isMultibet = betCount > 1;
 
   if (betCount > 0) {
     receipt.bets.forEach(bet => {
@@ -64,13 +65,16 @@ function formatTicket(receipt, roundId, defaultStatus = 'pending', isRoundFinish
     date: receipt.created_time || new Date().toISOString(),
     roundId: roundId,
     totalAmount: totalAmount, // Valeur publique (convertie)
-    avgCoeff: (betCount > 0) ? (totalCoeff / betCount) : 0,
-    potentialWinnings: totalPotentialWinnings, // Valeur publique (convertie)
+    // Pour un ticket simple, exposer la cote; pour un multibet, ne PAS calculer/afficher une cote moyenne
+    avgCoeff: isMultibet ? null : (betCount > 0 ? (totalCoeff / betCount) : 0),
+    // Pour l'UX, éviter d'afficher un gain combiné pour les multibets. potentialWinnings vaut pour les tickets simples.
+    potentialWinnings: isMultibet ? null : totalPotentialWinnings, // Valeur publique (convertie) ou null pour multibet
     status: status,
     prize: systemToPublic(receipt.prize || 0), // Convertir prize de système à publique
     isPaid: receipt.isPaid || false,
     paidAt: receipt.paid_at || null,
     isInCurrentRound: defaultStatus === 'pending' && !isRoundFinished, // Indique si le ticket est dans le round actuel non terminé
+    isMultibet: isMultibet,
     bets: receipt.bets || [] // Inclure les bets pour le rebet
   };
 }
@@ -191,9 +195,9 @@ router.get("/", (req, res) => {
     
     // 4. Calculer les statistiques (basées sur les filtres)
     const totalBetAmount = filteredTickets.reduce((sum, t) => sum + t.totalAmount, 0);
-    const potentialWinnings = filteredTickets
-      .filter(t => t.status === 'pending')
-      .reduce((sum, t) => sum + t.potentialWinnings, 0);
+    const potentialWinnings = filteredTickets
+      .filter(t => t.status === 'pending')
+      .reduce((sum, t) => sum + (t.potentialWinnings || 0), 0);
     const activeTicketsCount = filteredTickets.filter(t => t.status === 'pending').length;
     
     const wonTickets = filteredTickets.filter(t => t.status === 'won').length;

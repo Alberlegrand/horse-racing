@@ -177,7 +177,9 @@ class App {
                 const roundId = t.roundId || '-';
                 const createdTime = t.date || t.created_time || t.created_at || Date.now();
                 const total = (t.totalAmount || 0).toFixed(2);
-                const avgCoeff = (t.avgCoeff || 0).toFixed(2);
+                const isMultibet = Array.isArray(t.bets) && t.bets.length > 1;
+                // For single bets, show the participant coeff; for multibets, show a compact label
+                const coeffLabel = isMultibet ? `Multibet (${t.bets.length})` : (t.bets && t.bets[0] && t.bets[0].participant ? `x${Number(t.bets[0].participant.coeff).toFixed(2)}` : (t.avgCoeff ? `x${Number(t.avgCoeff).toFixed(2)}` : '-'));
                 const hasPrize = t.prize && t.prize > 0;
                 // Permettre l'annulation tant que le statut est "pending"
                 const canCancel = t.status === 'pending';
@@ -189,7 +191,7 @@ class App {
                     <td class="p-2 text-slate-400 text-xs">${new Date(createdTime).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</td>
                     <td class="p-2 text-sm text-slate-300">#${roundId}</td>
                     <td class="p-2 text-sm font-semibold text-green-300">${total} HTG</td>
-                    <td class="p-2 text-sm text-slate-300">x${avgCoeff}</td>
+                    <td class="p-2 text-sm text-slate-300">${coeffLabel}</td>
                     <td class="p-2">${this.formatStatus(t.status || 'pending')}</td>
                     <td class="p-2">
                         <div class="flex gap-1 flex-wrap">
@@ -321,8 +323,6 @@ class App {
                         const data = await res.json();
                         
                         if (!res.ok) {
-                            // Fermer la fenêtre d'impression si le paiement échoue
-                            if (payoutWindow) payoutWindow.close();
                             throw new Error(data.error || data.message || "Erreur lors du paiement");
                         }
                         
@@ -339,9 +339,9 @@ class App {
                         console.error('Erreur payTicket:', err);
                         this.alertModal(err.message || 'Erreur lors du paiement', 'error');
                     }
-                }
-            );
-        };
+                } // end confirmModal callback
+            ); // end confirmModal
+        }; // end payTicket
 
         /* -------------------------
            Fonction cancelTicket pour le dashboard
@@ -684,7 +684,10 @@ class App {
                     <td class="p-2">${new Date(ticket.date).toLocaleString('fr-FR')}</td>
                     <td class="p-2">${ticket.roundId}</td>
                     <td class="p-2">
-                        ${ticket.bets.map(bet => `
+                        ${ticket.isMultibet ? `
+                            <div class="text-sm font-medium">Multibet (${ticket.bets.length} paris)</div>
+                            <div class="text-xs text-slate-400 mt-1">Total: ${ticket.totalAmount.toFixed(2)} HTG</div>
+                        ` : ticket.bets.map(bet => `
                             <div class="text-sm mb-1">
                                 <span title="Participant">#${bet.participant.number} ${bet.participant.name}</span>
                                 <span class="text-slate-400"> - </span>
@@ -695,15 +698,14 @@ class App {
                                 <span title="Gain potentiel">${((parseFloat(bet.value)/100) * bet.participant.coeff).toFixed(2)} HTG</span>
                             </div>
                         `).join('')}
-                        <div class="text-xs text-slate-400 mt-1">Total: ${ticket.totalAmount.toFixed(2)} HTG</div>
                     </td>
-                    <td class="p-2">${ticket.avgCoeff.toFixed(2)}x</td>
-                    <td class="p-2">${ticket.potentialWinnings.toFixed(2)} HTG</td>
+                    <td class="p-2">${ticket.isMultibet ? `Multibet (${ticket.bets.length})` : `${ticket.avgCoeff.toFixed(2)}x`}</td>
+                    <td class="p-2">${ticket.isMultibet ? '-' : `${ticket.potentialWinnings.toFixed(2)} HTG`}</td>
                     <td class="p-2">${this.formatStatus(ticket.status)}</td>
                     <td class="p-2">
                         <div class="flex items-center gap-2">
-                            <button onclick="window.open('/api/v1/receipts/?action=print&id=${ticket.id}', '_blank')" 
-                                    class="p-1 hover:bg-slate-600 rounded" title="Imprimer">
+                <button onclick="window.printTicket && window.printTicket(${ticket.id})" 
+                    class="p-1 hover:bg-slate-600 rounded" title="Imprimer">
                                 🖨️
                             </button>
                             ${ticket.status === 'won' ? 
@@ -812,7 +814,7 @@ class App {
                     <td class="p-2 text-sm text-slate-300">${formatDate(t.date)}</td>
                     <td class="p-2 text-sm text-slate-300">Course #${t.roundId}</td>
                     <td class="p-2 text-sm font-semibold">${t.totalAmount.toFixed(2)} HTG</td>
-                    <td class="p-2 text-sm text-slate-300">x${t.avgCoeff.toFixed(2)}</td>
+                    <td class="p-2 text-sm text-slate-300">${t.isMultibet ? `Multibet (${t.bets?.length || 0})` : (t.bets && t.bets[0] && t.bets[0].participant ? `x${Number(t.bets[0].participant.coeff).toFixed(2)}` : (t.avgCoeff ? `x${Number(t.avgCoeff).toFixed(2)}` : '-'))}</td>
                     <td class="p-2 text-sm ${hasPrize ? 'text-green-400 font-bold' : 'text-slate-400'}">
                         ${hasPrize ? `${t.prize.toFixed(2)} HTG` : '-'}
                     </td>
@@ -822,7 +824,7 @@ class App {
                     <td class="p-2 flex gap-2">
                         <!-- Bouton imprimer ticket (toujours visible) -->
                         <button class="px-2 py-1 bg-blue-600 hover:bg-blue-700 text-xs rounded" 
-                            onclick="window.open('/api/v1/receipts/?action=print&id=${t.id}', '_blank')"
+                            onclick="window.printTicket && window.printTicket(${t.id})"
                             title="Imprimer le ticket">
                             🖨️
                         </button>
@@ -830,8 +832,8 @@ class App {
                         <!-- Bouton imprimer décaissement (visible pour tickets perdus après fin du round, ou tous les tickets terminés) -->
                         ${(t.status === 'lost' && isRoundFinished) || (t.status === 'won' || t.status === 'paid') ? `
                             <button class="px-2 py-1 bg-purple-600 hover:bg-purple-700 text-xs rounded" 
-                                onclick="window.open('/api/v1/receipts/?action=payout&id=${t.id}', '_blank')"
-                                title="Imprimer le décaissement">
+                                onclick="window.payTicket && window.payTicket(${t.id})"
+                                title="Imprimer le décaissement & Payer">
                                 💰
                             </button>` : ''}
                         
@@ -1431,7 +1433,12 @@ class App {
 
                             // Ouvrir l'impression du ticket (même logique que le reste)
                             if (newId) {
-                                window.open(`/api/v1/receipts/?action=print&id=${newId}`, '_blank');
+                                if (typeof window.printTicket === 'function') {
+                                    window.printTicket(newId);
+                                } else {
+                                    // printTicket should always be present (printJS is guaranteed). If not, notify.
+                                    this.alertModal('Erreur: printTicket non disponible pour imprimer le ticket.', 'error');
+                                }
                             }
 
                             // Rafraîchir les listes
@@ -1706,6 +1713,22 @@ class App {
         // Exposer les helpers globaux pour qu'ils soient disponibles quel que soit la page
         window.rebetTicket = (id) => this.rebetTicket(id);
         window.cancelTicket = (id) => this.cancelTicket(id);
+        // Impression centralisée via printJS (printJS est garanti)
+        window.printTicket = async (id) => {
+            try {
+                const res = await fetch(`/api/v1/receipts/?action=print&id=${id}`);
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                const html = await res.text();
+                // printJS doit être présent sur la page
+                if (typeof printJS !== 'function') {
+                    throw new Error('printJS non trouvé sur la page');
+                }
+                printJS({ printable: html, type: 'raw-html' });
+            } catch (err) {
+                console.error('Erreur printTicket:', err);
+                this.showToast(err.message || 'Erreur impression', 'error');
+            }
+        };
 
         // Initialiser WebSocket
         this.connectWebSocket();

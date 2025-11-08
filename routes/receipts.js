@@ -285,12 +285,41 @@ export default function createReceiptsRouter(broadcast) {
       const winner = (round.participants || []).find(p => p.place === 1);
       const winnerName = winner ? `${winner.name} (N°${winner.number})` : 'Non disponible';
 
-      // Calculer les totaux (les valeurs bet.value sont en système, convertir en publique)
+      // Calculer les totaux et préparer le détail par pari
       let totalMise = 0;
-      receipt.bets.forEach(bet => {
+      let totalGainPari = 0;
+      const betsDetailHTML = receipt.bets.map(bet => {
+        const participant = bet.participant || {};
         const miseSystem = parseFloat(bet.value || 0);
-        totalMise += systemToPublic(miseSystem);
-      });
+        const mise = systemToPublic(miseSystem);
+        const coeff = parseFloat(participant.coeff || 0) || 0;
+        const isWin = winner && Number(bet.number) === Number(winner.number);
+        const gain = isWin ? systemToPublic(miseSystem * coeff) : 0;
+        totalMise += mise;
+        totalGainPari += gain;
+
+        return `
+          <div class="info-line">
+            <span class="info-label">#${escapeHtml(String(participant.number || bet.number || '?'))} ${escapeHtml(String(participant.name || ''))}</span>
+            <span>${mise.toFixed(2)} HTG</span>
+          </div>
+          <div class="info-line">
+            <span class="info-label">Cote</span>
+            <span>x${coeff.toFixed(2)}</span>
+          </div>
+          <div class="info-line">
+            <span class="info-label">Résultat</span>
+            <span>${isWin ? 'GAGNÉ' : 'PERDU'}</span>
+          </div>
+          <div class="info-line">
+            <span class="info-label">Gain pari</span>
+            <span>${gain.toFixed(2)} HTG</span>
+          </div>
+          <hr class="divider" />`;
+      }).join('');
+
+      // Le montant total du décaissement est la somme des gains par pari (chaque pari est traité individuellement)
+      const payoutAmountComputed = totalGainPari;
 
       // Générer le HTML du décaissement
       const payoutHTML = `
@@ -429,6 +458,9 @@ export default function createReceiptsRouter(broadcast) {
             <span>${totalMise.toFixed(2)} HTG</span>
           </div>
 
+          <h3 style="margin-top:12px;">Détail des paris</h3>
+          ${betsDetailHTML}
+
           ${hasWon ? `
           <div class="winner-info">
             <strong>Gagnant de la course :</strong><br>
@@ -438,7 +470,7 @@ export default function createReceiptsRouter(broadcast) {
 
           <div class="payout-amount">
             <div class="payout-amount-label">MONTANT DU DÉCAISSEMENT</div>
-            <div class="payout-amount-value">${payoutAmount.toFixed(2)} HTG</div>
+            <div class="payout-amount-value">${payoutAmountComputed.toFixed(2)} HTG</div>
           </div>
 
           <hr class="divider">
