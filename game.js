@@ -1,5 +1,13 @@
 // game.js
 
+// Importer ChaCha20 RNG - cryptographiquement sécurisé pour les jeux d'argent
+import { chacha20Random, chacha20RandomInt, chacha20Shuffle, initChaCha20 } from './chacha20.js';
+import { pool } from './config/db.js';
+import { getNextRoundNumber } from './utils/roundNumberManager.js';
+
+// Initialiser ChaCha20 RNG au démarrage
+initChaCha20();
+
 // Données de base
 const BASE_PARTICIPANTS = [
     { number: 6, name: "De Bruyne", coeff: 5.5, family: 0, place: 0 },
@@ -24,7 +32,7 @@ export const gameState = {
 };
 
 function generateRoundId() {
-    return Math.floor(96908000 + Math.random() * 1000);
+    return Math.floor(96908000 + chacha20Random() * 1000);
 }
 
 // Simple helper pour envelopper les réponses
@@ -36,7 +44,7 @@ export function wrap(data) {
  * Archive le tour terminé et en démarre un nouveau.
  * @param {function} broadcast - La fonction pour notifier les clients WebSocket.
  */
-export function startNewRound(broadcast) {
+export async function startNewRound(broadcast) {
     console.log(`🏁 Fin du tour #${gameState.currentRound.id}. Archivage des résultats.`);
 
     // 1️⃣ Archive le tour complété
@@ -48,7 +56,12 @@ export function startNewRound(broadcast) {
             totalPrize: gameState.currentRound.totalPrize || 0,
             winner: (gameState.currentRound.participants || []).find(p => p.place === 1) || null,
         };
-        gameState.gameHistory.push(finishedRound);
+        // Evite la duplication accidentelle si un autre module a déjà archivé ce round
+        if (!gameState.gameHistory.some(r => r.id === finishedRound.id)) {
+            gameState.gameHistory.push(finishedRound);
+        } else {
+            console.warn(`startNewRound: round ${finishedRound.id} déjà présent dans gameHistory`);
+        }
 
         // Garde seulement les 10 derniers tours
         if (gameState.gameHistory.length > 10) gameState.gameHistory.shift();
@@ -58,33 +71,86 @@ export function startNewRound(broadcast) {
     const newRoundId = generateRoundId();
     const basePlaces = Array.from({ length: BASE_PARTICIPANTS.length }, (_, i) => i + 1);
 
-    // Mélange Fisher-Yates
-    for (let i = basePlaces.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [basePlaces[i], basePlaces[j]] = [basePlaces[j], basePlaces[i]];
-    }
+    // Mélange Fisher-Yates avec ChaCha20 (cryptographiquement sécurisé)
+    const shuffledPlaces = chacha20Shuffle(basePlaces);
 
     // !! IMPORTANT : On mute la propriété de l'objet gameState
     gameState.currentRound = {
         id: newRoundId,
         participants: BASE_PARTICIPANTS.map((p, i) => ({
             ...p,
-            place: basePlaces[i],
+            place: shuffledPlaces[i],
         })),
         receipts: [],
         lastReceiptId: 3,
         totalPrize: 0
     };
+    // Mark as not yet persisted in DB. Will be toggled after insert completes.
+    gameState.currentRound.persisted = false;
 
     console.log(`🚀 Nouveau tour #${gameState.currentRound.id} prêt à commencer !`);
 
+    // Persister le round en base de données IMMÉDIATEMENT (dans une fonction async/await)
+    const persistRound = async () => {
+        try {
+            const roundNum = getNextRoundNumber();
+            const insertRes = await pool.query(
+                `INSERT INTO rounds (round_id, round_number, status, created_at) 
+                 VALUES ($1, $2, 'waiting', CURRENT_TIMESTAMP) 
+                 ON CONFLICT (round_id) DO NOTHING
+                 RETURNING round_id`,
+                [newRoundId, roundNum]
+            );
+            console.log(`✅ Round #${roundNum} (ID: ${newRoundId}) créé en DB immédiatement`);
+            return true;
+        } catch (err) {
+            console.error('[DB] Erreur création round:', err);
+            return false;
+        }
+    };
+    // Await persistence so clients receive the new_round only after DB row exists.
+    const persisted = await persistRound();
+    gameState.currentRound.persisted = !!persisted;
+
     // 3️⃣ Démarre le timer de 2 minutes pour le prochain lancement
     // Le timer commence MAINTENANT, après que le client ait cliqué sur "new_game"
-    const ROUND_WAIT_DURATION_MS = 180000; // 3 minutes (180000 ms)
+    const ROUND_WAIT_DURATION_MS = process.env.ROUND_WAIT_DURATION_MS || 180000; // 3 minutes (60000 ms)
     const now = Date.now();
     gameState.nextRoundStartTime = now + ROUND_WAIT_DURATION_MS;
     
     console.log(`⏰ Timer démarré : nouveau tour dans ${ROUND_WAIT_DURATION_MS / 1000} secondes (fin: ${new Date(gameState.nextRoundStartTime).toLocaleTimeString()})`);
+
+    // Schedule a pre-start broadcast 5 seconds before the next round starts.
+    const schedulePreStart = (broadcastFn) => {
+        try {
+            // Clear any previous pre-start timer
+            if (gameState.preStartTimer) {
+                clearTimeout(gameState.preStartTimer);
+                gameState.preStartTimer = null;
+            }
+            const nowMs = Date.now();
+            const preStartTimeMs = gameState.nextRoundStartTime - 5000; // 5s before
+            const delay = preStartTimeMs - nowMs;
+            const doBroadcast = () => {
+                if (broadcastFn) {
+                    broadcastFn({
+                        event: 'pre_start',
+                        roundId: newRoundId,
+                        preStartAt: preStartTimeMs,
+                        countdownMs: 5000
+                    });
+                }
+            };
+            if (delay <= 0) {
+                // If less than 5s remains, broadcast immediately
+                doBroadcast();
+            } else {
+                gameState.preStartTimer = setTimeout(doBroadcast, delay);
+            }
+        } catch (e) {
+            console.error('[SCHED] Erreur schedulePreStart:', e && e.message ? e.message : e);
+        }
+    };
 
     // 4️⃣ Notifie les clients (via la fonction passée en paramètre)
     if (broadcast) {
@@ -104,6 +170,8 @@ export function startNewRound(broadcast) {
             raceStartTime: null,
             raceEndTime: null
         });
+            // schedule the pre-start overlay broadcast 5s before the next round
+            schedulePreStart(broadcast);
     } else {
         console.warn("startNewRound: 'broadcast' function non fournie.");
     }

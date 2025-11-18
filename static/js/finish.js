@@ -49,14 +49,19 @@ FinishScreenView.prototype.update = function (game) {
     try {
         var winner = game.getWinner();
         // Émet un événement global pour que l'historique local se mette à jour
-        $(document).trigger('round_winner', [{
+        // (déduplication : n'émet que si l'id du round n'a pas déjà été traité)
+        if (!window.__shownRoundWinnersSet) window.__shownRoundWinnersSet = new Set();
+        if (!window.__shownRoundWinnersSet.has(game.id)) {
+            window.__shownRoundWinnersSet.add(game.id);
+            $(document).trigger('round_winner', [{
             id: game.id,
             winner: {
                 number: winner && winner.number,
                 name: winner && winner.name,
                 family: winner && winner.family
             }
-        }]);
+            }]);
+        } // end dedup
     } catch (e) {
         // silencieux
     }

@@ -4,12 +4,18 @@ import cors from "cors";
 import path from "path";
 import { fileURLToPath } from "url";
 
+// Import ChaCha20 RNG pour la sécurité des positions (jeux d'argent)
+import { chacha20Random, chacha20RandomInt, chacha20Shuffle, initChaCha20 } from "./chacha20.js";
+
 // Recréation de __dirname (car non dispo en ES module)
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
 const PORT = 8080;
+
+// Initialiser ChaCha20 au démarrage du serveur
+initChaCha20();
 
 // =================================================================
 // ===           CONFIGURATION DU MIDDLEWARE                     ===
@@ -37,7 +43,7 @@ app.use('/fonts', express.static(path.join(__dirname, 'static', 'fonts')));
 // =================================================================
 
 function generateRoundId() {
-  return Math.floor(96908000 + Math.random() * 1000);
+  return Math.floor(96908000 + chacha20Random() * 1000);
 }
 
 // Données de base des participants qui seront réutilisées à chaque tour
@@ -90,18 +96,15 @@ function startNewRound(broadcast) {
   // Génère un tableau de places 1..N
   const basePlaces = Array.from({ length: BASE_PARTICIPANTS.length }, (_, i) => i + 1);
 
-  // Mélange les places avec Fisher-Yates pour avoir un ordre aléatoire
-  for (let i = basePlaces.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [basePlaces[i], basePlaces[j]] = [basePlaces[j], basePlaces[i]];
-  }
+  // Mélange les places avec Fisher-Yates ChaCha20 (cryptographiquement sécurisé pour jeux d'argent)
+  const shuffledPlaces = chacha20Shuffle(basePlaces);
 
   // Assigne les places uniques à chaque participant
   currentRound = {
     id: newRoundId,
     participants: BASE_PARTICIPANTS.map((p, i) => ({
       ...p,
-      place: basePlaces[i],
+      place: shuffledPlaces[i],
     })),
     receipts: [],         // <-- garantie : table des receipts vide pour chaque nouveau round
     lastReceiptId: 3,
@@ -184,7 +187,7 @@ app.post("/api/v1/rounds/", (req, res) => {
         return;
       }
 
-      const winner = participants[Math.floor(Math.random() * participants.length)];
+      const winner = participants[chacha20RandomInt(participants.length)];
       const winnerWithPlace = { ...winner, place: 1, family: winner.family ?? 0 };
 
       // Met à jour les places dans le tour courant
@@ -353,8 +356,8 @@ app.post("/api/v1/receipts/", (req, res) => {
     const receipt = req.body;
     console.log("Ajout d'un nouveau ticket de pari :", receipt);
 
-    // Génération d'un ID unique et aléatoire pour le ticket
-    receipt.id = Math.floor(Math.random() * 10000000000);
+    // Génération d'un ID unique et aléatoire pour le ticket avec ChaCha20
+    receipt.id = Math.floor(chacha20Random() * 10000000000);
 
     // S'assurer que receipt.bets existe
     receipt.bets = receipt.bets || [];

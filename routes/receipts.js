@@ -4,6 +4,13 @@ import express from "express";
 import { gameState, wrap } from "../game.js";
 import { escapeHtml, systemToPublic } from "../utils.js";
 
+// Import ChaCha20 pour les IDs de reçus sécurisés
+import { chacha20Random, chacha20RandomInt, initChaCha20 } from "../chacha20.js";
+import crypto from 'crypto';
+// DB models pour persistance des tickets
+import { createReceipt as dbCreateReceipt, createBet as dbCreateBet } from "../models/receiptModel.js";
+import { pool } from "../config/db.js";
+
 /**
  * Crée le routeur pour les "receipts" (tickets).
  * @param {function} broadcast - La fonction de diffusion WebSocket (optionnelle).
@@ -199,7 +206,7 @@ export default function createReceiptsRouter(broadcast) {
         <div class="receipt-container">
           
           <div class="header text-center">
-            <h2>🏇 PARYAJ CHEVAL</h2>
+            <h2>PARYAJ CHEVAL</h2>
             <p>
               Ticket #${receipt.id} | Tour #${gameState.currentRound.id}<br>
               ${escapeHtml(createdTime)}
@@ -322,183 +329,203 @@ export default function createReceiptsRouter(broadcast) {
       const payoutAmountComputed = totalGainPari;
 
       // Générer le HTML du décaissement
-      const payoutHTML = `
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Décaissement #${receipt.id}</title>
-        <style>
-          @media print {
-            @page {
-              margin: 15mm 10mm;
-              size: auto;
-            }
-            body {
-              margin: 0;
-              padding: 0;
-            }
-            .payout-container {
-              width: 100%;
-              max-width: 80mm;
-              margin: 0 auto;
-              padding: 20px !important;
-            }
-          }
-          body {
-            font-family: Arial, Helvetica, 'Segoe UI', sans-serif;
-            margin: 0;
-            padding: 10px;
-            background: white;
-          }
-          .payout-container {
-            font-family: Arial, Helvetica, 'Segoe UI', sans-serif;
-            width: 280px;
-            max-width: 280px;
-            margin: 0 auto;
-            padding: 20px;
-            border: 2px solid #000;
-            box-sizing: border-box;
-          }
-          .header {
-            text-align: center;
-            margin-bottom: 20px;
-          }
-          .header h2 {
-            margin: 0 0 10px 0;
-            font-size: 18px;
-            font-weight: bold;
-          }
-          .status-box {
-            text-align: center;
-            padding: 12px;
-            margin: 15px 0;
-            border: 2px solid;
-            border-radius: 8px;
-            font-size: 16px;
-            font-weight: bold;
-          }
-          .status-won {
-            background-color: #d4edda;
-            border-color: #28a745;
-            color: #155724;
-          }
-          .status-lost {
-            background-color: #f8d7da;
-            border-color: #dc3545;
-            color: #721c24;
-          }
-          .info-line {
-            display: flex;
-            justify-content: space-between;
-            padding: 8px 0;
-            font-size: 13px;
-            border-bottom: 1px dotted #ccc;
-          }
-          .info-label {
-            font-weight: bold;
-          }
-          .payout-amount {
-            text-align: center;
-            margin: 20px 0;
-            padding: 15px;
-            background-color: #f0f0f0;
-            border: 2px solid #000;
-            border-radius: 8px;
-          }
-          .payout-amount-label {
-            font-size: 12px;
-            color: #666;
-            margin-bottom: 5px;
-          }
-          .payout-amount-value {
-            font-size: 24px;
-            font-weight: bold;
-            color: #000;
-          }
-          .divider {
-            border: none;
-            border-top: 2px solid #000;
-            margin: 15px 0;
-          }
-          .winner-info {
-            background-color: #e7f3ff;
-            padding: 10px;
-            border-radius: 5px;
-            margin: 15px 0;
-            font-size: 12px;
-          }
-          .footer {
-            text-align: center;
-            margin-top: 20px;
-            font-size: 11px;
-            color: #666;
-          }
-        </style>
-      </head>
-      <body>
-        <div class="payout-container">
-          <div class="header">
-            <h2>💰 DÉCAISSEMENT</h2>
-            <p style="font-size: 12px; margin: 8px 0;">
-              Ticket #${receipt.id} | Tour #${round.id}<br>
-              ${escapeHtml(createdTime)}
-            </p>
-          </div>
+  const payoutHTML = `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Décaissement #${receipt.id}</title>
+  <style>
+    /* -------------------------------
+       IMPRESSION 55MM - NOIR ET BLANC
+       Lisible, centré, marges sûres
+    -------------------------------- */
+    * {
+      box-sizing: border-box;
+      background: #fff !important;
+      color: #000 !important;
+      font-family: 'Arial', sans-serif;
+      text-shadow: none !important;
+      box-shadow: none !important;
+    }
 
-          <hr class="divider">
+    body {
+      margin: 0;
+      padding: 4mm 3mm; /* Marges de sécurité pour éviter les coupures */
+      width: 49mm; /* Réduction pour ne pas coller aux bords physiques du rouleau */
+      font-size: 11px;
+      line-height: 1.3;
+    }
 
-          <div class="status-box ${hasWon ? 'status-won' : 'status-lost'}">
-            ${hasWon ? '✅ TICKET GAGNANT ✅' : '❌ TICKET PERDANT ❌'}
-          </div>
+    .payout-container {
+      width: 100%;
+      margin: 0 auto;
+    }
 
-          <div class="info-line">
-            <span class="info-label">Mise totale :</span>
-            <span>${totalMise.toFixed(2)} HTG</span>
-          </div>
+    /* En-tête */
+    .header {
+      text-align: center;
+      margin-bottom: 3mm;
+    }
 
-          <h3 style="margin-top:12px;">Détail des paris</h3>
-          ${betsDetailHTML}
+    .header h2 {
+      font-size: 14px;
+      margin: 0;
+      font-weight: bold;
+    }
 
-          ${hasWon ? `
-          <div class="winner-info">
-            <strong>Gagnant de la course :</strong><br>
-            ${escapeHtml(winnerName)}
-          </div>
-          ` : ''}
+    .header p {
+      font-size: 9px;
+      margin: 2px 0;
+    }
 
-          <div class="payout-amount">
-            <div class="payout-amount-label">MONTANT DU DÉCAISSEMENT</div>
-            <div class="payout-amount-value">${payoutAmountComputed.toFixed(2)} HTG</div>
-          </div>
+    /* Boîte de statut */
+    .status-box {
+      border: 1px solid #000;
+      text-align: center;
+      padding: 3px 0;
+      margin: 3mm 0;
+      font-size: 11px;
+      font-weight: bold;
+    }
 
-          <hr class="divider">
+    /* Lignes d’informations */
+    .info-line {
+      display: flex;
+      justify-content: space-between;
+      border-bottom: 1px dotted #000;
+      padding: 1.2mm 0;
+      font-size: 10px;
+    }
 
-          <div class="info-line">
-            <span class="info-label">Statut du paiement :</span>
-            <span>${receipt.isPaid ? '✅ Payé' : '⏳ En attente'}</span>
-          </div>
+    .info-label {
+      font-weight: bold;
+    }
 
-          ${receipt.isPaid && receipt.paid_at ? `
-          <div class="info-line">
-            <span class="info-label">Date de paiement :</span>
-            <span>${new Date(receipt.paid_at).toLocaleString('fr-FR')}</span>
-          </div>
-          ` : ''}
+    /* Section Montant */
+    .payout-amount {
+      text-align: center;
+      margin: 3mm 0;
+      border: 1px solid #000;
+      border-radius: 3px;
+      padding: 2mm 0;
+    }
 
-          <hr class="divider">
+    .payout-amount-label {
+      font-size: 9px;
+      margin-bottom: 2px;
+    }
 
-          <div class="footer">
-            <p>
-              Ce document prouve le résultat du ticket.<br>
-              Conservez-le comme justificatif.
-            </p>
-          </div>
-        </div>
-      </body>
-      </html>
-      `;
+    .payout-amount-value {
+      font-size: 16px;
+      font-weight: bold;
+    }
+
+    /* Détails des paris */
+    h3 {
+      font-size: 11px;
+      margin: 3mm 0 1.5mm 0;
+      text-align: left;
+      font-weight: bold;
+      border-bottom: 1px solid #000;
+      padding-bottom: 1mm;
+    }
+
+    /* Informations gagnant */
+    .winner-info {
+      border: 1px solid #000;
+      padding: 2mm;
+      font-size: 10px;
+      margin: 3mm 0;
+      border-radius: 2px;
+    }
+
+    /* Ligne séparatrice */
+    .divider {
+      border-top: 1px solid #000;
+      margin: 2.5mm 0;
+    }
+
+    /* Pied de page */
+    .footer {
+      text-align: center;
+      font-size: 9px;
+      margin-top: 4mm;
+      line-height: 1.4;
+    }
+
+    /* Impression stricte */
+    @media print {
+      @page {
+        size: 55mm auto;
+        margin: 0;
+      }
+      body {
+        width: 49mm; /* laisse ~3mm de marge de sécurité de chaque côté */
+        padding: 4mm 3mm;
+        font-size: 11px;
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <div class="payout-container">
+    <div class="header">
+      <h2>DECAISSEMENT</h2>
+      <p>Ticket #${receipt.id} | Tour #${round.id}<br>${escapeHtml(createdTime)}</p>
+    </div>
+
+    <hr class="divider">
+
+    <div class="status-box">
+      ${hasWon ? '*** TICKET GAGNANT ***' : '*** TICKET PERDANT ***'}
+    </div>
+
+    <div class="info-line">
+      <span class="info-label">Mise totale :</span>
+      <span>${totalMise.toFixed(2)} HTG</span>
+    </div>
+
+    <h3>Détail des paris</h3>
+    ${betsDetailHTML}
+
+    ${hasWon ? `
+    <div class="winner-info">
+      <strong>Gagnant de la course :</strong><br>
+      ${escapeHtml(winnerName)}
+    </div>` : ''}
+
+    <div class="payout-amount">
+      <div class="payout-amount-label">MONTANT DU DECAISSEMENT</div>
+      <div class="payout-amount-value">${payoutAmountComputed.toFixed(2)} HTG</div>
+    </div>
+
+    <hr class="divider">
+
+    <div class="info-line">
+      <span class="info-label">Statut du paiement :</span>
+      <span>${receipt.isPaid ? 'Payé' : 'En attente'}</span>
+    </div>
+
+    ${receipt.isPaid && receipt.paid_at ? `
+    <div class="info-line">
+      <span class="info-label">Date de paiement :</span>
+      <span>${new Date(receipt.paid_at).toLocaleString('fr-FR')}</span>
+    </div>` : ''}
+
+    <hr class="divider">
+
+    <div class="footer">
+      <p>Ce document prouve le résultat du ticket.<br>Conservez-le comme justificatif.</p>
+    </div>
+  </div>
+</body>
+</html>
+`;
+
+
 
       res.setHeader("Content-Type", "text/html");
       return res.send(payoutHTML);
@@ -509,14 +536,50 @@ export default function createReceiptsRouter(broadcast) {
 
 
   // POST /api/v1/receipts/?action=add or ?action=delete&id=...
-  router.post("/", (req, res) => {
+  router.post("/", async (req, res) => {
     const action = req.query.action || "add";
 
     if (action === "add") {
+      // ✅ Vérification: Un ticket ne peut être créé QUE si un round est actif et prêt
+      if (!gameState.currentRound || !gameState.currentRound.id) {
+        console.warn("[SYNC] ❌ Impossible créer ticket: aucun round actif");
+        return res.status(409).json({
+          error: "Aucun round prêt. Veuillez attendre le prochain tirage.",
+          code: "NO_ACTIVE_ROUND"
+        });
+      }
+
+      // If the currentRound hasn't been persisted to DB yet, wait up to 5s for persistence.
+      // This avoids creating receipts referencing a round that doesn't yet exist in DB
+      // and prevents FK errors / nullable round fallback.
+      const waitForPersist = async (timeoutMs = 5000, intervalMs = 100) => {
+        const start = Date.now();
+        while (!gameState.currentRound.persisted && (Date.now() - start) < timeoutMs) {
+          await new Promise(r => setTimeout(r, intervalMs));
+        }
+        return !!gameState.currentRound.persisted;
+      };
+
+      const persisted = await waitForPersist(5000, 100);
+      if (!persisted) {
+        // If round still not persisted after waiting, reject the request so client can retry.
+        console.warn('[DB] ❌ currentRound not persisted after wait - ask client to retry');
+        return res.status(503).json({ error: 'Round not ready. Please retry in a moment.', code: 'ROUND_NOT_PERSISTED' });
+      }
+
       const receipt = req.body;
       console.log("Ajout d'un nouveau ticket :", receipt);
 
-      receipt.id = Math.floor(Math.random() * 10000000000);
+      // Génération d'un ID formaté : <stationNumber><6chiffres>
+      // - `STATION_NUMBER` peut être fourni via la variable d'environnement pour représenter la succursale.
+      // - Par défaut on utilisera la valeur fictive '01' (modifiable si besoin).
+      // Exemple: station '01' + '034521' => receipt.id = 01034521
+      const STATION_NUMBER = (process.env.STATION_NUMBER || '01').toString();
+      // Générer 6 chiffres via crypto.randomInt (plus robuste que RNG JS pour éviter collisions)
+      const seq6 = String(crypto.randomInt(0, 1000000)).padStart(6, '0');
+      const composedIdStr = `${STATION_NUMBER}${seq6}`;
+      const numericId = Number(composedIdStr);
+      receipt.id = Number.isSafeInteger(numericId) ? numericId : composedIdStr;
       receipt.bets = (receipt.bets || []).map(bet => {
         if (!bet.participant || bet.participant.number === undefined) {
           console.warn("Bet sans participant valide :", bet);
@@ -566,6 +629,144 @@ export default function createReceiptsRouter(broadcast) {
       }
       gameState.currentRound.receipts.push(receipt);
 
+      // --- Persistance en base de données (asynchrone, avec retry pour FK) ---
+      (async () => {
+        // Attendre que le round soit créé en DB (avec retry)
+        const waitForRound = async (roundId, maxRetries = 50, delayMs = 100) => {
+          for (let i = 0; i < maxRetries; i++) {
+            try {
+              const res = await pool.query("SELECT round_id FROM rounds WHERE round_id = $1 LIMIT 1", [roundId]);
+              if (res.rows && res.rows[0]) {
+                console.log(`[DB] ✓ Round ${roundId} trouvé en DB après ${i * delayMs}ms`);
+                return true;
+              }
+            } catch (err) {
+              console.error('[DB] Erreur lookup round:', err.message);
+            }
+            if (i < maxRetries - 1) {
+              await new Promise(resolve => setTimeout(resolve, delayMs));
+            }
+          }
+          console.warn(`[DB] ⚠️ Round ${roundId} non trouvé après ${maxRetries * delayMs}ms`);
+          return false;
+        };
+
+        // Vérifier que le round existe avant de persister le receipt
+        const roundExists = await waitForRound(gameState.currentRound.id);
+        if (!roundExists) {
+          console.warn('[DB] ⚠️ Round FK check failed, but continuing (will use nullable round_id)');
+        }
+
+        let dbReceipt = null;
+        // Helper to generate a new formatted receipt id (stationNumber + 6 digits)
+        const generateFormattedId = () => {
+          const STATION_NUMBER = (process.env.STATION_NUMBER || '01').toString();
+          const seq6 = String(crypto.randomInt(0, 1000000)).padStart(6, '0');
+          const composed = `${STATION_NUMBER}${seq6}`;
+          const num = Number(composed);
+          return Number.isSafeInteger(num) ? num : composed;
+        };
+
+        try {
+          // calculer total_amount (somme des mises en valeur publique)
+          const totalAmount = (receipt.bets || []).reduce((sum, b) => sum + (Number(b.value) || 0), 0);
+          // Créer le receipt en base (utilise receipt.id comme receipt_id si fourni)
+          // Si le round n'a pas été trouvé en base, envoyer `null` pour round_id afin d'éviter
+          // une violation de contrainte FK lorsque la table `rounds` n'a pas encore l'entrée.
+          const dbRoundId = roundExists ? gameState.currentRound.id : null;
+
+          // Retry loop: if insert fails with duplicate key, regenerate id and retry
+          const MAX_INSERT_ATTEMPTS = 5;
+          for (let attempt = 1; attempt <= MAX_INSERT_ATTEMPTS; attempt++) {
+            try {
+              dbReceipt = await dbCreateReceipt({ round_id: dbRoundId, user_id: receipt.user_id || null, total_amount: totalAmount, status: isRaceFinished ? (receipt.prize > 0 ? 'won' : 'lost') : 'pending', prize: receipt.prize || 0, receipt_id: receipt.id });
+              // If DB returned a canonical id, update in-memory receipt
+              if (dbReceipt && (dbReceipt.receipt_id || dbReceipt.receipt_id === 0)) {
+                receipt.id = dbReceipt.receipt_id || receipt.id;
+              }
+              console.log(`[DB] ✓ Receipt ${receipt.id} créé en DB (attempt ${attempt})`);
+              break; // success
+            } catch (insertErr) {
+              // Unique violation (duplicate primary key) - regenerate id and retry
+              if (insertErr && insertErr.code === '23505') {
+                console.warn(`[DB] Duplicate receipt_id ${receipt.id} on insert (attempt ${attempt}). Regenerating id and retrying.`);
+                // generate a new id and update the in-memory receipt (gameState reference will follow)
+                const newId = generateFormattedId();
+                receipt.id = newId;
+                // if last attempt, bubble the error after loop
+                if (attempt === MAX_INSERT_ATTEMPTS) {
+                  console.error('[DB] Échec création receipt après plusieurs tentatives de génération d[0m id');
+                }
+                // continue to next attempt
+                continue;
+              } else {
+                // other DB error - log and stop retrying
+                console.error('[DB] Erreur persistance receipt:', insertErr && insertErr.message ? insertErr.message : insertErr);
+                break;
+              }
+            }
+          }
+        } catch (err) {
+          // Fallback catch; should be rare due to inner handling
+          console.error('[DB] Erreur persistance receipt (unexpected):', err && err.message ? err.message : err);
+        }
+        try {
+          // If receipt wasn't persisted in DB, do NOT try to persist bets because bets reference receipts via FK.
+          if (!dbReceipt) {
+            console.warn('[DB] Receipt non persisté en base; saut des insertions de bets pour éviter violation FK');
+            return;
+          }
+          // Créer les bets en base (si la table bets existe)
+          for (const b of receipt.bets || []) {
+            try {
+              const participantNumber = b.number || b.participant?.number || null;
+              let participantId = null;
+              if (participantNumber !== null) {
+                try {
+                  // Debug: check if table has data
+                  const countRes = await pool.query("SELECT COUNT(*) as cnt FROM participants");
+                  const totalParticipants = parseInt(countRes.rows[0]?.cnt || 0, 10);
+                  console.log(`[DB] Participants dans la table: ${totalParticipants}`);
+                  
+                  const pRes = await pool.query("SELECT participant_id FROM participants WHERE number = $1 LIMIT 1", [participantNumber]);
+                  if (pRes && pRes.rows && pRes.rows[0]) {
+                    participantId = pRes.rows[0].participant_id;
+                    console.log(`[DB] ✓ Participant trouvé: numero=${participantNumber}, id=${participantId}`);
+                  } else {
+                    console.warn(`[DB] ⚠️ Aucun participant trouvé pour numero=${participantNumber}`);
+                    // Show all participants for debugging
+                    const allRes = await pool.query("SELECT participant_id, number, name FROM participants");
+                    if (allRes.rows.length > 0) {
+                      console.log("[DB] Participants disponibles:", allRes.rows);
+                    }
+                  }
+                } catch (lookupErr) {
+                  console.error('[DB] Erreur lookup participant by number:', lookupErr.message);
+                }
+              }
+
+              // Only persist bet if we have a valid participant_id (required by schema)
+              if (participantId !== null) {
+                await dbCreateBet({
+                  receipt_id: receipt.id,
+                  participant_id: participantId,
+                  participant_number: participantNumber,
+                  participant_name: b.participant?.name || null,
+                  coefficient: b.participant?.coeff || null,
+                  value: Number(b.value) || 0
+                });
+              } else {
+                console.warn('[DB] Impossible de persister le pari: participant_id introuvable pour numero', participantNumber);
+              }
+            } catch (err2) {
+              console.error('[DB] Erreur persistance bet:', err2);
+            }
+          }
+        } catch (err3) {
+          console.error('[DB] Erreur lors de la persistance des bets:', err3);
+        }
+      })();
+
       console.log("Ticket ajouté ID :", receipt.id);
       
       // Broadcast WebSocket pour notifier les clients avec toutes les infos
@@ -586,27 +787,91 @@ export default function createReceiptsRouter(broadcast) {
 
     if (action === "delete") {
       const id = parseInt(req.query.id, 10);
-      
-      // Chercher le ticket dans le round actuel
+
+      console.log(`[DELETE ATTEMPT] id=${id} currentRound=${gameState.currentRound?.id} isRaceRunning=${gameState.isRaceRunning} raceStartTime=${String(gameState.raceStartTime)} raceEndTime=${String(gameState.raceEndTime)}`);
+
+      // Chercher le ticket dans le round actuel (mémoire)
       let receipt = gameState.currentRound.receipts.find(r => r.id === id);
       let foundInCurrentRound = true;
-      
-      // Si pas trouvé dans le round actuel, chercher dans l'historique
+
+      // Si pas trouvé dans le round actuel, chercher dans l'historique mémoire
       if (!receipt) {
         foundInCurrentRound = false;
         for (const historicalRound of gameState.gameHistory) {
           receipt = (historicalRound.receipts || []).find(r => r.id === id);
           if (receipt) {
+            console.warn(`[DELETE] Receipt ${id} found in historical round ${historicalRound.id} - deletion denied`);
             // On ne peut pas annuler un ticket de l'historique
             return res.status(400).json({ 
-              error: "Impossible d'annuler un ticket d'un round terminé" 
+              error: "Impossible d'annuler un ticket d'un round terminé",
+              reason: "found_in_history",
+              historicalRoundId: historicalRound.id,
+              receiptId: id
             });
           }
         }
       }
-      
+
+      // Si toujours pas trouvé en mémoire, tenter une recherche dans la base (fallback)
       if (!receipt) {
-        return res.status(404).json({ error: "Ticket non trouvé" });
+        try {
+          const dbRes = await pool.query("SELECT receipt_id, round_id, status, prize FROM receipts WHERE receipt_id = $1 LIMIT 1", [id]);
+          if (dbRes.rows && dbRes.rows[0]) {
+              const dbReceipt = dbRes.rows[0];
+              // Si le ticket appartient à un round différent => il est historique
+              if (dbReceipt.round_id && Number(dbReceipt.round_id) !== Number(gameState.currentRound.id)) {
+                console.warn(`[DELETE] Receipt ${id} in DB belongs to round ${dbReceipt.round_id} (current ${gameState.currentRound.id}) - deletion denied`);
+                return res.status(400).json({ error: "Impossible d'annuler un ticket d'un round terminé", reason: "db_round_mismatch", dbRoundId: dbReceipt.round_id, currentRoundId: gameState.currentRound.id, receiptId: id });
+              }
+
+            // Vérifier si la course est réellement terminée (course lancée ET terminée)
+            const hasWinner = Array.isArray(gameState.currentRound.participants) &&
+                              gameState.currentRound.participants.some(p => p.place === 1);
+            const isRaceFinished = gameState.raceEndTime !== null ||
+                                   (gameState.raceStartTime !== null && !gameState.isRaceRunning && hasWinner);
+            if (isRaceFinished) {
+              console.warn(`[DELETE] Receipt ${id} deletion denied because race is finished (isRaceFinished=${isRaceFinished})`);
+              return res.status(400).json({ error: "Impossible d'annuler un ticket une fois la course terminée avec résultats", reason: "race_finished", isRaceFinished, receiptId: id });
+            }
+
+            // Supprimer le ticket en base si le ticket existe et appartient au round courant
+            try {
+              await pool.query("DELETE FROM receipts WHERE receipt_id = $1", [id]);
+              console.log(`[DB] Receipt ${id} supprimé en base (fallback)`);
+
+              // Mettre à jour l'état en mémoire (au cas où une entrée correspondante existerait)
+              // Décrémenter totalPrize si le ticket avait un prize
+              const prizeValue = dbReceipt.prize ? Number(dbReceipt.prize) : 0;
+              if (prizeValue) {
+                gameState.currentRound.totalPrize = Math.max(0, (gameState.currentRound.totalPrize || 0) - prizeValue);
+              }
+              gameState.currentRound.receipts = (gameState.currentRound.receipts || []).filter(r => r.id !== id);
+
+              if (broadcast) {
+                broadcast({
+                  event: "receipt_deleted",
+                  receiptId: id,
+                  roundId: gameState.currentRound.id,
+                  totalReceipts: gameState.currentRound.receipts.length,
+                  currentRound: JSON.parse(JSON.stringify(gameState.currentRound)),
+                  totalPrize: gameState.currentRound.totalPrize || 0
+                });
+              }
+
+              return res.json(wrap({ success: true }));
+            } catch (delErr) {
+              console.error('[DB] Erreur lookup/delete receipt fallback:', delErr);
+              return res.status(500).json({ error: 'Erreur serveur lors de la suppression' });
+            }
+          }
+        } catch (dbErr) {
+          console.error('[DB] Erreur lookup/delete receipt fallback:', dbErr);
+          return res.status(500).json({ error: 'Erreur serveur lors de la suppression' });
+        }
+
+        // Si on est ici, rien trouvé en mémoire ni en base
+        console.warn(`[DELETE] Receipt ${id} not found in memory nor DB`);
+        return res.status(404).json({ error: "Ticket non trouvé", reason: "not_found", receiptId: id });
       }
 
       // Vérifier si le round est réellement terminé (course lancée ET terminée)
@@ -623,15 +888,23 @@ export default function createReceiptsRouter(broadcast) {
           error: "Impossible d'annuler un ticket une fois la course terminée avec résultats"
         });
       }
-      
-      // Supprimer le ticket du round actuel
-      gameState.currentRound.receipts = gameState.currentRound.receipts.filter(r => r.id !== id);
-      
-      // Recalculer le totalPrize si nécessaire
-      if (receipt.prize) {
-        gameState.currentRound.totalPrize = Math.max(0, (gameState.currentRound.totalPrize || 0) - receipt.prize);
+
+      // Supprimer le ticket du round actuel en mémoire
+      // Calculer prize à retirer si présent
+      if (receipt && receipt.prize) {
+        gameState.currentRound.totalPrize = Math.max(0, (gameState.currentRound.totalPrize || 0) - Number(receipt.prize));
       }
-      
+
+      gameState.currentRound.receipts = (gameState.currentRound.receipts || []).filter(r => r.id !== id);
+
+      // Supprimer également en base (s'il existe)
+      try {
+        await pool.query("DELETE FROM receipts WHERE receipt_id = $1", [id]);
+        console.log(`[DB] Receipt ${id} supprimé en base (memo->db)`);
+      } catch (e) {
+        console.warn('[DB] Échec suppression receipt en base (memo->db) pour id', id, e && e.message);
+      }
+
       // Broadcast WebSocket pour notifier les clients avec toutes les infos
       if (broadcast) {
         broadcast({
@@ -643,7 +916,7 @@ export default function createReceiptsRouter(broadcast) {
           totalPrize: gameState.currentRound.totalPrize || 0
         });
       }
-      
+
       console.log("Ticket supprimé ID :", id);
       return res.json(wrap({ success: true }));
     }

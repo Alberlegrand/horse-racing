@@ -3,6 +3,10 @@
 import express from "express";
 import { gameState, wrap } from "../game.js";
 import { systemToPublic } from "../utils.js";
+import { pool } from "../config/db.js";
+import { getReceiptsByUser, getBetsByReceipt, getReceiptById } from "../models/receiptModel.js";
+import { createPayment as dbCreatePayment, updatePaymentStatus as dbUpdatePaymentStatus } from "../models/paymentModel.js";
+import { updateReceiptStatus as dbUpdateReceiptStatus } from "../models/receiptModel.js";
 
 /**
  * Crée le routeur pour "my-bets" (Mes Paris).
@@ -81,7 +85,7 @@ function formatTicket(receipt, roundId, defaultStatus = 'pending', isRoundFinish
 
 // GET /api/v1/my-bets/:id - Récupérer un ticket spécifique avec ses bets
 // IMPORTANT: Cette route doit être définie AVANT la route GET "/" pour éviter les conflits
-router.get("/:id", (req, res) => {
+router.get("/:id", async (req, res) => {
   try {
     const ticketId = parseInt(req.params.id, 10);
     
@@ -99,13 +103,29 @@ router.get("/:id", (req, res) => {
     
     // Si pas trouvé, chercher dans l'historique
     if (!receipt) {
-      for (const historicalRound of gameState.gameHistory) {
-        receipt = (historicalRound.receipts || []).find(r => r.id === ticketId);
-        if (receipt) {
-          roundId = historicalRound.id;
-          isRoundFinished = true;
-          break;
+      // Rechercher en base si disponible
+      try {
+        const dbReceipt = await getReceiptById(ticketId);
+        if (dbReceipt) {
+          // charger les bets
+          const dbBets = await getBetsByReceipt(ticketId);
+          // normaliser la forme attendue
+          dbReceipt.bets = dbBets.map(b => ({ number: b.participant_number, value: b.value, participant: { name: b.participant_name, coeff: b.coefficient } }));
+          receipt = dbReceipt;
+          roundId = dbReceipt.round_id;
+          isRoundFinished = dbReceipt.status !== 'pending';
+        } else {
+          for (const historicalRound of gameState.gameHistory) {
+            receipt = (historicalRound.receipts || []).find(r => r.id === ticketId);
+            if (receipt) {
+              roundId = historicalRound.id;
+              isRoundFinished = true;
+              break;
+            }
+          }
         }
+      } catch (err) {
+        console.error('Erreur DB getReceiptById:', err);
       }
     }
 
@@ -124,8 +144,8 @@ router.get("/:id", (req, res) => {
 });
 
 // GET /api/v1/my-bets/
-router.get("/", (req, res) => {
-  try {
+router.get("/", async (req, res) => {
+  try {
     // 1. Récupérer les filtres de la requête
     const {
       page = 1,
@@ -138,43 +158,150 @@ router.get("/", (req, res) => {
     const pageNum = parseInt(page, 10);
     const limitNum = parseInt(limit, 10);
 
-    // 2. Agréger tous les tickets (historique + en cours)
-    let allTickets = [];
+    // If user_id is provided, read directly from DB instead of gameState
+    if (req.query.user_id) {
+      try {
+        const userId = parseInt(req.query.user_id, 10);
+        const dbLimit = parseInt(limit, 10) || 50;
+        const dbReceipts = await getReceiptsByUser(userId, dbLimit);
+        const ticketsFromDb = [];
+        for (const r of dbReceipts) {
+          const bets = await getBetsByReceipt(r.receipt_id);
+          
+          // Convertir total_amount et prize de système à publique
+          const totalAmountPublic = systemToPublic(Number(r.total_amount) || 0);
+          const prizePublic = systemToPublic(Number(r.prize) || 0);
+          
+          // Calculer potentialWinnings et avgCoeff
+          let avgCoeff = 0;
+          let potentialWinnings = 0;
+          if (bets && bets.length === 1) {
+            avgCoeff = Number(bets[0].coefficient) || 0;
+            const betValuePublic = systemToPublic(Number(bets[0].value) || 0);
+            potentialWinnings = betValuePublic * avgCoeff;
+          }
+          
+          const normalized = {
+            id: r.receipt_id,
+            date: r.created_at ? r.created_at.toISOString() : new Date().toISOString(),
+            roundId: r.round_id,
+            totalAmount: totalAmountPublic,
+            avgCoeff: (bets || []).length > 1 ? null : avgCoeff,
+            potentialWinnings: (bets || []).length > 1 ? null : potentialWinnings,
+            status: r.status,
+            prize: prizePublic,
+            isPaid: r.status === 'paid',
+            paidAt: r.paid_at || null,
+            isInCurrentRound: false,
+            isMultibet: (bets || []).length > 1,
+            bets: (bets || []).map(b => ({ 
+              number: b.participant_number, 
+              value: systemToPublic(Number(b.value) || 0), // Convertir value aussi
+              participant: { name: b.participant_name, coeff: Number(b.coefficient) || 0 } 
+            }))
+          };
+          ticketsFromDb.push(normalized);
+        }
 
-    // Tickets en cours (pending) - round actuel
-    // IMPORTANT: Vérifier si le round est terminé pour déterminer correctement le statut
-    // Un round est terminé SEULEMENT si la course a été lancée ET terminée
-    const hasWinner = Array.isArray(gameState.currentRound.participants) && 
-                     gameState.currentRound.participants.some(p => p.place === 1);
-    
-    // Un round est terminé si :
-    // 1. raceEndTime est défini (course lancée et terminée)
-    // OU 2. La course a été lancée (raceStartTime !== null) ET n'est plus en cours ET il y a un gagnant
-    // Cela garantit que les tickets restent en "pending" tant que la course n'a pas été lancée
-    const isRoundFinished = gameState.raceEndTime !== null || 
-                            (gameState.raceStartTime !== null && !gameState.isRaceRunning && hasWinner);
-    
-    const pendingTickets = (gameState.currentRound.receipts || []).map(r => {
-      const ticket = formatTicket(r, gameState.currentRound.id, 'pending', isRoundFinished);
-      ticket.isRoundFinished = isRoundFinished;
-      return ticket;
-    });
-    
-    // Tickets de l'historique (won/lost) - rounds terminés
-    const historicalTickets = gameState.gameHistory.flatMap(round => 
-      (round.receipts || []).map(r => {
-        const ticket = formatTicket(r, round.id, 'historical');
-        ticket.isRoundFinished = true; // Les rounds dans l'historique sont toujours terminés
+        // Build response similar to previous logic
+        const allTickets = ticketsFromDb.sort((a,b) => new Date(b.date) - new Date(a.date));
+        const pageNum = parseInt(page, 10);
+        const limitNum = parseInt(limit, 10);
+        const totalItems = allTickets.length;
+        const startIndex = (pageNum -1)*limitNum;
+        const paginatedTickets = allTickets.slice(startIndex, startIndex + limitNum);
+        const stats = { totalBetAmount: allTickets.reduce((s,t)=>s+t.totalAmount,0), potentialWinnings: 0, activeTicketsCount: paginatedTickets.filter(t=>t.status==='pending').length, winRate:0, paidWinnings: allTickets.filter(t=>t.status==='paid').reduce((s,t)=>s+t.prize,0), pendingPayments: allTickets.filter(t=>t.status==='won').reduce((s,t)=>s+t.prize,0) };
+        return res.json(wrap({ pagination: { currentPage: pageNum, totalPages: Math.ceil(totalItems/limitNum), totalItems, limit: limitNum, displayedRange: `${startIndex+1}-${startIndex+paginatedTickets.length}` }, stats, tickets: paginatedTickets }));
+      } catch (err) {
+        console.error('Erreur DB getReceiptsByUser:', err);
+        // fallback to in-memory below
+      }
+    }
+
+    // 2. Agréger tous les tickets (DB + en mémoire pour les tickets en cours non encore persistés)
+    let allTickets = [];
+
+    // IMPORTANT: Charger d'abord les tickets depuis la DB pour avoir les statuts les plus à jour
+    try {
+      const allDbReceipts = await pool.query(
+        `SELECT r.*, 
+                COUNT(b.bet_id) as bet_count
+         FROM receipts r 
+         LEFT JOIN bets b ON r.receipt_id = b.receipt_id 
+         GROUP BY r.receipt_id 
+         ORDER BY r.created_at DESC`
+      );
+      
+      for (const dbReceipt of allDbReceipts.rows) {
+        const bets = await getBetsByReceipt(dbReceipt.receipt_id);
+        
+        // Convertir total_amount de système à publique
+        const totalAmountPublic = systemToPublic(Number(dbReceipt.total_amount) || 0);
+        // Convertir prize de système à publique
+        const prizePublic = systemToPublic(Number(dbReceipt.prize) || 0);
+        
+        // Calculer potentialWinnings et avgCoeff à partir des bets
+        let avgCoeff = 0;
+        let potentialWinnings = 0;
+        if (bets && bets.length === 1) {
+          avgCoeff = Number(bets[0].coefficient) || 0;
+          // Convertir value de système à publique, puis calculer le gain
+          const betValuePublic = systemToPublic(Number(bets[0].value) || 0);
+          potentialWinnings = betValuePublic * avgCoeff;
+        }
+        
+        const formattedTicket = {
+          id: dbReceipt.receipt_id,
+          date: dbReceipt.created_at ? dbReceipt.created_at.toISOString() : new Date().toISOString(),
+          roundId: dbReceipt.round_id,
+          totalAmount: totalAmountPublic,
+          status: dbReceipt.status, // Récupérer directement depuis la DB
+          prize: prizePublic,
+          isPaid: dbReceipt.status === 'paid',
+          paidAt: dbReceipt.paid_at || null,
+          isInCurrentRound: false,
+          isMultibet: (bets || []).length > 1,
+          avgCoeff: (bets || []).length > 1 ? null : avgCoeff,
+          potentialWinnings: (bets || []).length > 1 ? null : potentialWinnings,
+          bets: (bets || []).map(b => ({ 
+            number: b.participant_number, 
+            value: systemToPublic(Number(b.value) || 0), // Convertir value de système à publique
+            participant: { name: b.participant_name, coeff: Number(b.coefficient) || 0 } 
+          }))
+        };
+        allTickets.push(formattedTicket);
+      }
+    } catch (err) {
+      console.error('[DB] Erreur chargement tickets depuis DB:', err.message);
+      // Fallback: utiliser gameState si DB échoue
+    }
+
+    // Si la DB n'a rien retourné, fallback sur gameState
+    if (allTickets.length === 0) {
+      const hasWinner = Array.isArray(gameState.currentRound.participants) && 
+                       gameState.currentRound.participants.some(p => p.place === 1);
+      
+      const isRoundFinished = gameState.raceEndTime !== null || 
+                              (gameState.raceStartTime !== null && !gameState.isRaceRunning && hasWinner);
+      
+      const pendingTickets = (gameState.currentRound.receipts || []).map(r => {
+        const ticket = formatTicket(r, gameState.currentRound.id, 'pending', isRoundFinished);
+        ticket.isRoundFinished = isRoundFinished;
         return ticket;
-      })
-    );
-    
-    // Fusionner et trier par date (plus récent en premier)
-    allTickets = [...pendingTickets, ...historicalTickets].sort((a, b) => 
-      new Date(b.date) - new Date(a.date)
-    );
-
-    // 3. Appliquer les filtres
+      });
+      
+      const historicalTickets = gameState.gameHistory.flatMap(round => 
+        (round.receipts || []).map(r => {
+          const ticket = formatTicket(r, round.id, 'historical');
+          ticket.isRoundFinished = true;
+          return ticket;
+        })
+      );
+      
+      allTickets = [...pendingTickets, ...historicalTickets].sort((a, b) => 
+        new Date(b.date) - new Date(a.date)
+      );
+    }    // 3. Appliquer les filtres
     let filteredTickets = allTickets;
 
     if (searchId) {
@@ -251,7 +378,7 @@ router.get("/", (req, res) => {
 });
 
 // POST /api/v1/my-bets/pay/:id - Marquer un ticket comme payé
-router.post("/pay/:id", (req, res) => {
+router.post("/pay/:id", async (req, res) => {
   try {
     const ticketId = parseInt(req.params.id, 10);
     
@@ -259,55 +386,57 @@ router.post("/pay/:id", (req, res) => {
       return res.status(400).json({ error: "ID de ticket invalide" });
     }
 
-    // Chercher le ticket dans le round actuel
-    let receipt = gameState.currentRound.receipts.find(r => r.id === ticketId);
-    let foundInCurrentRound = true;
-    
-    // Si pas trouvé dans le round actuel, chercher dans l'historique
-    if (!receipt) {
-      foundInCurrentRound = false;
-      for (const round of gameState.gameHistory) {
-        receipt = (round.receipts || []).find(r => r.id === ticketId);
-        if (receipt) break;
-      }
+    // Chercher le ticket en base de données (pas en mémoire)
+    let receipt = null;
+    try {
+      receipt = await getReceiptById(ticketId);
+    } catch (err) {
+      console.warn('[DB] Erreur lookup receipt:', err.message);
     }
 
     if (!receipt) {
       return res.status(404).json({ error: "Ticket non trouvé" });
     }
 
-    // Vérifier que le ticket a gagné (prize > 0)
-    if (!receipt.prize || receipt.prize <= 0) {
-      return res.status(400).json({ error: "Ce ticket n'a pas gagné, aucun paiement à effectuer" });
-    }
-
     // Vérifier que le ticket n'est pas déjà payé
-    if (receipt.isPaid === true) {
+    if (receipt.status === 'paid') {
       return res.status(400).json({ error: "Ce ticket a déjà été payé" });
     }
 
-    // Marquer comme payé
-    receipt.isPaid = true;
-    receipt.paid_at = new Date().toISOString();
+    // Vérifier que le ticket a gagné (statut 'won' ou prize > 0)
+    if (receipt.status !== 'won' && (!receipt.prize || receipt.prize <= 0)) {
+      return res.status(400).json({ error: "Ce ticket n'a pas gagné, aucun paiement à effectuer" });
+    }
+    
+    let prize = receipt.prize || 0;
 
-    console.log(`💰 Ticket #${ticketId} marqué comme payé (gain: ${receipt.prize} HTG)`);
+    console.log(`💰 Ticket #${ticketId} marqué comme payé (gain: ${prize} HTG)`);
 
     // Notifier via WebSocket
     if (broadcast) {
       broadcast({
         event: "receipt_paid",
         receiptId: ticketId,
-        prize: receipt.prize,
-        paidAt: receipt.paid_at,
-        roundId: foundInCurrentRound ? gameState.currentRound.id : null
+        prize: prize,
+        paidAt: new Date().toISOString(),
+        roundId: receipt.round_id || null
       });
+    }
+
+    // Persister le paiement en base
+    try {
+      await dbCreatePayment({ receipt_id: ticketId, user_id: receipt.user_id || null, amount: prize || 0, method: 'cash', status: 'completed' });
+      // Mettre à jour le statut du receipt en base
+      await dbUpdateReceiptStatus(ticketId, 'paid', prize || 0);
+    } catch (err) {
+      console.error('[DB] Erreur lors de la création du paiement :', err);
     }
 
     return res.json(wrap({
       success: true,
       ticketId: ticketId,
-      prize: receipt.prize,
-      paidAt: receipt.paid_at
+      prize: prize || 0,
+      paidAt: new Date().toISOString()
     }));
 
   } catch (error) {

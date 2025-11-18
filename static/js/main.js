@@ -274,6 +274,13 @@ function handleWebSocketMessage(data) {
     // Le nouveau round devrait déjà être disponible
     console.log('🏆 Course terminée');
   }
+  else if (data.event === 'pre_start') {
+    // Show a 5-second overlay/countdown before the round starts to prevent ticket deletions/emissions
+    const roundId = data.roundId || 'N/A';
+    const countdownMs = data.countdownMs || 5000;
+    console.log(`⏳ Pré-démarrage round ${roundId} — affichage overlay ${countdownMs}ms`);
+    setBetFrameDisabled(true, `Démarrage imminent — Round ${roundId}`, countdownMs);
+  }
   
   // Note: refreshTickets est déjà géré par app.js, pas besoin de le refaire ici
 }

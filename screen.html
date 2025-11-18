@@ -607,10 +607,19 @@
                 console.log('🏆 Mise à jour des 6 derniers gagnants...');
                 
                 // Prendre les 6 derniers rounds avec des gagnants
-                const winnersWithRounds = gameHistory
-                    .filter(round => round.winner)
-                    .slice(-6)
-                    .reverse(); // Plus récent en premier
+                // Evite d'afficher des doublons : construire une liste unique (par round id)
+                const uniqueById = [];
+                const seen = new Set();
+                // Parcourt du plus ancien au plus récent, puis on slice(-6) pour les 6 derniers
+                const ordered = (gameHistory || []).filter(r => r && r.winner).slice(-20); // limiter
+                for (let i = 0; i < ordered.length; i++) {
+                    const r = ordered[i];
+                    if (!seen.has(r.id)) {
+                        seen.add(r.id);
+                        uniqueById.push(r);
+                    }
+                }
+                const winnersWithRounds = uniqueById.slice(-6).reverse();
                 
                 const $winnersList = $('#winnersList');
                 $winnersList.empty();
@@ -648,6 +657,7 @@
                         card.addClass('family' + winner.family);
                     }
                     winnerItem.append(card);
+                    winnerItem.data('roundId', round.id);
                     $winnersList.append(winnerItem);
                 });
             }
@@ -687,8 +697,16 @@
                     }
                     winnerItem.append(card);
 
-                    // Préprend le nouveau gagnant
+                    // Préprend le nouveau gagnant (éviter les doublons pour le même round)
+                    const alreadyPresent = $winnersList.children('.winner-item').filter(function() {
+                        return $(this).data('roundId') === roundId;
+                    }).length > 0;
+                    if (alreadyPresent) return; // dédoublonnage
+
+                    // stocker l'id du round sur l'élément pour de futures vérifications
+                    winnerItem.data('roundId', roundId);
                     $winnersList.prepend(winnerItem);
+                    winnerItem.data('roundId', roundId);
 
                     // Garde seulement 6
                     var items = $winnersList.children('.winner-item');
@@ -749,7 +767,7 @@
                 $('#timeRemainingDisplay').text('00:00');
                 $('#countdownPanel').addClass('hidden');
                 targetEndTime = 0;
-                totalDelayMs = 180000;
+                totalDelayMs = 0;
                 
                 // 9. Nettoyer les boutons
                 $('.start').css('visibility', 'hidden');

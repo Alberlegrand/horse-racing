@@ -111,6 +111,9 @@ class App {
             case 'betting':
                 this.initBetting();
                 break;
+            case 'account':
+                this.initAccount();
+                break;
         }
     }
 
@@ -129,7 +132,7 @@ class App {
         this.dashboardUpdateStats = null;
 
         // Variables pour le timer de lancement (identique à screen.html)
-        this.timerTotalDelayMs = 180000; // 2 minutes par défaut
+        this.timerTotalDelayMs = 60000; // 2 minutes par défaut
         this.timerTargetEndTime = 0; // Timestamp exact de la fin du compte à rebours
         this.timerCountdownInterval = null; // ID de l'intervalle pour la mise à jour de la barre
 
@@ -187,7 +190,7 @@ class App {
                 const tr = document.createElement('tr');
                 tr.className = 'hover:bg-slate-700/50';
                 tr.innerHTML = `
-                    <td class="p-2 text-sm font-medium">#${t.id}</td>
+                    <td class="p-2 text-sm font-medium">#${t.id || '—'}</td>
                     <td class="p-2 text-slate-400 text-xs">${new Date(createdTime).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</td>
                     <td class="p-2 text-sm text-slate-300">#${roundId}</td>
                     <td class="p-2 text-sm font-semibold text-green-300">${total} HTG</td>
@@ -195,16 +198,16 @@ class App {
                     <td class="p-2">${this.formatStatus(t.status || 'pending')}</td>
                     <td class="p-2">
                         <div class="flex gap-1 flex-wrap">
-                            <button data-action="print" data-id="${t.id}" 
+                            <button data-action="print" data-id="${t.id || ''}" 
                                 class="px-2 py-1 bg-blue-600 hover:bg-blue-700 text-xs rounded text-white" 
                                 title="Imprimer">🖨️</button>
                             ${canCancel
-                                ? `<button data-action="void" data-id="${t.id}" 
+                                ? `<button data-action="void" data-id="${t.id || ''}" 
                                     class="px-2 py-1 bg-red-600 hover:bg-red-700 text-xs rounded text-white" 
                                     title="Annuler">❌</button>`
                                 : ''}
                             ${t.status === 'won'
-                                ? `<button data-action="pay" data-id="${t.id}" 
+                                ? `<button data-action="pay" data-id="${t.id || ''}" 
                                     class="px-2 py-1 bg-green-600 hover:bg-green-700 text-xs rounded text-white" 
                                     title="Payer le ticket">💵</button>`
                                 : ''}
@@ -212,7 +215,7 @@ class App {
                                 ? `<span class="px-2 py-1 bg-blue-500/30 text-blue-300 text-xs rounded" 
                                     title="Payé le ${t.paidAt ? new Date(t.paidAt).toLocaleString('fr-FR') : 'N/A'}">✓ Payé</span>`
                                 : ''}
-                            <button data-action="rebet" data-id="${t.id}" 
+                            <button data-action="rebet" data-id="${t.id || ''}" 
                                 class="px-2 py-1 bg-purple-600 hover:bg-purple-700 text-xs rounded text-white" 
                                 title="Rejouer ce ticket">🔄</button>
                         </div>
@@ -326,12 +329,13 @@ class App {
                             throw new Error(data.error || data.message || "Erreur lors du paiement");
                         }
                         
-                        // 3. Rafraîchir la liste des tickets pour mettre à jour le statut
-                        refreshTickets();
+                        // 3. Attendre que la DB soit mise à jour, puis rafraîchir la liste des tickets
+                        setTimeout(() => refreshTickets(), 300);
                         
                         // 4. Message de confirmation
+                        const prizeAmount = data.data?.prize ? Number(data.data.prize).toFixed(2) : 'N/A';
                         this.alertModal(
-                            `✅ Ticket #${ticketId} payé avec succès (${data.data?.prize?.toFixed(2) || 'N/A'} HTG)`,
+                            `✅ Ticket #${ticketId} payé avec succès (${prizeAmount} HTG)`,
                             'success'
                         );
                         
@@ -351,14 +355,13 @@ class App {
                 `Confirmer l'annulation du ticket #${ticketId} ?`,
                 async () => {
                     try {
+                        console.log(`[CLIENT] Deleting receipt id=${ticketId} -> /api/v1/receipts/?action=delete&id=${ticketId}`);
                         const res = await fetch(`/api/v1/receipts/?action=delete&id=${ticketId}`, { method: 'POST' });
                         const data = await res.json();
                         if (!res.ok) throw new Error(data.error || data.message || "Erreur lors de l'annulation");
-                        
-                        this.alertModal(`✅ Ticket #${ticketId} annulé avec succès`, 'success', () => {
-                            // Rafraîchir la liste des tickets pour mettre à jour le statut
-                            refreshTickets();
-                        });
+                        // Rafraîchir immédiatement la liste des tickets pour synchroniser l'UI
+                        try { refreshTickets(); } catch (e) { console.warn('refreshTickets failed after delete:', e); }
+                        this.alertModal(`✅ Ticket #${ticketId} annulé avec succès`, 'success');
                         
                     } catch (err) {
                         console.error('Erreur cancelTicket:', err);
@@ -373,7 +376,13 @@ class App {
 
     // Rendre les fonctions accessibles globalement
     window.payTicket = payTicket;
-    window.cancelTicket = (id) => this.cancelTicket(id);
+    // Exposer cancelTicket correctement (appelera la fonction locale si présente,
+    // sinon délèguera à window.app.cancelTicket si l'application est initialisée)
+    window.cancelTicket = (id) => {
+        if (typeof cancelTicket === 'function') return cancelTicket(id);
+        if (window.app && typeof window.app.cancelTicket === 'function') return window.app.cancelTicket(id);
+        console.error('cancelTicket function not available');
+    };
 
         /* -------------------------
            Rafraîchissement
@@ -449,7 +458,7 @@ class App {
                         timeLeft: data.timerTimeLeft,
                         totalDuration: data.timerTotalDuration
                     });
-                    this.dashboardDemarrerTimer(data.timerTimeLeft, data.timerTotalDuration || 180000);
+                    this.dashboardDemarrerTimer(data.timerTimeLeft, data.timerTotalDuration || 60000);
                 } else if (data.nextRoundStartTime) {
                     // Calculer le temps restant depuis nextRoundStartTime
                     const timeLeft = Math.max(0, data.nextRoundStartTime - Date.now());
@@ -458,7 +467,7 @@ class App {
                             timeLeft,
                             totalDuration: data.timerTotalDuration
                         });
-                        this.dashboardDemarrerTimer(timeLeft, data.timerTotalDuration || 180000);
+                        this.dashboardDemarrerTimer(timeLeft, data.timerTotalDuration || 60000);
                     }
                 } else if (data.isRaceRunning) {
                     // Si une course est en cours, arrêter le timer
@@ -572,7 +581,7 @@ class App {
             }
 
             // Mettre à jour les variables
-            this.timerTotalDelayMs = totalDuration || 180000;
+            this.timerTotalDelayMs = totalDuration || 60000;
             this.timerTargetEndTime = Date.now() + (timeLeft || 0);
 
             // Mise à jour immédiate
@@ -824,7 +833,7 @@ class App {
                     <td class="p-2 flex gap-2">
                         <!-- Bouton imprimer ticket (toujours visible) -->
                         <button class="px-2 py-1 bg-blue-600 hover:bg-blue-700 text-xs rounded" 
-                            onclick="window.printTicket && window.printTicket(${t.id})"
+                            onclick="window.printTicket && window.printTicket(${t.id || ''})"
                             title="Imprimer le ticket">
                             🖨️
                         </button>
@@ -832,7 +841,7 @@ class App {
                         <!-- Bouton imprimer décaissement (visible pour tickets perdus après fin du round, ou tous les tickets terminés) -->
                         ${(t.status === 'lost' && isRoundFinished) || (t.status === 'won' || t.status === 'paid') ? `
                             <button class="px-2 py-1 bg-purple-600 hover:bg-purple-700 text-xs rounded" 
-                                onclick="window.payTicket && window.payTicket(${t.id})"
+                                onclick="window.payTicket && window.payTicket(${t.id || ''})"
                                 title="Imprimer le décaissement & Payer">
                                 💰
                             </button>` : ''}
@@ -840,7 +849,7 @@ class App {
                         <!-- Bouton annuler (seulement si round pas terminé) -->
                         ${canCancel ? `
                             <button class="px-2 py-1 bg-red-600 hover:bg-red-700 text-xs rounded" 
-                                onclick="window.cancelTicket && window.cancelTicket(${t.id})"
+                                onclick="window.cancelTicket && window.cancelTicket(${t.id || ''})"
                                 title="Annuler le ticket">
                                 ❌
                             </button>` : ''}
@@ -848,7 +857,7 @@ class App {
                         <!-- Bouton payer (visible pour tous les tickets gagnants, même si prize = 0) -->
                         ${t.status === 'won' ? `
                             <button class="px-2 py-1 bg-green-600 hover:bg-green-700 text-xs rounded" 
-                                onclick="window.payTicket && window.payTicket(${t.id})"
+                                onclick="window.payTicket && window.payTicket(${t.id || ''})"
                                 title="Payer le ticket">
                                 💵
                             </button>` : ''}
@@ -888,12 +897,13 @@ class App {
                             throw new Error(data.error || data.message || "Erreur lors du paiement");
                         }
                         
-                        // 3. Rafraîchir la liste des tickets pour mettre à jour le statut
-                        fetchMyBets(currentPage);
+                        // 3. Attendre que la DB soit mise à jour, puis rafraîchir la liste des tickets
+                        setTimeout(() => fetchMyBets(currentPage), 300);
                         
                         // 4. Message de confirmation
+                        const prizeAmount = data.data?.prize ? Number(data.data.prize).toFixed(2) : 'N/A';
                         window.app.alertModal(
-                            `✅ Ticket #${id} payé avec succès (${data.data?.prize?.toFixed(2) || 'N/A'} HTG).<br><br>Le décaissement a été envoyé à l'imprimante.`,
+                            `✅ Ticket #${id} payé avec succès (${prizeAmount} HTG).<br><br>Le décaissement a été envoyé à l'imprimante.`,
                             'success'
                         );
                         
@@ -915,16 +925,17 @@ class App {
                 `Confirmer l'annulation du ticket #${id} ?`,
                 async () => {
                     try {
+                        console.log(`[CLIENT] Deleting receipt id=${id} -> /api/v1/receipts/?action=delete&id=${id}`);
                         const res = await fetch(`/api/v1/receipts/?action=delete&id=${id}`, { method: 'POST' });
                         const data = await res.json();
                         if (!res.ok) throw new Error(data.error || data.message || "Erreur lors de l'annulation");
-                        
+
+                        // Rafraîchir immédiatement la liste des tickets
+                        try { fetchMyBets(currentPage); } catch (e) { console.warn('fetchMyBets failed after delete:', e); }
+
                         window.app.alertModal(
                             `✅ Ticket #${id} annulé avec succès.`,
-                            'success',
-                            () => {
-                                fetchMyBets(currentPage);
-                            }
+                            'success'
                         );
                     } catch (e) {
                         window.app.alertModal(
@@ -936,9 +947,13 @@ class App {
             );
         }
 
-    // Rendre les fonctions accessibles globalement pour les onclick inline
+        // Rendre les fonctions accessibles globalement pour les onclick inline
     window.payTicket = payTicket;
-    window.cancelTicket = (id) => this.cancelTicket(id);
+    window.cancelTicket = (id) => {
+        if (typeof cancelTicket === 'function') return cancelTicket(id);
+        if (window.app && typeof window.app.cancelTicket === 'function') return window.app.cancelTicket(id);
+        console.error('cancelTicket function not available');
+    };
 
         function updatePagination(p) {
             totalPages = p.totalPages || 1;
@@ -1020,6 +1035,234 @@ class App {
     initBetting() {
         // Initialiser la page de pari
         console.log('Initialisation de la page de pari');
+    }
+
+    initAccount() {
+        console.log('Initialisation de la page Account (caisse)');
+        const self = this;
+
+        // état propre à la page account
+        this.accountState = this.accountState || {
+            currentBalance: 0,
+            totalReceipts: 0,
+            totalPayouts: 0,
+            currentRoundId: null,
+            isRoundReady: false,
+            ws: null,
+            wsReconnectTimer: null,
+            refreshInterval: null
+        };
+
+        const state = this.accountState;
+
+        // Helper pour mettre à jour le statut visible du round
+        function updateRoundStatusUI(rid) {
+            const rs = document.getElementById('roundStatus');
+            if (rs) rs.textContent = rid ? `(Round: ${rid})` : '(Round: aucun)';
+        }
+
+        async function refreshCashierDashboard() {
+            try {
+                // money
+                const moneyRes = await fetch('/api/v1/money/');
+                if (!moneyRes.ok) throw new Error(`HTTP ${moneyRes.status}`);
+                const moneyJson = await moneyRes.json();
+                const moneyData = moneyJson.data || {};
+                state.currentBalance = Number(moneyData.money || 0);
+                state.totalReceipts = Number(moneyData.totalReceived || 0);
+                state.totalPayouts = Number(moneyData.totalPayouts || 0);
+
+                const el = id => document.getElementById(id);
+                if (el('currentBalance')) el('currentBalance').textContent = state.currentBalance.toFixed(2) + ' HTG';
+                if (el('totalReceipts')) el('totalReceipts').textContent = state.totalReceipts.toFixed(2) + ' HTG';
+                if (el('totalPayouts')) el('totalPayouts').textContent = state.totalPayouts.toFixed(2) + ' HTG';
+                if (el('netBalance')) el('netBalance').textContent = (state.totalReceipts - state.totalPayouts).toFixed(2) + ' HTG';
+                if (el('systemBalance')) el('systemBalance').textContent = state.currentBalance.toFixed(2) + ' HTG';
+
+                // tickets
+                const myBetsRes = await fetch('/api/v1/my-bets/?limit=1000&page=1');
+                if (!myBetsRes.ok) throw new Error(`HTTP ${myBetsRes.status}`);
+                const myBetsJson = await myBetsRes.json();
+                const myBetsData = myBetsJson.data || {};
+                const tickets = myBetsData.tickets || [];
+
+                const activeTickets = tickets.filter(t => t.status === 'pending');
+                const wonTickets = tickets.filter(t => t.status === 'won');
+                const paidTickets = tickets.filter(t => t.status === 'paid');
+
+                if (el('activeTicketsCount')) el('activeTicketsCount').textContent = activeTickets.length;
+                if (el('wonTicketsCount')) el('wonTicketsCount').textContent = wonTickets.length;
+                if (el('wonTicketsAmount')) el('wonTicketsAmount').textContent = wonTickets.reduce((s, t) => s + (Number(t.prize) || 0), 0).toFixed(2) + ' HTG';
+                if (el('paidTicketsCount')) el('paidTicketsCount').textContent = paidTickets.length;
+                if (el('paidTicketsAmount')) el('paidTicketsAmount').textContent = paidTickets.reduce((s, t) => s + (Number(t.prize) || 0), 0).toFixed(2) + ' HTG';
+
+                // history
+                const historyEl = document.getElementById('cashierOperationsHistory');
+                if (historyEl) {
+                    const recent = tickets.slice(0, 10);
+                    if (recent.length === 0) {
+                        historyEl.innerHTML = '<div class="p-2 text-center text-slate-500">Aucune opération récente</div>';
+                    } else {
+                        historyEl.innerHTML = recent.map(t => {
+                            const time = t.created_time ? new Date(t.created_time).toLocaleString('fr-FR') : '';
+                            const status = (t.status || '').toUpperCase();
+                            const total = (Number(t.total_amount) || (t.bets && t.bets.reduce((s, b) => s + (Number(b.value)||0), 0)) || 0).toFixed(2);
+                            return `<div class="p-2 border-b border-slate-600 flex justify-between items-center">
+                                        <div class="text-sm text-slate-200">Ticket #${t.id} <span class="text-xs text-slate-400">${time}</span></div>
+                                        <div class="text-right">
+                                            <div class="text-sm font-medium">${total} HTG</div>
+                                            <div class="text-xs text-slate-400">${status}</div>
+                                        </div>
+                                    </div>`;
+                        }).join('');
+                    }
+                }
+
+            } catch (err) {
+                console.error('❌ Erreur refresh cashier dashboard:', err);
+                const errorMsg = document.getElementById('currentBalance');
+                if (errorMsg) {
+                    errorMsg.textContent = 'Erreur DB';
+                    errorMsg.classList.add('text-red-400');
+                }
+            }
+        }
+
+        async function fetchCurrentRound() {
+            try {
+                const res = await fetch('/api/v1/rounds/', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'get' })
+                });
+                if (!res.ok) throw new Error('HTTP ' + res.status);
+                const json = await res.json();
+                const payload = json.data || {};
+                const rid = payload.id || (payload.currentRound && payload.currentRound.id) || (payload.game && payload.game.id) || null;
+                state.currentRoundId = rid;
+                state.isRoundReady = !!rid;
+                updateRoundStatusUI(rid);
+            } catch (err) {
+                console.warn('[SYNC] fetchCurrentRound failed:', err.message);
+                state.currentRoundId = null;
+                state.isRoundReady = false;
+                updateRoundStatusUI(null);
+            }
+        }
+
+        function handleWsEvent(payload) {
+            if (!payload || !payload.event) return;
+            switch (payload.event) {
+                case 'receipt_added':
+                case 'receipt_deleted':
+                case 'receipt_cancelled':
+                case 'receipt_paid':
+                    refreshCashierDashboard();
+                    break;
+                case 'new_round':
+                case 'race_start':
+                    state.currentRoundId = payload.roundId || null;
+                    state.isRoundReady = !!state.currentRoundId;
+                    updateRoundStatusUI(state.currentRoundId);
+                    refreshCashierDashboard();
+                    break;
+                case 'race_end':
+                    state.currentRoundId = null;
+                    state.isRoundReady = false;
+                    updateRoundStatusUI(null);
+                    refreshCashierDashboard();
+                    break;
+                case 'money_update':
+                    if (payload.data) {
+                        if (typeof payload.data.cashBalance !== 'undefined') {
+                            state.currentBalance = Number(payload.data.cashBalance || 0);
+                            const el = document.getElementById('currentBalance'); if (el) el.textContent = state.currentBalance.toFixed(2) + ' HTG';
+                            const el2 = document.getElementById('systemBalance'); if (el2) el2.textContent = state.currentBalance.toFixed(2) + ' HTG';
+                        }
+                        if (typeof payload.data.totalReceived !== 'undefined') {
+                            state.totalReceipts = Number(payload.data.totalReceived || 0);
+                            const el = document.getElementById('totalReceipts'); if (el) el.textContent = state.totalReceipts.toFixed(2) + ' HTG';
+                        }
+                        if (typeof payload.data.totalPayouts !== 'undefined') {
+                            state.totalPayouts = Number(payload.data.totalPayouts || 0);
+                            const el = document.getElementById('totalPayouts'); if (el) el.textContent = state.totalPayouts.toFixed(2) + ' HTG';
+                        }
+                        const netEl = document.getElementById('netBalance'); if (netEl) netEl.textContent = (state.totalReceipts - state.totalPayouts).toFixed(2) + ' HTG';
+                    }
+                    break;
+                default:
+                    break;
+            }
+        }
+
+        function connectWebSocket() {
+            try { state.ws = new WebSocket('ws://localhost:8081/connection/websocket'); }
+            catch (e) { console.error('WS connection failed:', e); scheduleReconnect(); return; }
+            state.ws.addEventListener('open', () => { console.log('📡 WebSocket caisse connecté'); fetchCurrentRound(); });
+            state.ws.addEventListener('message', (msg) => { try { const data = JSON.parse(msg.data); handleWsEvent(data); } catch (err) { console.warn('WS: invalid message', err, msg.data); } });
+            state.ws.addEventListener('close', (ev) => { console.warn('⚠️ WebSocket closed', ev.code, ev.reason); scheduleReconnect(); });
+            state.ws.addEventListener('error', (err) => { console.error('WebSocket error', err); state.ws.close(); });
+        }
+
+        function scheduleReconnect() {
+            if (state.wsReconnectTimer) return;
+            state.wsReconnectTimer = setTimeout(() => { state.wsReconnectTimer = null; connectWebSocket(); }, 3000);
+        }
+
+        // event listeners UI
+        const refreshBtn = document.getElementById('refreshCashierBtn');
+        if (refreshBtn) refreshBtn.addEventListener('click', refreshCashierDashboard);
+        const validateBtn = document.getElementById('validateBalanceBtn');
+        if (validateBtn) validateBtn.addEventListener('click', () => { alert('✓ Réconciliation validée. Nouvelle caisse: ' + (document.getElementById('physicalBalance')?.value || '0') + ' HTG'); document.getElementById('physicalBalance').value = ''; refreshCashierDashboard(); });
+        const physical = document.getElementById('physicalBalance'); if (physical) physical.addEventListener('input', () => { const v = parseFloat(physical.value)||0; const discrepancy = v - state.currentBalance; const alertEl = document.getElementById('discrepancyAlert'); if (Math.abs(discrepancy) > 0.01) { document.getElementById('discrepancyAmount').textContent = (discrepancy>0?'+':'')+discrepancy.toFixed(2)+' HTG'; alertEl.classList.remove('hidden'); } else { alertEl.classList.add('hidden'); } });
+
+        // Handlers pour opérations caisse
+        const openDrawerBtn = document.getElementById('openDrawerBtn');
+        if (openDrawerBtn) openDrawerBtn.addEventListener('click', () => { 
+            alert('🔓 Tiroir ouvert - Montant disponible: ' + state.currentBalance.toFixed(2) + ' HTG'); 
+        });
+        
+        const closeDrawerBtn = document.getElementById('closeDrawerBtn');
+        if (closeDrawerBtn) closeDrawerBtn.addEventListener('click', () => { 
+            alert('🔒 Caisse fermée - Solde: ' + state.currentBalance.toFixed(2) + ' HTG'); 
+        });
+
+        const depositBtn = document.getElementById('depositBtn');
+        if (depositBtn) depositBtn.addEventListener('click', () => {
+            const amount = prompt('💰 Montant du dépôt en banque (HTG):', state.currentBalance.toFixed(2));
+            if (amount && !isNaN(parseFloat(amount)) && parseFloat(amount) > 0) {
+                fetch('/api/v1/money/payout', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ amount: parseFloat(amount), reason: 'Dépôt en banque' })
+                }).then(r => r.json())
+                  .then(data => {
+                    alert(`✅ Dépôt de ${amount} HTG enregistré`);
+                    refreshCashierDashboard();
+                  }).catch(err => alert('❌ Erreur: ' + err.message));
+            }
+        });
+
+        const withdrawalBtn = document.getElementById('withdrawalBtn');
+        if (withdrawalBtn) withdrawalBtn.addEventListener('click', () => {
+            const amount = prompt('💸 Montant du retrait (HTG):', (state.currentBalance / 2).toFixed(2));
+            if (amount && !isNaN(parseFloat(amount)) && parseFloat(amount) > 0) {
+                fetch('/api/v1/money/payout', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ amount: parseFloat(amount), reason: 'Retrait/Remise' })
+                }).then(r => r.json())
+                  .then(data => {
+                    alert(`✅ Retrait de ${amount} HTG enregistré`);
+                    refreshCashierDashboard();
+                  }).catch(err => alert('❌ Erreur: ' + err.message));
+            }
+        });
+
+        // initial load + periodic refresh
+        refreshCashierDashboard();
+        if (state.refreshInterval) clearInterval(state.refreshInterval);
+        state.refreshInterval = setInterval(refreshCashierDashboard, 15000);
+        // start websocket
+        connectWebSocket();
     }
 
     setupGlobalEventListeners() {
@@ -1351,17 +1594,33 @@ class App {
                     const participantLabel = origPart.name ? `${origPart.name} (N°${num})` : `N°${num}`;
                     const coeffLabel = (typeof origPart.coeff !== 'undefined') ? ` — cote: x${Number(origPart.coeff).toFixed(2)}` : '';
 
-                    // Valeur publique par défaut (si value est en système)
-                    const defaultValue = (typeof window.Currency !== 'undefined' && typeof window.Currency.systemToPublic === 'function')
-                        ? window.Currency.systemToPublic(b.value || 0)
-                        : (b.value || 0);
+                    // Convertir b.value (système, ×100) en valeur publique
+                    let publicValue = b.value || 0;
+                    
+                    // Si Currency.systemToPublic existe, l'utiliser; sinon diviser par 100
+                    if (typeof window.Currency !== 'undefined' && typeof window.Currency.systemToPublic === 'function') {
+                        publicValue = window.Currency.systemToPublic(publicValue);
+                        // systemToPublic peut retourner un objet avec toString(), extraire la valeur numérique
+                        if (typeof publicValue === 'object' && publicValue.toNumber) {
+                            publicValue = publicValue.toNumber();
+                        } else if (typeof publicValue === 'object' && publicValue.toString) {
+                            publicValue = Number(publicValue.toString());
+                        } else {
+                            publicValue = Number(publicValue);
+                        }
+                    } else {
+                        // Fallback: diviser par 100 (conversion système -> public)
+                        publicValue = Number(publicValue) / 100;
+                    }
 
-                    // Show the original public value as a placeholder, but reinitialize the field (empty value)
-                    const placeholderVal = (typeof defaultValue === 'object' && typeof defaultValue.toString === 'function') ? defaultValue.toString() : (Number(defaultValue || 0).toFixed((window.Currency && window.Currency.visibleDigits) || 2));
+                    // Formater avec la bonne précision décimale
+                    const visibleDigits = (window.Currency && window.Currency.visibleDigits) || 2;
+                    const placeholderVal = Number(publicValue || 0).toFixed(visibleDigits);
+                    
                     return `
                         <div class="mb-2">
                             <label style="display:block;font-weight:600;margin-bottom:4px;">Pari ${idx+1}: ${participantLabel}${coeffLabel}</label>
-                            <input data-bet-index="${idx}" class="rebet-amount" type="number" step="0.01" min="0" value="" placeholder="${placeholderVal}" style="width:100%;padding:6px;border-radius:4px;border:1px solid #333;background:#0f1724;color:#fff;" />
+                            <input data-bet-index="${idx}" data-default-value="${placeholderVal}" class="rebet-amount" type="number" step="0.01" min="0" value="" placeholder="${placeholderVal}" style="width:100%;padding:6px;border-radius:4px;border:1px solid #333;background:#0f1724;color:#fff;" />
                         </div>
                     `;
                 }).join('');
@@ -1382,9 +1641,12 @@ class App {
                             const inputs = modalEl.querySelectorAll('.rebet-amount');
                             const newBets = [];
                             inputs.forEach((inp, i) => {
-                                // Read user input; if empty, fall back to placeholder
+                                // Read user input; if empty, use the data-default-value attribute
                                 let raw = inp.value;
-                                if (!raw || raw === '') raw = inp.placeholder || '0';
+                                if (!raw || raw === '') {
+                                    // Récupérer la valeur par défaut stockée dans data-default-value
+                                    raw = inp.getAttribute('data-default-value') || '0';
+                                }
                                 const userVal = Number(raw || 0);
 
                                 // Preserve the original participant object (number, name, coeff)
@@ -1542,7 +1804,7 @@ class App {
                 }
                 // Synchroniser le timer si disponible
                 if (this.currentPage === 'dashboard' && data.timerTimeLeft && data.timerTimeLeft > 0) {
-                    const totalDuration = data.timerTotalDuration || 180000;
+                    const totalDuration = data.timerTotalDuration || 60000;
                     if (this.dashboardDemarrerTimer) {
                         // Petit délai pour s'assurer que initDashboard est terminé
                         setTimeout(() => {
@@ -1592,7 +1854,7 @@ class App {
                         // Petit délai pour s'assurer que initDashboard est terminé
                         setTimeout(() => {
                             if (this.dashboardDemarrerTimer) {
-                                this.dashboardDemarrerTimer(data.timer.timeLeft, data.timer.totalDuration || 180000);
+                                this.dashboardDemarrerTimer(data.timer.timeLeft, data.timer.totalDuration || 60000);
                             }
                         }, 100);
                     } else {
@@ -1602,7 +1864,7 @@ class App {
                     // Calculer le temps restant depuis nextRoundStartTime
                     const timeLeft = Math.max(0, data.nextRoundStartTime - Date.now());
                     if (timeLeft > 0 && this.dashboardDemarrerTimer) {
-                        const totalDuration = data.timer?.totalDuration || 180000;
+                        const totalDuration = data.timer?.totalDuration || 60000;
                         // Petit délai pour s'assurer que initDashboard est terminé
                         setTimeout(() => {
                             if (this.dashboardDemarrerTimer) {
@@ -1678,6 +1940,7 @@ class App {
             case 'ticket_update':
             case 'receipt_added':
             case 'receipt_deleted':
+            case 'receipt_cancelled':
             case 'receipt_paid':
                 console.log('🎫 Mise à jour des tickets - Round:', data.roundId, 'Événement:', data.event);
                 // Mettre à jour le round si nécessaire
@@ -1692,9 +1955,13 @@ class App {
                 if (this.currentPage === 'my-bets' && this.myBetsFetchMyBets) {
                     setTimeout(() => this.myBetsFetchMyBets(1), 200);
                 }
-                // Notification spéciale pour les paiements
+                // Notifications spéciales
                 if (data.event === 'receipt_paid') {
-                    this.showToast(`💰 Ticket #${data.receiptId} payé (${data.prize?.toFixed(2) || 'N/A'} HTG) - Round #${data.roundId || 'N/A'}`, 'success');
+                    const prizeAmount = data.prize ? Number(data.prize).toFixed(2) : 'N/A';
+                    this.showToast(`💰 Ticket #${data.receiptId} payé (${prizeAmount} HTG) - Round #${data.roundId || 'N/A'}`, 'success');
+                }
+                if (data.event === 'receipt_cancelled') {
+                    this.showToast(`❌ Ticket #${data.receiptId} annulé - Round #${data.roundId || 'N/A'}`, 'info');
                 }
                 break;
 
@@ -1712,7 +1979,11 @@ class App {
 
         // Exposer les helpers globaux pour qu'ils soient disponibles quel que soit la page
         window.rebetTicket = (id) => this.rebetTicket(id);
-        window.cancelTicket = (id) => this.cancelTicket(id);
+        window.cancelTicket = (id) => {
+            if (window.app && typeof window.app.cancelTicket === 'function') return window.app.cancelTicket(id);
+            if (typeof cancelTicket === 'function') return cancelTicket(id);
+            console.error('cancelTicket function not available');
+        };
         // Impression centralisée via printJS (printJS est garanti)
         window.printTicket = async (id) => {
             try {

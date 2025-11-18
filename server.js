@@ -13,12 +13,24 @@ import keepaliveRouter from "./routes/keepalive.js";
 import moneyRouter from "./routes/money.js";
 import { SERVER_WEBSOCKET_CONFIG } from "./config/websocket.js";
 
+// Import ChaCha20 RNG pour sécurité des jeux d'argent
+import { initChaCha20 } from "./chacha20.js";
+
+// Import base de données
+import { initializeDatabase } from "./config/db.js";
+
 // Recréation de __dirname
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
 const PORT = 8080;
+
+// Initialiser ChaCha20 RNG au démarrage
+initChaCha20();
+
+// Initialiser la base de données au démarrage
+await initializeDatabase();
 
 // =================================================================
 // ===           CONFIGURATION DU MIDDLEWARE                     ===
