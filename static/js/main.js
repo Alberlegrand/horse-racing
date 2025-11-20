@@ -334,7 +334,8 @@ function updateTicketsTable(tickets) {
 async function refreshTickets() {
   try {
     const res = await fetch('/api/v1/rounds/', { 
-      method: 'POST', 
+      method: 'POST',
+      credentials: 'include',
       headers: { 
         'Content-Type': 'application/json',
         'Accept': 'application/json' 

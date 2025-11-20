@@ -470,7 +470,7 @@
         $(document).ready(function () {
 
             // --- Variables pour le minuteur ---
-            var totalDelayMs = 0; // Délai total par défaut (2 minutes), mis à jour par l'API
+            var totalDelayMs = 180000; // Délai total par défaut (2 minutes), mis à jour par l'API
             var countdownInterval = null; // ID de l'intervalle pour la mise à jour de la barre
             var targetEndTime = 0; // Timestamp exact de la fin du compte à rebours
             var ws = null; // WebSocket pour la synchronisation en temps réel
@@ -594,6 +594,7 @@
                     // Le clic a réussi, on passe en mode "surveillance de fin"
                     attendreFinDeCourse();
                 } else {
+                    alert("Pas de bouton start");
                     // Le bouton n'est pas prêt. On relance la boucle de polling.
                     console.log(`⏳ Bouton "Start" non trouvé. Re-vérification de l'état dans ${delaiPoll / 1000}s...`);
                     setTimeout(gererCycleDeJeu, delaiPoll);

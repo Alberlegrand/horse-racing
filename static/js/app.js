@@ -231,7 +231,7 @@ class App {
         const rebetTicket = async (ticketId) => {
             try {
                 // Récupérer le ticket original avec ses bets
-                const ticketRes = await fetch(`/api/v1/my-bets/${ticketId}`);
+                const ticketRes = await fetch(`/api/v1/my-bets/${ticketId}`, { credentials: 'include' });
                 if (!ticketRes.ok) throw new Error('Ticket non trouvé');
                 const ticketData = await ticketRes.json();
                 const originalTicket = ticketData?.data;
@@ -242,6 +242,7 @@ class App {
                 // Récupérer le round actuel pour obtenir les participants
                 const roundRes = await fetch('/api/v1/rounds/', {
                     method: 'POST',
+                    credentials: 'include',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ action: 'get' })
                 });
@@ -283,6 +284,7 @@ class App {
                 
                 const addRes = await fetch('/api/v1/receipts/?action=add', {
                     method: 'POST',
+                    credentials: 'include',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(receiptData)
                 });
@@ -322,7 +324,7 @@ class App {
                         await new Promise(resolve => setTimeout(resolve, 500));
                         
                         // 2. Effectuer le paiement
-                        const res = await fetch(`/api/v1/my-bets/pay/${ticketId}`, { method: 'POST' });
+                        const res = await fetch(`/api/v1/my-bets/pay/${ticketId}`, { method: 'POST', credentials: 'include' });
                         const data = await res.json();
                         
                         if (!res.ok) {
@@ -356,7 +358,7 @@ class App {
                 async () => {
                     try {
                         console.log(`[CLIENT] Deleting receipt id=${ticketId} -> /api/v1/receipts/?action=delete&id=${ticketId}`);
-                        const res = await fetch(`/api/v1/receipts/?action=delete&id=${ticketId}`, { method: 'POST' });
+                        const res = await fetch(`/api/v1/receipts/?action=delete&id=${ticketId}`, { method: 'POST', credentials: 'include' });
                         const data = await res.json();
                         if (!res.ok) throw new Error(data.error || data.message || "Erreur lors de l'annulation");
                         // Rafraîchir immédiatement la liste des tickets pour synchroniser l'UI
@@ -390,7 +392,7 @@ class App {
         const refreshTickets = async () => {
             try {
                 // Charger les 10 derniers tickets via my-bets API
-                const res = await fetch('/api/v1/my-bets/?limit=10&page=1');
+                const res = await fetch('/api/v1/my-bets/?limit=10&page=1', { credentials: 'include' });
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 const data = await res.json();
                 const tickets = data?.data?.tickets || [];
@@ -398,7 +400,8 @@ class App {
 
                 // Mettre à jour le round actuel depuis l'API rounds
                 const roundRes = await fetch('/api/v1/rounds/', { 
-                    method: 'POST', 
+                    method: 'POST',
+                    credentials: 'include',
                     headers: { 
                         'Content-Type': 'application/json',
                         'Accept': 'application/json' 
@@ -428,6 +431,7 @@ class App {
             try {
                 const res = await fetch('/api/v1/rounds/status', { 
                     method: 'GET',
+                    credentials: 'include',
                     headers: { 
                         'Accept': 'application/json' 
                     }
@@ -1064,7 +1068,7 @@ class App {
         async function refreshCashierDashboard() {
             try {
                 // money
-                const moneyRes = await fetch('/api/v1/money/');
+                const moneyRes = await fetch('/api/v1/money/', { credentials: 'include' });
                 if (!moneyRes.ok) throw new Error(`HTTP ${moneyRes.status}`);
                 const moneyJson = await moneyRes.json();
                 const moneyData = moneyJson.data || {};
@@ -1080,7 +1084,7 @@ class App {
                 if (el('systemBalance')) el('systemBalance').textContent = state.currentBalance.toFixed(2) + ' HTG';
 
                 // tickets
-                const myBetsRes = await fetch('/api/v1/my-bets/?limit=1000&page=1');
+                const myBetsRes = await fetch('/api/v1/my-bets/?limit=1000&page=1', { credentials: 'include' });
                 if (!myBetsRes.ok) throw new Error(`HTTP ${myBetsRes.status}`);
                 const myBetsJson = await myBetsRes.json();
                 const myBetsData = myBetsJson.data || {};

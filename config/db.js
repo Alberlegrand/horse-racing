@@ -411,12 +411,32 @@ const createTables = async () => {
     const adminCheck = await client.query(
       "SELECT COUNT(*) as count FROM users WHERE role = 'admin'"
     );
-    if (adminCheck.rows[0].count === 0) {
+    console.log("🔍 Admin check result:", adminCheck.rows[0]);
+    const adminCount = parseInt(adminCheck.rows[0].count, 10);
+    if (adminCount === 0) {
       await client.query(`
         INSERT INTO users (username, email, password, role, email_verified)
-        VALUES ('admin', 'admin@horseracing.local', 'hashed_password_change_me', 'admin', true)
+        VALUES ('admin', 'admin@horseracing.local', 'admin123', 'admin', true)
       `);
-      console.log("👤 Utilisateur admin créé");
+      console.log("👤 Utilisateur admin créé (username: admin, password: admin123)");
+    } else {
+      console.log("✅ Admin user already exists");
+    }
+
+    // Vérifier et créer l'utilisateur caissier par défaut
+    const cashierCheck = await client.query(
+      "SELECT COUNT(*) as count FROM users WHERE role = 'cashier'"
+    );
+    console.log("🔍 Cashier check result:", cashierCheck.rows[0]);
+    const cashierCount = parseInt(cashierCheck.rows[0].count, 10);
+    if (cashierCount === 0) {
+      await client.query(`
+        INSERT INTO users (username, email, password, role, email_verified, is_active)
+        VALUES ('caissier', 'cashier@horseracing.local', 'caissier123', 'cashier', true, true)
+      `);
+      console.log("👤 Utilisateur caissier créé (username: caissier, password: caissier123)");
+    } else {
+      console.log("✅ Cashier user already exists");
     }
 
     // Insérer les participants (chevaux/sportifs)

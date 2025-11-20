@@ -1,12 +1,15 @@
 import express from "express";
 import { WebSocketServer } from "ws";
 import cors from "cors";
+import cookieParser from "cookie-parser";
+import jwt from "jsonwebtoken";
 import path from "path";
 import { fileURLToPath } from "url";
 
 // Imports de nos modules
 import { gameState, startNewRound, wrap } from "./game.js";
 import createRoundsRouter from "./routes/rounds.js";
+import createAuthRouter, { verifyToken, requireRole } from "./routes/auth.js";
 import createReceiptsRouter from "./routes/receipts.js";
 import createMyBetsRouter from "./routes/my_bets.js";
 import keepaliveRouter from "./routes/keepalive.js";
@@ -35,7 +38,13 @@ await initializeDatabase();
 // =================================================================
 // ===           CONFIGURATION DU MIDDLEWARE                     ===
 // =================================================================
-app.use(cors());
+app.use(cors({
+  origin: true,
+  credentials: true, // Allow cookies
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+}));
+app.use(cookieParser());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
@@ -113,31 +122,81 @@ wss.on("connection", (ws) => {
 // ===           ROUTES DE L'APPLICATION                         ===
 // =================================================================
 
+/**
+ * Middleware pour protéger les routes HTML - vérifie le cookie d'authentification
+ */
+function requireAuthHTML(req, res, next) {
+  const cookie = req.cookies?.authSession;
+  if (!cookie) {
+    return res.redirect('/');
+  }
+  try {
+    const JWT_SECRET = process.env.JWT_SECRET || "your-secret-key-change-in-production";
+    jwt.verify(cookie, JWT_SECRET);
+    next();
+  } catch (err) {
+    console.log('[AUTH] Invalid session cookie, redirecting to login');
+    return res.redirect('/');
+  }
+}
+
+/**
+ * Middleware pour vérifier le rôle sur les routes HTML
+ */
+function requireRoleHTML(role) {
+  return (req, res, next) => {
+    const cookie = req.cookies?.authSession;
+    if (!cookie) {
+      return res.redirect('/');
+    }
+    try {
+      const JWT_SECRET = process.env.JWT_SECRET || "your-secret-key-change-in-production";
+      const decoded = jwt.verify(cookie, JWT_SECRET);
+      if (decoded.role !== role && decoded.role !== 'admin') {
+        console.log(`[AUTH] Access denied: required role ${role}, got ${decoded.role}`);
+        return res.status(403).sendFile(path.join(__dirname, "./static/pages", "login.html"));
+      }
+      next();
+    } catch (err) {
+      console.log('[AUTH] Invalid session cookie, redirecting to login');
+      return res.redirect('/');
+    }
+  };
+}
+
 // === Routes statiques HTML ===
-app.get("/", (req, res) => res.sendFile(path.join(__dirname, "index.html")));
-app.get("/horse", (req, res) => res.sendFile(path.join(__dirname, "horse.html")));
-app.get("/cashier", (req, res) => res.sendFile(path.join(__dirname, "cashier.html")));
-app.get("/course-chevaux", (req, res) => res.sendFile(path.join(__dirname, "./pages/course-chevaux.html")));
-app.get("/dashboard", (req, res) => res.sendFile(path.join(__dirname, "./dashboard.html")));
-app.get("/bet_frame", (req, res) => res.sendFile(path.join(__dirname, "bet_frame.html")));
-app.get("/my-bets", (req, res) => res.sendFile(path.join(__dirname, "./static/pages", "my-bets.html")));
+// Page de login - pas de protection
+//app.get("/", (req, res) => res.sendFile(path.join(__dirname, "index.html")));
+app.get("/", (req, res) => res.sendFile(path.join(__dirname, "./static/pages", "login.html")));
 app.get("/landing", (req, res) => res.sendFile(path.join(__dirname, "landing.html")));
-app.get("/screen", (req, res) => res.sendFile(path.join(__dirname, "screen.html")));
+
+// Routes protégées - authentification requise
+app.get("/horse", requireAuthHTML, (req, res) => res.sendFile(path.join(__dirname, "horse.html")));
+app.get("/cashier", requireRoleHTML('cashier'), (req, res) => res.sendFile(path.join(__dirname, "cashier.html")));
+app.get("/screen", requireAuthHTML, (req, res) => res.sendFile(path.join(__dirname, "screen.html")));
+app.get("/course-chevaux", requireAuthHTML, (req, res) => res.sendFile(path.join(__dirname, "./pages/course-chevaux.html")));
+app.get("/dashboard", requireRoleHTML('admin'), (req, res) => res.sendFile(path.join(__dirname, "./dashboard.html")));
+app.get("/bet_frame", requireAuthHTML, (req, res) => res.sendFile(path.join(__dirname, "bet_frame.html")));
+app.get("/my-bets", requireAuthHTML, (req, res) => res.sendFile(path.join(__dirname, "./static/pages", "my-bets.html")));
 
 
 
 // === API v1 ===
-// On injecte la fonction 'broadcast' dans le routeur des rounds
-const roundsRouter = createRoundsRouter(broadcast);
-app.use("/api/v1/rounds/", roundsRouter);
-// On injecte aussi 'broadcast' dans le routeur des receipts pour les notifications temps réel
-app.use("/api/v1/receipts/", createReceiptsRouter(broadcast));
-// Le nouveau routeur pour "Mes Paris" - avec broadcast pour les notifications
-app.use("/api/v1/my-bets/", createMyBetsRouter(broadcast));
-app.use("/api/v1/money/", moneyRouter);
+// Auth routes (no protection needed - public login endpoint)
+app.use('/api/v1/auth/', createAuthRouter());
 
-// Keepalive route centralisée
+// Keepalive route centralisée (no protection)
 app.use("/api/v1/keepalive/", keepaliveRouter);
+
+// Protected routes - require authentication
+const roundsRouter = createRoundsRouter(broadcast);
+app.use("/api/v1/rounds/", verifyToken, roundsRouter);
+
+app.use("/api/v1/receipts/", verifyToken, requireRole('cashier', 'admin'), createReceiptsRouter(broadcast));
+
+app.use("/api/v1/my-bets/", verifyToken, createMyBetsRouter(broadcast));
+
+app.use("/api/v1/money/", verifyToken, requireRole('cashier', 'admin'), moneyRouter);
 
 // ...existing code...
 // Remplacez/ajoutez la route keepalive par ce handler robuste :

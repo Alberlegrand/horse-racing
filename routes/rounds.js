@@ -35,7 +35,7 @@ function generateRoundId() {
 // --- CONFIGURATION ---
 // La valeur fixe que vous voulez pour l'intervalle d'attente.
 // Nous utilisons directement cette valeur (60000 ms = 2 minutes) et non un minuteur externe.
-const ROUND_WAIT_DURATION_MS = process.env.ROUND_WAIT_DURATION_MS || 180000; // 3 minutes (60000 ms)
+const ROUND_WAIT_DURATION_MS = parseInt(process.env.ROUND_WAIT_DURATION_MS) || 180000; // 3 minutes (60000 ms)
 const MOVIE_SCREEN_DURATION_MS = 20000; // 20 secondes pour movie_screen
 const FINISH_SCREEN_DURATION_MS = 5000; // 5 secondes pour finish_screen
 const TOTAL_RACE_TIME_MS = MOVIE_SCREEN_DURATION_MS + FINISH_SCREEN_DURATION_MS; // 25 secondes total

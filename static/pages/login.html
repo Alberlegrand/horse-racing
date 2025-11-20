@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Connexion — Horse Racing</title>
+  <!-- Tailwind via CDN for quick prototyping -->
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-900 text-slate-100 min-h-screen flex items-center justify-center">
+  <div class="w-full max-w-md p-8 bg-slate-800/70 backdrop-blur rounded-xl shadow-lg">
+    <div class="text-center mb-6">
+      <h1 class="text-2xl font-semibold">Se connecter</h1>
+      <p class="text-sm text-slate-300 mt-1">Accédez au tableau de bord du caissier</p>
+    </div>
+
+    <form id="loginForm" class="space-y-4">
+      <div>
+        <label for="station" class="block text-sm text-slate-300 mb-1">Numéro de station</label>
+        <input id="station" name="station" type="text" required
+               class="w-full px-3 py-2 rounded-md bg-slate-700 border border-slate-600 focus:outline-none focus:ring-2 focus:ring-emerald-400" placeholder="Ex: 01" />
+      </div>
+
+      <div>
+        <label for="username" class="block text-sm text-slate-300 mb-1">Identifiant</label>
+        <input id="username" name="username" type="text" required
+               class="w-full px-3 py-2 rounded-md bg-slate-700 border border-slate-600 focus:outline-none focus:ring-2 focus:ring-emerald-400" placeholder="Votre nom d'utilisateur" />
+      </div>
+
+      <div>
+        <label for="password" class="block text-sm text-slate-300 mb-1">Mot de passe</label>
+        <input id="password" name="password" type="password" required
+               class="w-full px-3 py-2 rounded-md bg-slate-700 border border-slate-600 focus:outline-none focus:ring-2 focus:ring-emerald-400" placeholder="••••••••" />
+      </div>
+
+      <div class="flex items-center justify-between">
+        <label class="inline-flex items-center text-sm text-slate-300">
+          <input id="remember" type="checkbox" class="form-checkbox h-4 w-4 text-emerald-400 bg-slate-700 rounded" />
+          <span class="ml-2">Se souvenir</span>
+        </label>
+        <a href="#" class="text-sm text-emerald-300 hover:underline">Mot de passe oublié ?</a>
+      </div>
+
+      <div>
+        <button type="submit" class="w-full py-2 rounded-md bg-emerald-500 hover:bg-emerald-600 font-semibold text-slate-900">Se connecter</button>
+      </div>
+
+      <div id="loginMessage" class="text-center text-sm text-rose-400 mt-2"></div>
+    </form>
+
+    <div class="mt-6 text-center text-xs text-slate-400">Besoin d'aide ? Contactez l'administrateur.</div>
+  </div>
+
+  <script>
+    // Minimal client-side handler: POST credentials to /api/v1/auth/login (adjust route as needed)
+    const form = document.getElementById('loginForm');
+    const msg = document.getElementById('loginMessage');
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      msg.textContent = '';
+
+      const station = document.getElementById('station').value.trim();
+      const username = document.getElementById('username').value.trim();
+      const password = document.getElementById('password').value;
+      const remember = document.getElementById('remember').checked;
+
+      if (!station || !username || !password) {
+        msg.textContent = 'Veuillez remplir tous les champs.';
+        return;
+      }
+
+      try {
+        const resp = await fetch('/api/v1/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ station, username, password, remember })
+        });
+
+        if (!resp.ok) {
+          const body = await resp.json().catch(()=>({ error: resp.statusText }));
+          msg.textContent = body?.error || 'Erreur de connexion';
+          return;
+        }
+
+        const data = await resp.json();
+        // Example: server returns { success: true, token: '...', redirect: '/dashboard' }
+        if (data && data.success) {
+          // Optionally store token
+          if (data.token) {
+            localStorage.setItem('authToken', data.token);
+          }
+          // Redirect to dashboard (adjust path if needed)
+          window.location.href = data.redirect || '/pages/dashboard.html';
+        } else {
+          msg.textContent = data?.message || 'Identifiants invalides';
+        }
+      } catch (err) {
+        console.error('Login error', err);
+        msg.textContent = 'Impossible de joindre le serveur';
+      }
+    });
+  </script>
+</body>
+</html>

@@ -836,8 +836,13 @@ export default function createReceiptsRouter(broadcast) {
 
             // Supprimer le ticket en base si le ticket existe et appartient au round courant
             try {
+              // Supprimer les bets associés au ticket (cascade)
+              await pool.query("DELETE FROM bets WHERE receipt_id = $1", [id]);
+              console.log(`[DB] Bets associés au ticket ${id} supprimés en base (fallback)`);
+              
+              // Puis supprimer le ticket lui-même
               await pool.query("DELETE FROM receipts WHERE receipt_id = $1", [id]);
-              console.log(`[DB] Receipt ${id} supprimé en base (fallback)`);
+              console.log(`[DB] Receipt ${id} supprimé en base (fallback) + bets associés`);
 
               // Mettre à jour l'état en mémoire (au cas où une entrée correspondante existerait)
               // Décrémenter totalPrize si le ticket avait un prize
@@ -897,10 +902,15 @@ export default function createReceiptsRouter(broadcast) {
 
       gameState.currentRound.receipts = (gameState.currentRound.receipts || []).filter(r => r.id !== id);
 
-      // Supprimer également en base (s'il existe)
+      // Supprimer également en base (s'il existe) - Receipt et ses Bets associés
       try {
+        // Supprimer les bets associés au ticket (cascade)
+        await pool.query("DELETE FROM bets WHERE receipt_id = $1", [id]);
+        console.log(`[DB] Bets associés au ticket ${id} supprimés en base`);
+        
+        // Puis supprimer le ticket lui-même
         await pool.query("DELETE FROM receipts WHERE receipt_id = $1", [id]);
-        console.log(`[DB] Receipt ${id} supprimé en base (memo->db)`);
+        console.log(`[DB] Receipt ${id} supprimé en base (memo->db) + bets associés`);
       } catch (e) {
         console.warn('[DB] Échec suppression receipt en base (memo->db) pour id', id, e && e.message);
       }

@@ -114,8 +114,15 @@ export async function startNewRound(broadcast) {
 
     // 3️⃣ Démarre le timer de 2 minutes pour le prochain lancement
     // Le timer commence MAINTENANT, après que le client ait cliqué sur "new_game"
-    const ROUND_WAIT_DURATION_MS = process.env.ROUND_WAIT_DURATION_MS || 180000; // 3 minutes (60000 ms)
+   // 3️⃣ Démarre le timer
+    // CORRECTION ICI : On utilise Number() pour convertir la string du .env en nombre
+    const envDuration = Number(process.env.ROUND_WAIT_DURATION_MS);
+    // Si la conversion échoue (NaN) ou vaut 0, on utilise 180000 par défaut
+    const ROUND_WAIT_DURATION_MS = (envDuration > 0) ? envDuration : 180000; 
+    
     const now = Date.now();
+    
+    // Maintenant l'addition sera mathématique (Nombre + Nombre)
     gameState.nextRoundStartTime = now + ROUND_WAIT_DURATION_MS;
     
     console.log(`⏰ Timer démarré : nouveau tour dans ${ROUND_WAIT_DURATION_MS / 1000} secondes (fin: ${new Date(gameState.nextRoundStartTime).toLocaleTimeString()})`);
