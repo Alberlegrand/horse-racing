@@ -21,7 +21,7 @@ export async function createReceipt({ round_id, user_id, total_amount, status = 
   }
 }
 
-// Créer un pari (bet) pour un ticket
+// Créer un pari (bet) pour un ticket - OPTIMISÉ
 export async function createBet({ receipt_id, participant_id, participant_number, participant_name, coefficient, value, status = 'pending', prize = 0 }) {
   const res = await pool.query(
     `INSERT INTO bets (receipt_id, participant_id, participant_number, participant_name, coefficient, value, status, prize, created_at)
@@ -30,6 +30,28 @@ export async function createBet({ receipt_id, participant_id, participant_number
     [receipt_id, participant_id, participant_number, participant_name, coefficient, value, status, prize]
   );
   return res.rows[0];
+}
+
+// Créer plusieurs bets en batch pour plus de performance
+export async function createBetsBatch(bets) {
+  if (!bets || bets.length === 0) return [];
+  
+  const placeholders = bets
+    .map((_, i) => `($${i * 9 + 1},$${i * 9 + 2},$${i * 9 + 3},$${i * 9 + 4},$${i * 9 + 5},$${i * 9 + 6},$${i * 9 + 7},$${i * 9 + 8},CURRENT_TIMESTAMP)`)
+    .join(',');
+  
+  const values = bets.flatMap(b => [
+    b.receipt_id, b.participant_id, b.participant_number, b.participant_name,
+    b.coefficient, b.value, b.status || 'pending', b.prize || 0
+  ]);
+  
+  const res = await pool.query(
+    `INSERT INTO bets (receipt_id, participant_id, participant_number, participant_name, coefficient, value, status, prize, created_at)
+     VALUES ${placeholders}
+     RETURNING *`,
+    values
+  );
+  return res.rows;
 }
 
 // Récupérer tous les tickets d'un utilisateur
@@ -41,11 +63,23 @@ export async function getReceiptsByUser(user_id, limit = 20) {
   return res.rows;
 }
 
-// Récupérer les paris d'un ticket
+// Récupérer les paris d'un ticket - OPTIMISÉ avec index
 export async function getBetsByReceipt(receipt_id) {
   const res = await pool.query(
     `SELECT * FROM bets WHERE receipt_id = $1 ORDER BY created_at ASC`,
     [receipt_id]
+  );
+  return res.rows;
+}
+
+// Récupérer les paris de plusieurs tickets en batch
+export async function getBetsByReceiptsBatch(receipt_ids) {
+  if (!receipt_ids || receipt_ids.length === 0) return [];
+  
+  const placeholders = receipt_ids.map((_, i) => `$${i + 1}`).join(',');
+  const res = await pool.query(
+    `SELECT * FROM bets WHERE receipt_id IN (${placeholders}) ORDER BY receipt_id, created_at ASC`,
+    receipt_ids
   );
   return res.rows;
 }
@@ -56,6 +90,18 @@ export async function getReceiptById(receipt_id) {
     [receipt_id]
   );
   return res.rows[0];
+}
+
+// Récupérer plusieurs receipts par ID
+export async function getReceiptsByIdBatch(receipt_ids) {
+  if (!receipt_ids || receipt_ids.length === 0) return [];
+  
+  const placeholders = receipt_ids.map((_, i) => `$${i + 1}`).join(',');
+  const res = await pool.query(
+    `SELECT * FROM receipts WHERE receipt_id IN (${placeholders})`,
+    receipt_ids
+  );
+  return res.rows;
 }
 
 // Mettre à jour le statut et le gain d'un ticket

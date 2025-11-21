@@ -22,6 +22,10 @@ import { initChaCha20 } from "./chacha20.js";
 // Import base de données
 import { initializeDatabase } from "./config/db.js";
 
+// Import Redis pour cache et sessions
+import { initRedis, closeRedis } from "./config/redis.js";
+import { cacheResponse } from "./middleware/cache.js";
+
 // Recréation de __dirname
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -31,6 +35,11 @@ const PORT = 8080;
 
 // Initialiser ChaCha20 RNG au démarrage
 initChaCha20();
+
+// Initialiser Redis (avec fallback gracieux si non disponible)
+await initRedis().catch(err => {
+  console.warn('⚠️ Redis n\'est pas disponible, fonctionnement sans cache:', err.message);
+});
 
 // Initialiser la base de données au démarrage
 await initializeDatabase();

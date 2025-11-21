@@ -7,6 +7,9 @@ import { gameState, startNewRound, wrap } from "../game.js";
 // Import ChaCha20 pour la sécurité des positions
 import { chacha20Random, chacha20RandomInt, chacha20Shuffle, initChaCha20 } from "../chacha20.js";
 
+// Import cache middleware for performance
+import { cacheResponse } from "../middleware/cache.js";
+
 // Import des fonctions et constantes nécessaires pour créer un nouveau round
 import { getParticipants, createRound, finishRound, getRoundsHistory, getRoundByNumber } from "../models/gameModel.js";
 
@@ -246,7 +249,7 @@ export default function createRoundsRouter(broadcast) {
      * Cet endpoint est la "Source de Vérité" pour le minuteur.
      * Il calcule le temps restant à partir du timestamp du futur lancement.
      */
-    router.get("/launch-time", (req, res) => {
+    router.get("/launch-time", cacheResponse(10), (req, res) => {
         let timeLeft = 0;
         const now = Date.now();
 
@@ -272,7 +275,7 @@ export default function createRoundsRouter(broadcast) {
      * Retourne l'état actuel du jeu pour la synchronisation au chargement de la page.
      * Permet de savoir quel écran afficher et le temps restant.
      */
-    router.get("/status", (req, res) => {
+    router.get("/status", cacheResponse(5), (req, res) => {
         const now = Date.now();
         const MOVIE_SCREEN_DURATION_MS = 25000; // 25 secondes pour movie_screen (correspond à la durée côté client)
         const FINISH_DURATION_MS = 5000; // 5 secondes pour finish_screen

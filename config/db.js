@@ -402,6 +402,28 @@ const createTables = async () => {
       CREATE INDEX IF NOT EXISTS idx_notifications_user_id ON notifications(user_id);
       CREATE INDEX IF NOT EXISTS idx_notifications_status ON notifications(status);
     `);
+    // ==========================================
+    // === INDEXES POUR PERFORMANCE ===
+    // ==========================================
+    // Indexes sur receipts pour recherches rapides
+    await client.query("CREATE INDEX IF NOT EXISTS idx_receipts_round_id ON receipts(round_id)");
+    await client.query("CREATE INDEX IF NOT EXISTS idx_receipts_user_id ON receipts(user_id)");
+    await client.query("CREATE INDEX IF NOT EXISTS idx_receipts_status ON receipts(status)");
+    await client.query("CREATE INDEX IF NOT EXISTS idx_receipts_created_at ON receipts(created_at DESC)");
+    
+    // Indexes sur bets pour recherches rapides
+    await client.query("CREATE INDEX IF NOT EXISTS idx_bets_receipt_id ON bets(receipt_id)");
+    await client.query("CREATE INDEX IF NOT EXISTS idx_bets_participant_id ON bets(participant_id)");
+    
+    // Indexes sur rounds
+    await client.query("CREATE INDEX IF NOT EXISTS idx_rounds_status ON rounds(status)");
+    await client.query("CREATE INDEX IF NOT EXISTS idx_rounds_created_at ON rounds(created_at DESC)");
+    
+    // Indexes sur participants
+    await client.query("CREATE INDEX IF NOT EXISTS idx_participants_number ON participants(number)");
+    
+    // Indexes sur users
+    await client.query("CREATE INDEX IF NOT EXISTS idx_users_username ON users(username)");
 
     // ==========================================
     // === INSERTION DES DONNÉES PAR DÉFAUT ===

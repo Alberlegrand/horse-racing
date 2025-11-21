@@ -312,29 +312,35 @@ class App {
         /* -------------------------
            Fonction payTicket pour le dashboard
         ------------------------- */
-        const payTicket = async (ticketId) => {
+        const payTicket = async (ticketId, buttonElement = null) => {
             this.confirmModal(
                 `Confirmer le paiement du ticket #${ticketId} ?<br><br>Le décaissement sera imprimé, puis le ticket sera marqué comme payé.`,
                 async () => {
                     try {
-                        // 1. Ouvrir la fenêtre d'impression du décaissement
-                        //const payoutWindow = window.open(`/api/v1/receipts/?action=payout&id=${ticketId}`, '_blank', 'width=800,height=600');
+                        // Get button element if not provided
+                        if (!buttonElement && event && event.target) {
+                            buttonElement = event.target;
+                        }
+                        
+                        // Show loading state on button
+                        if (buttonElement && window.buttonLoader) {
+                            window.buttonLoader.start(buttonElement, 'Traitement du paiement...');
+                        }
                         
                         // Attendre un court délai pour que la fenêtre se charge
                         await new Promise(resolve => setTimeout(resolve, 500));
                         
-                        // 2. Effectuer le paiement
-                        const res = await fetch(`/api/v1/my-bets/pay/${ticketId}`, { method: 'POST', credentials: 'include' });
-                        const data = await res.json();
+                        // Effectuer le paiement avec enhanced fetch client
+                        const data = await window.enhancedFetch.post(
+                            `/api/v1/my-bets/pay/${ticketId}`,
+                            {},
+                            buttonElement
+                        );
                         
-                        if (!res.ok) {
-                            throw new Error(data.error || data.message || "Erreur lors du paiement");
-                        }
-                        
-                        // 3. Attendre que la DB soit mise à jour, puis rafraîchir la liste des tickets
+                        // Attendre que la DB soit mise à jour, puis rafraîchir la liste des tickets
                         setTimeout(() => refreshTickets(), 300);
                         
-                        // 4. Message de confirmation
+                        // Message de confirmation
                         const prizeAmount = data.data?.prize ? Number(data.data.prize).toFixed(2) : 'N/A';
                         this.alertModal(
                             `✅ Ticket #${ticketId} payé avec succès (${prizeAmount} HTG)`,
@@ -344,6 +350,11 @@ class App {
                     } catch (err) {
                         console.error('Erreur payTicket:', err);
                         this.alertModal(err.message || 'Erreur lors du paiement', 'error');
+                    } finally {
+                        // Stop loading state on button
+                        if (buttonElement && window.buttonLoader) {
+                            window.buttonLoader.stop(buttonElement);
+                        }
                     }
                 } // end confirmModal callback
             ); // end confirmModal
@@ -352,15 +363,30 @@ class App {
         /* -------------------------
            Fonction cancelTicket pour le dashboard
         ------------------------- */
-        const cancelTicket = async (ticketId) => {
+        const cancelTicket = async (ticketId, buttonElement = null) => {
             this.confirmModal(
                 `Confirmer l'annulation du ticket #${ticketId} ?`,
                 async () => {
                     try {
+                        // Get button element if not provided
+                        if (!buttonElement && event && event.target) {
+                            buttonElement = event.target;
+                        }
+                        
+                        // Show loading state on button
+                        if (buttonElement && window.buttonLoader) {
+                            window.buttonLoader.start(buttonElement, 'Annulation en cours...');
+                        }
+                        
                         console.log(`[CLIENT] Deleting receipt id=${ticketId} -> /api/v1/receipts/?action=delete&id=${ticketId}`);
-                        const res = await fetch(`/api/v1/receipts/?action=delete&id=${ticketId}`, { method: 'POST', credentials: 'include' });
-                        const data = await res.json();
-                        if (!res.ok) throw new Error(data.error || data.message || "Erreur lors de l'annulation");
+                        
+                        // Call API with enhanced fetch client
+                        const data = await window.enhancedFetch.post(
+                            `/api/v1/receipts/?action=delete&id=${ticketId}`,
+                            {},
+                            buttonElement
+                        );
+                        
                         // Rafraîchir immédiatement la liste des tickets pour synchroniser l'UI
                         try { refreshTickets(); } catch (e) { console.warn('refreshTickets failed after delete:', e); }
                         this.alertModal(`✅ Ticket #${ticketId} annulé avec succès`, 'success');
@@ -371,6 +397,11 @@ class App {
                             err.message || 'Impossible d\'annuler ce ticket. La course est peut-être déjà terminée avec résultats.',
                             'error'
                         );
+                    } finally {
+                        // Stop loading state on button
+                        if (buttonElement && window.buttonLoader) {
+                            window.buttonLoader.stop(buttonElement);
+                        }
                     }
                 }
             );
@@ -722,12 +753,12 @@ class App {
                                 🖨️
                             </button>
                             ${ticket.status === 'won' ? 
-                                `<button onclick="payTicket(${ticket.id})" 
+                                `<button onclick="payTicket(${ticket.id}, this)" 
                                          class="p-1 hover:bg-slate-600 rounded" title="Payer">
                                     💰
                                 </button>` : ''}
                             ${ticket.isInCurrentRound ? 
-                                `<button onclick="cancelTicket(${ticket.id})" 
+                                `<button onclick="cancelTicket(${ticket.id}, this)" 
                                          class="p-1 hover:bg-slate-600 rounded" title="Annuler">
                                     ❌
                                 </button>` : ''}

@@ -1,0 +1,165 @@
+/**
+ * Connection Status & Button Loading Styles
+ */
+
+/* Connection Status Indicator */
+.connection-status {
+  position: fixed;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 10px 20px;
+  border-radius: 0 0 6px 6px;
+  font-size: 14px;
+  font-weight: 500;
+  z-index: 9998;
+  min-width: 300px;
+  text-align: center;
+  animation: slideDown 0.3s ease-out;
+}
+
+@keyframes slideDown {
+  from {
+    transform: translate(-50%, -100%);
+    opacity: 0;
+  }
+  to {
+    transform: translate(-50%, 0);
+    opacity: 1;
+  }
+}
+
+.connection-status.status-success {
+  background-color: #10b981;
+  color: white;
+  box-shadow: 0 2px 8px rgba(16, 185, 129, 0.3);
+}
+
+.connection-status.status-error {
+  background-color: #ef4444;
+  color: white;
+  box-shadow: 0 2px 8px rgba(239, 68, 68, 0.3);
+}
+
+.connection-status.status-warning {
+  background-color: #f59e0b;
+  color: white;
+  box-shadow: 0 2px 8px rgba(245, 158, 11, 0.3);
+}
+
+.connection-status.status-hidden {
+  display: none !important;
+}
+
+/* Button Loading State */
+.btn-loading {
+  opacity: 0.75 !important;
+  cursor: wait !important;
+  pointer-events: none !important;
+  position: relative;
+}
+
+.btn-loading:disabled {
+  opacity: 0.75;
+}
+
+/* Spinner SVG Animation */
+.button-spinner {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  margin-right: 8px;
+  vertical-align: middle;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Toast Notification */
+.toast {
+  position: fixed;
+  padding: 12px 20px;
+  border-radius: 6px;
+  z-index: 9999;
+  font-weight: 500;
+  max-width: 400px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  animation: slideIn 0.3s ease-out;
+}
+
+@keyframes slideIn {
+  from {
+    transform: translateX(400px);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+.toast-error {
+  background-color: #ef4444;
+  color: white;
+}
+
+.toast-success {
+  background-color: #10b981;
+  color: white;
+}
+
+.toast-warning {
+  background-color: #f59e0b;
+  color: white;
+}
+
+.toast-info {
+  background-color: #3b82f6;
+  color: white;
+}
+
+/* Loading Spinner SVG Inline */
+svg.spinner {
+  width: 16px;
+  height: 16px;
+  display: inline-block;
+  margin-right: 8px;
+  vertical-align: middle;
+  animation: spin 1s linear infinite;
+}
+
+/* Responsive adjustments */
+@media (max-width: 640px) {
+  .connection-status {
+    min-width: auto;
+    width: calc(100% - 20px);
+    margin: 0 10px;
+    font-size: 12px;
+    padding: 8px 16px;
+  }
+
+  .toast {
+    right: 10px;
+    left: 10px;
+    width: calc(100% - 20px);
+    max-width: none;
+  }
+}
+
+/* Dark mode support */
+@media (prefers-color-scheme: dark) {
+  .connection-status {
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.5);
+  }
+
+  .toast {
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+  }
+}

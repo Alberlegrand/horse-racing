@@ -4,9 +4,10 @@ import express from "express";
 import { gameState, wrap } from "../game.js";
 import { systemToPublic } from "../utils.js";
 import { pool } from "../config/db.js";
-import { getReceiptsByUser, getBetsByReceipt, getReceiptById } from "../models/receiptModel.js";
+import { getReceiptsByUser, getBetsByReceipt, getBetsByReceiptsBatch, getReceiptById } from "../models/receiptModel.js";
 import { createPayment as dbCreatePayment, updatePaymentStatus as dbUpdatePaymentStatus } from "../models/paymentModel.js";
 import { updateReceiptStatus as dbUpdateReceiptStatus } from "../models/receiptModel.js";
+import { cacheResponse } from "../middleware/cache.js";
 
 /**
  * Crée le routeur pour "my-bets" (Mes Paris).
@@ -144,7 +145,7 @@ router.get("/:id", async (req, res) => {
 });
 
 // GET /api/v1/my-bets/
-router.get("/", async (req, res) => {
+router.get("/", cacheResponse(30), async (req, res) => {
   try {
     // 1. Récupérer les filtres de la requête
     const {
@@ -164,15 +165,21 @@ router.get("/", async (req, res) => {
         const userId = parseInt(req.query.user_id, 10);
         const dbLimit = parseInt(limit, 10) || 50;
         const dbReceipts = await getReceiptsByUser(userId, dbLimit);
-        const ticketsFromDb = [];
-        for (const r of dbReceipts) {
-          const bets = await getBetsByReceipt(r.receipt_id);
-          
-          // Convertir total_amount et prize de système à publique
+        const receiptIds = dbReceipts.map(r => r.receipt_id);
+        
+        // OPTIMISATION: Fetch tous les bets en une seule query au lieu de N queries
+        const allBets = receiptIds.length > 0 ? await getBetsByReceiptsBatch(receiptIds) : [];
+        const betsByReceipt = {};
+        allBets.forEach(bet => {
+          if (!betsByReceipt[bet.receipt_id]) betsByReceipt[bet.receipt_id] = [];
+          betsByReceipt[bet.receipt_id].push(bet);
+        });
+        
+        const ticketsFromDb = dbReceipts.map(r => {
+          const bets = betsByReceipt[r.receipt_id] || [];
           const totalAmountPublic = systemToPublic(Number(r.total_amount) || 0);
           const prizePublic = systemToPublic(Number(r.prize) || 0);
           
-          // Calculer potentialWinnings et avgCoeff
           let avgCoeff = 0;
           let potentialWinnings = 0;
           if (bets && bets.length === 1) {
@@ -181,7 +188,7 @@ router.get("/", async (req, res) => {
             potentialWinnings = betValuePublic * avgCoeff;
           }
           
-          const normalized = {
+          return {
             id: r.receipt_id,
             date: r.created_at ? r.created_at.toISOString() : new Date().toISOString(),
             roundId: r.round_id,
@@ -196,17 +203,13 @@ router.get("/", async (req, res) => {
             isMultibet: (bets || []).length > 1,
             bets: (bets || []).map(b => ({ 
               number: b.participant_number, 
-              value: systemToPublic(Number(b.value) || 0), // Convertir value aussi
+              value: systemToPublic(Number(b.value) || 0),
               participant: { name: b.participant_name, coeff: Number(b.coefficient) || 0 } 
             }))
           };
-          ticketsFromDb.push(normalized);
-        }
+        });
 
-        // Build response similar to previous logic
         const allTickets = ticketsFromDb.sort((a,b) => new Date(b.date) - new Date(a.date));
-        const pageNum = parseInt(page, 10);
-        const limitNum = parseInt(limit, 10);
         const totalItems = allTickets.length;
         const startIndex = (pageNum -1)*limitNum;
         const paginatedTickets = allTickets.slice(startIndex, startIndex + limitNum);

@@ -3,22 +3,23 @@ import express from "express";
 import { wrap } from "../game.js";
 import { systemToPublic } from "../utils.js";
 import { pool } from "../config/db.js";
+import { cacheResponse } from "../middleware/cache.js";
+import { cacheDelPattern } from "../config/redis.js";
+import { getSalesStats, invalidateCachePattern } from "../models/queryCache.js";
 
 const router = express.Router();
 
-// GET /api/v1/money/ - calcule le solde caisse depuis la base
-router.get("/", async (req, res) => {
+// GET /api/v1/money/ - calcule le solde caisse depuis la base (CACHED)
+router.get("/", cacheResponse(30), async (req, res) => {
   try {
-    // Total entrées (mises reçues = somme des total_amount des tickets)
-    const receivedRes = await pool.query(`SELECT COALESCE(SUM(total_amount),0) AS total_received FROM receipts WHERE status IN ('pending', 'won', 'paid', 'lost')`);
-    const totalReceivedSystem = Number(receivedRes.rows[0].total_received) || 0;
-    const totalReceived = systemToPublic(totalReceivedSystem); // Convertir en valeur publique
-
-    // Total sorties (gains décaissés = somme des prizes des tickets payés)
-    const payoutRes = await pool.query(`SELECT COALESCE(SUM(prize),0) AS total_payouts FROM receipts WHERE status = 'paid'`);
-    const totalPayoutsSystem = Number(payoutRes.rows[0].total_payouts) || 0;
-    const totalPayouts = systemToPublic(totalPayoutsSystem); // Convertir en valeur publique
-
+    // OPTIMISATION: Utiliser la query cache - combine 2 queries en 1 + multi-tier caching
+    const stats = await getSalesStats();
+    
+    const totalReceivedSystem = Number(stats.total_received) || 0;
+    const totalPayoutsSystem = Number(stats.total_payouts) || 0;
+    
+    const totalReceived = systemToPublic(totalReceivedSystem);
+    const totalPayouts = systemToPublic(totalPayoutsSystem);
     const cashBalance = totalReceived - totalPayouts;
 
     console.log(`💰 Money: received=${totalReceived}, payouts=${totalPayouts}, balance=${cashBalance}`);
@@ -32,17 +33,22 @@ router.get("/", async (req, res) => {
 // Support legacy clients that POST to /api/v1/money/ (some frontends expect POST)
 router.post("/", async (req, res) => {
   try {
-    const receivedRes = await pool.query(`SELECT COALESCE(SUM(total_amount),0) AS total_received FROM receipts WHERE status IN ('pending', 'won', 'paid', 'lost')`);
-    const totalReceivedSystem = Number(receivedRes.rows[0].total_received) || 0;
-    const totalReceived = systemToPublic(totalReceivedSystem); // Convertir en valeur publique
-
-    const payoutRes = await pool.query(`SELECT COALESCE(SUM(prize),0) AS total_payouts FROM receipts WHERE status = 'paid'`);
-    const totalPayoutsSystem = Number(payoutRes.rows[0].total_payouts) || 0;
-    const totalPayouts = systemToPublic(totalPayoutsSystem); // Convertir en valeur publique
-
+    // OPTIMISATION: Utiliser la query cache - combine 2 queries en 1 + multi-tier caching
+    const stats = await getSalesStats();
+    
+    const totalReceivedSystem = Number(stats.total_received) || 0;
+    const totalPayoutsSystem = Number(stats.total_payouts) || 0;
+    
+    const totalReceived = systemToPublic(totalReceivedSystem);
+    const totalPayouts = systemToPublic(totalPayoutsSystem);
     const cashBalance = totalReceived - totalPayouts;
 
     console.log(`💰 Money (POST): received=${totalReceived}, payouts=${totalPayouts}, balance=${cashBalance}`);
+    
+    // Invalidate cache after money state change
+    await invalidateCachePattern("sales_stats");
+    await cacheDelPattern("http:*/api/v1/money*");
+    
     return res.json(wrap({ money: cashBalance, totalReceived, totalPayouts }));
   } catch (err) {
     console.error('Erreur POST /api/v1/money:', err);
@@ -68,6 +74,11 @@ router.post("/payout", async (req, res) => {
     });
 
     console.log(`💸 Payout enregistré: ${amount} HTG (${reason})`);
+    
+    // Invalidate cache after payout
+    await invalidateCachePattern("sales_stats");
+    await cacheDelPattern("http:*/api/v1/money*");
+    
     return res.json(wrap({ success: true, message: `Décaissement de ${amount} HTG enregistré` }));
   } catch (err) {
     console.error('Erreur POST /api/v1/money/payout:', err);
