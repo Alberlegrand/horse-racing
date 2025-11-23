@@ -8,12 +8,8 @@ import { escapeHtml, systemToPublic } from "../utils.js";
 import { chacha20Random, chacha20RandomInt, initChaCha20 } from "../chacha20.js";
 import crypto from 'crypto';
 // DB models pour persistance des tickets
-import { createReceipt as dbCreateReceipt, createBet as dbCreateBet, createBetsBatch } from "../models/receiptModel.js";
+import { createReceipt as dbCreateReceipt, createBet as dbCreateBet } from "../models/receiptModel.js";
 import { pool } from "../config/db.js";
-// Cache invalidation
-import { cacheDelPattern } from "../config/redis.js";
-// Cache middleware
-import { cacheResponse } from "../middleware/cache.js";
 
 /**
  * Crée le routeur pour les "receipts" (tickets).
@@ -574,6 +570,31 @@ export default function createReceiptsRouter(broadcast) {
       const receipt = req.body;
       console.log("Ajout d'un nouveau ticket :", receipt);
 
+      // ✅ VALIDATION STRICTE: Vérifier que les participants du ticket existent dans le round actuel
+      if (!Array.isArray(receipt.bets) || receipt.bets.length === 0) {
+        console.warn("[VALIDATION] ❌ Ticket sans paris");
+        return res.status(400).json({
+          error: "Le ticket doit contenir au moins un pari",
+          code: "NO_BETS"
+        });
+      }
+
+      // Vérifier que TOUS les participants du ticket existent dans le round
+      const currentParticipantNumbers = (gameState.currentRound.participants || []).map(p => p.number);
+      const invalidBets = receipt.bets.filter(bet => {
+        const participantNumber = bet.participant?.number || bet.number;
+        return !currentParticipantNumbers.includes(participantNumber);
+      });
+
+      if (invalidBets.length > 0) {
+        console.warn(`[VALIDATION] ❌ Participants introuvables: ${invalidBets.map(b => b.participant?.number || b.number).join(', ')}`);
+        return res.status(400).json({
+          error: "Un ou plusieurs participants ne sont pas valides pour ce tour",
+          code: "INVALID_PARTICIPANTS",
+          invalidParticipants: invalidBets.map(b => b.participant?.number || b.number)
+        });
+      }
+
       // Génération d'un ID formaté : <stationNumber><6chiffres>
       // - `STATION_NUMBER` peut être fourni via la variable d'environnement pour représenter la succursale.
       // - Par défaut on utilisera la valeur fictive '01' (modifiable si besoin).
@@ -720,59 +741,51 @@ export default function createReceiptsRouter(broadcast) {
             console.warn('[DB] Receipt non persisté en base; saut des insertions de bets pour éviter violation FK');
             return;
           }
-          
-          // OPTIMISATION: Batch insert tous les bets au lieu de les boucler 1 par 1
-          // Récupérer tous les participant IDs en une seule query
-          const participantNumbers = (receipt.bets || []).map(b => b.number || b.participant?.number).filter(Boolean);
-          const participantMap = {};
-          
-          if (participantNumbers.length > 0) {
+          // Créer les bets en base (si la table bets existe)
+          for (const b of receipt.bets || []) {
             try {
-              // Fetch all participants in one query
-              const placeholders = participantNumbers.map((_, i) => `$${i + 1}`).join(',');
-              const pRes = await pool.query(
-                `SELECT participant_id, number FROM participants WHERE number IN (${placeholders})`,
-                participantNumbers
-              );
-              pRes.rows.forEach(row => {
-                participantMap[row.number] = row.participant_id;
-              });
-              console.log(`[DB] ✓ ${pRes.rows.length} participants trouvés en une seule query`);
-            } catch (err) {
-              console.error('[DB] Erreur batch lookup participants:', err.message);
+              const participantNumber = b.number || b.participant?.number || null;
+              let participantId = null;
+              if (participantNumber !== null) {
+                try {
+                  // Debug: check if table has data
+                  const countRes = await pool.query("SELECT COUNT(*) as cnt FROM participants");
+                  const totalParticipants = parseInt(countRes.rows[0]?.cnt || 0, 10);
+                  console.log(`[DB] Participants dans la table: ${totalParticipants}`);
+                  
+                  const pRes = await pool.query("SELECT participant_id FROM participants WHERE number = $1 LIMIT 1", [participantNumber]);
+                  if (pRes && pRes.rows && pRes.rows[0]) {
+                    participantId = pRes.rows[0].participant_id;
+                    console.log(`[DB] ✓ Participant trouvé: numero=${participantNumber}, id=${participantId}`);
+                  } else {
+                    console.warn(`[DB] ⚠️ Aucun participant trouvé pour numero=${participantNumber}`);
+                    // Show all participants for debugging
+                    const allRes = await pool.query("SELECT participant_id, number, name FROM participants");
+                    if (allRes.rows.length > 0) {
+                      console.log("[DB] Participants disponibles:", allRes.rows);
+                    }
+                  }
+                } catch (lookupErr) {
+                  console.error('[DB] Erreur lookup participant by number:', lookupErr.message);
+                }
+              }
+
+              // Only persist bet if we have a valid participant_id (required by schema)
+              if (participantId !== null) {
+                await dbCreateBet({
+                  receipt_id: receipt.id,
+                  participant_id: participantId,
+                  participant_number: participantNumber,
+                  participant_name: b.participant?.name || null,
+                  coefficient: b.participant?.coeff || null,
+                  value: Number(b.value) || 0
+                });
+              } else {
+                console.warn('[DB] Impossible de persister le pari: participant_id introuvable pour numero', participantNumber);
+              }
+            } catch (err2) {
+              console.error('[DB] Erreur persistance bet:', err2);
             }
-          }
-          
-          // Préparer les bets pour batch insert
-          const betsForBatch = (receipt.bets || [])
-            .filter(b => {
-              const num = b.number || b.participant?.number;
-              return num !== null && participantMap[num];
-            })
-            .map(b => {
-              const num = b.number || b.participant?.number;
-              return {
-                receipt_id: receipt.id,
-                participant_id: participantMap[num],
-                participant_number: num,
-                participant_name: b.participant?.name || null,
-                coefficient: b.participant?.coeff || null,
-                value: Number(b.value) || 0,
-                status: 'pending',
-                prize: 0
-              };
-            });
-          
-          // Insert tous les bets en une seule query au lieu de N queries
-          if (betsForBatch.length > 0) {
-            try {
-              await createBetsBatch(betsForBatch);
-              console.log(`[DB] ✓ ${betsForBatch.length} bets créés en batch (1 query au lieu de ${betsForBatch.length})`);
-            } catch (batchErr) {
-              console.error('[DB] Erreur batch insert bets:', batchErr.message);
-            }
-          } else {
-            console.warn('[DB] Aucun bet valide pour batch insert');
           }
         } catch (err3) {
           console.error('[DB] Erreur lors de la persistance des bets:', err3);
@@ -793,10 +806,6 @@ export default function createReceiptsRouter(broadcast) {
           totalPrize: gameState.currentRound.totalPrize || 0
         });
       }
-      
-      // Invalidate cache after successful receipt creation
-      await cacheDelPattern("http:*/api/v1/my-bets/*");
-      await cacheDelPattern("http:*/api/v1/money*");
       
       return res.json(wrap({ id: receipt.id, success: true }));
     }
@@ -879,10 +888,6 @@ export default function createReceiptsRouter(broadcast) {
                 });
               }
 
-              // Invalidate related caches after successful deletion
-              await cacheDelPattern("http:*/api/v1/my-bets/*");
-              await cacheDelPattern("http:*/api/v1/money*");
-
               return res.json(wrap({ success: true }));
             } catch (delErr) {
               console.error('[DB] Erreur lookup/delete receipt fallback:', delErr);
@@ -946,10 +951,6 @@ export default function createReceiptsRouter(broadcast) {
           totalPrize: gameState.currentRound.totalPrize || 0
         });
       }
-
-      // Invalidate related caches after successful deletion
-      await cacheDelPattern("http:*/api/v1/my-bets/*");
-      await cacheDelPattern("http:*/api/v1/money*");
 
       console.log("Ticket supprimé ID :", id);
       return res.json(wrap({ success: true }));

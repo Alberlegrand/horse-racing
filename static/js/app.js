@@ -330,12 +330,23 @@ class App {
                         // Attendre un court délai pour que la fenêtre se charge
                         await new Promise(resolve => setTimeout(resolve, 500));
                         
-                        // Effectuer le paiement avec enhanced fetch client
-                        const data = await window.enhancedFetch.post(
-                            `/api/v1/my-bets/pay/${ticketId}`,
-                            {},
-                            buttonElement
-                        );
+                        // Effectuer le paiement avec enhanced fetch client ou fallback
+                        let data;
+                        if (window.enhancedFetch && typeof window.enhancedFetch.post === 'function') {
+                            data = await window.enhancedFetch.post(
+                                `/api/v1/my-bets/pay/${ticketId}`,
+                                {},
+                                buttonElement
+                            );
+                        } else {
+                            // Fallback si les modules n'ont pas chargé
+                            const res = await fetch(`/api/v1/my-bets/pay/${ticketId}`, {
+                                method: 'POST',
+                                credentials: 'include'
+                            });
+                            data = await res.json();
+                            if (!res.ok) throw new Error(data.error || data.message || 'Erreur lors du paiement');
+                        }
                         
                         // Attendre que la DB soit mise à jour, puis rafraîchir la liste des tickets
                         setTimeout(() => refreshTickets(), 300);
@@ -380,12 +391,23 @@ class App {
                         
                         console.log(`[CLIENT] Deleting receipt id=${ticketId} -> /api/v1/receipts/?action=delete&id=${ticketId}`);
                         
-                        // Call API with enhanced fetch client
-                        const data = await window.enhancedFetch.post(
-                            `/api/v1/receipts/?action=delete&id=${ticketId}`,
-                            {},
-                            buttonElement
-                        );
+                        // Call API with enhanced fetch client ou fallback
+                        let data;
+                        if (window.enhancedFetch && typeof window.enhancedFetch.post === 'function') {
+                            data = await window.enhancedFetch.post(
+                                `/api/v1/receipts/?action=delete&id=${ticketId}`,
+                                {},
+                                buttonElement
+                            );
+                        } else {
+                            // Fallback si les modules n'ont pas chargé
+                            const res = await fetch(`/api/v1/receipts/?action=delete&id=${ticketId}`, {
+                                method: 'POST',
+                                credentials: 'include'
+                            });
+                            data = await res.json();
+                            if (!res.ok) throw new Error(data.error || data.message || 'Erreur lors de l\'annulation');
+                        }
                         
                         // Rafraîchir immédiatement la liste des tickets pour synchroniser l'UI
                         try { refreshTickets(); } catch (e) { console.warn('refreshTickets failed after delete:', e); }

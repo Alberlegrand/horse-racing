@@ -4,6 +4,7 @@
 import { chacha20Random, chacha20RandomInt, chacha20Shuffle, initChaCha20 } from './chacha20.js';
 import { pool } from './config/db.js';
 import { getNextRoundNumber } from './utils/roundNumberManager.js';
+import { cacheSet, cacheGet, cacheDelPattern } from './config/redis.js';
 
 // Initialiser ChaCha20 RNG au démarrage
 initChaCha20();
@@ -179,7 +180,62 @@ export async function startNewRound(broadcast) {
         });
             // schedule the pre-start overlay broadcast 5s before the next round
             schedulePreStart(broadcast);
+            // ✅ PERSISTANCE : Sauvegarde le gameState en Redis
+            await saveGameStateToRedis();
     } else {
         console.warn("startNewRound: 'broadcast' function non fournie.");
+    }
+}
+
+/**
+ * Sauvegarde l'état du jeu complet en Redis avec TTL de 1 heure
+ * Permet la récupération après crash serveur
+ */
+export async function saveGameStateToRedis() {
+    try {
+        await cacheSet('game:state:current', gameState, 3600);
+        console.log(`✅ [CACHE] GameState sauvegardé en Redis`);
+        return true;
+    } catch (err) {
+        console.error(`⚠️ [CACHE] Erreur sauvegarde gameState:`, err.message);
+        return false;
+    }
+}
+
+/**
+ * Récupère l'état du jeu depuis Redis (après crash serveur)
+ */
+export async function restoreGameStateFromRedis() {
+    try {
+        const savedState = await cacheGet('game:state:current');
+        if (savedState) {
+            // Restaure les propriétés clés
+            gameState.currentRound = savedState.currentRound || {};
+            gameState.gameHistory = savedState.gameHistory || [];
+            gameState.nextRoundStartTime = savedState.nextRoundStartTime;
+            gameState.raceStartTime = savedState.raceStartTime;
+            gameState.raceEndTime = savedState.raceEndTime;
+            gameState.isRaceRunning = savedState.isRaceRunning;
+            console.log(`✅ [CACHE] GameState restauré depuis Redis`);
+            return true;
+        }
+        return false;
+    } catch (err) {
+        console.error(`⚠️ [CACHE] Erreur restauration gameState:`, err.message);
+        return false;
+    }
+}
+
+/**
+ * Invalide le cache du gameState (après modification importante)
+ */
+export async function invalidateGameStateCache() {
+    try {
+        await cacheDelPattern('game:state:*');
+        console.log(`✅ [CACHE] GameState cache invalidé`);
+        return true;
+    } catch (err) {
+        console.error(`⚠️ [CACHE] Erreur invalidation gameState cache:`, err.message);
+        return false;
     }
 }

@@ -55,6 +55,11 @@
             visibility: visible;
         }
     </style>
+    
+    <!-- Connection & Error Handling Scripts (Load Early) -->
+    <script src="/js/button-loader.js"></script>
+    <script src="/js/connection-error-handler.js"></script>
+    <script src="/js/enhanced-fetch-client.js"></script>
 </head>
 
 <body class="">
@@ -264,11 +269,6 @@
             connectWebSocket();
         }
     </script>
-
-    <!-- Connection & Error Handling Scripts -->
-    <script src="/js/button-loader.js"></script>
-    <script src="/js/connection-error-handler.js"></script>
-    <script src="/js/enhanced-fetch-client.js"></script>
 
 </body>
 

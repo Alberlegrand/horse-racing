@@ -157,30 +157,33 @@ GameScreen.prototype._validateReceipt = function () {
 };
 
 GameScreen.prototype._addReceipt = function () {
-    let receipt = new GameModel.ReceiptModel(-1, this._bets);
+    let receipt = new GameModel.ReceiptModel(-1, this._bets);
 
-    let game = this._context.getGameManager().getGame();
-    let newReceiptData = this._view._getNewReceiptData(game, receipt);
+    let game = this._context.getGameManager().getGame();
+    let newReceiptData = this._view._getNewReceiptData(game, receipt);
 
-    this._context.getGameManager().createReceiptRequest(newReceiptData, $.proxy(
-        /** @param result {import('./types').ReceiptsAddResponse} */
-        function (result) {
-            receipt.id = parseInt(result.id);
-            if (receipt.id === -1) {
-                throw new GameScreen.ValidationError(Messages.NO_BETS);
-            }
-            this._receipts.push(receipt);
-            this._view.addReceipt(receipt, this._getTotalValue());
-            this._bets.forEach($.proxy(function (bet) {
-                this._view.setBet(bet.number, null, null);
-            }, this));
-            this._bets = [];
-            this._context.getWebClient()._updatePanel();
-        }, this)
-    );
-};
-
-/**
+    this._context.getGameManager().createReceiptRequest(newReceiptData, $.proxy(
+        /** @param result {import('./types').ReceiptsAddResponse} */
+        function (result) {
+            receipt.id = parseInt(result.id);
+            if (receipt.id === -1) {
+                throw new GameScreen.ValidationError(Messages.NO_BETS);
+            }
+            this._receipts.push(receipt);
+            this._view.addReceipt(receipt, this._getTotalValue());
+            this._bets.forEach($.proxy(function (bet) {
+                this._view.setBet(bet.number, null, null);
+            }, this));
+            this._bets = [];
+            
+            // 🖨️ AUTO-PRINT TICKET AFTER CREATION
+            console.log(`[GAME] 📋 Receipt #${receipt.id} created, printing...`);
+            this._printReceipt(receipt.id);
+            
+            this._context.getWebClient()._updatePanel();
+        }, this)
+    );
+};/**
  * @param receiptId {number}
  */
 GameScreen.prototype._removeReceipt = function (receiptId) {

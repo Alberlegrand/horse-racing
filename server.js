@@ -7,7 +7,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 
 // Imports de nos modules
-import { gameState, startNewRound, wrap } from "./game.js";
+import { gameState, startNewRound, wrap, restoreGameStateFromRedis } from "./game.js";
 import createRoundsRouter from "./routes/rounds.js";
 import createAuthRouter, { verifyToken, requireRole } from "./routes/auth.js";
 import createReceiptsRouter from "./routes/receipts.js";
@@ -25,6 +25,7 @@ import { initializeDatabase } from "./config/db.js";
 // Import Redis pour cache et sessions
 import { initRedis, closeRedis } from "./config/redis.js";
 import { cacheResponse } from "./middleware/cache.js";
+import { sessionMiddleware } from "./middleware/session.js";
 
 // Recréation de __dirname
 const __filename = fileURLToPath(import.meta.url);
@@ -44,6 +45,12 @@ await initRedis().catch(err => {
 // Initialiser la base de données au démarrage
 await initializeDatabase();
 
+// ✅ IMPORTANT: Restaurer l'état du jeu depuis Redis si serveur crash antérieur
+const restored = await restoreGameStateFromRedis();
+if (restored) {
+  console.log(`✅ État du jeu restauré depuis Redis après crash`);
+}
+
 // =================================================================
 // ===           CONFIGURATION DU MIDDLEWARE                     ===
 // =================================================================
@@ -56,6 +63,9 @@ app.use(cors({
 app.use(cookieParser());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+// ✅ MIDDLEWARE: Sessions Redis
+app.use(sessionMiddleware());
 
 // Fichiers statiques
 app.use(express.static(path.join(__dirname, "static")));
@@ -78,11 +88,17 @@ const wss = new WebSocketServer({
 
 /**
  * Diffuse des données à tous les clients WebSocket connectés.
+ * ✅ Ajoute automatiquement serverTime pour synchronisation
  */
 function broadcast(data) {
+  const enhancedData = {
+    ...data,
+    serverTime: Date.now() // ✅ SYNC: Timestamp serveur pour tous les broadcasts
+  };
+  
   wss.clients.forEach((client) => {
     if (client.readyState === 1) { // 1 = WebSocket.OPEN
-      client.send(JSON.stringify(data));
+      client.send(JSON.stringify(enhancedData));
     }
   });
 }
@@ -111,6 +127,7 @@ wss.on("connection", (ws) => {
   // Envoie l'état complet au nouveau client pour synchronisation
   ws.send(JSON.stringify({ 
     event: "connected", 
+    serverTime: Date.now(), // ✅ SYNC: Timestamp serveur pour synchronisation client
     roundId: gameState.currentRound?.id || null,
     screen: screen,
     isRaceRunning: gameState.isRaceRunning,
@@ -201,7 +218,19 @@ app.use("/api/v1/keepalive/", keepaliveRouter);
 const roundsRouter = createRoundsRouter(broadcast);
 app.use("/api/v1/rounds/", verifyToken, roundsRouter);
 
-app.use("/api/v1/receipts/", verifyToken, requireRole('cashier', 'admin'), createReceiptsRouter(broadcast));
+// Receipts router with special handling for print (no auth required)
+app.get("/api/v1/receipts/", (req, res, next) => {
+  // Allow print action without authentication
+  if (req.query.action === 'print') {
+    return next();
+  }
+  // For other GET/POST actions, require authentication
+  verifyToken(req, res, () => {
+    requireRole('cashier', 'admin')(req, res, next);
+  });
+});
+
+app.use("/api/v1/receipts/", createReceiptsRouter(broadcast));
 
 app.use("/api/v1/my-bets/", verifyToken, createMyBetsRouter(broadcast));
 
@@ -232,6 +261,30 @@ app.listen(PORT, () => {
   console.log(`✅ Serveur de jeu lancé sur http://localhost:${PORT}`);
   // Démarre le premier tour au lancement
   startNewRound(broadcast);
+  
+  // ✅ NOUVEAU: Broadcast le timer toutes les 500ms pour synchronisation client
+  // Cela permet aux clients de rester synchronisés même s'ils dérivent
+  setInterval(() => {
+    const now = Date.now();
+    if (gameState.nextRoundStartTime && gameState.nextRoundStartTime > now) {
+      const timeLeft = gameState.nextRoundStartTime - now;
+      const envDuration = Number(process.env.ROUND_WAIT_DURATION_MS);
+      const ROUND_WAIT_DURATION_MS = (envDuration > 0) ? envDuration : 180000;
+      
+      broadcast({
+        event: 'timer_update',
+        roundId: gameState.currentRound?.id, // ✅ Inclure le roundId
+        timer: {
+          timeLeft: Math.max(0, timeLeft),
+          totalDuration: ROUND_WAIT_DURATION_MS, // ✅ Utiliser la vraie durée
+          startTime: gameState.nextRoundStartTime - ROUND_WAIT_DURATION_MS,
+          endTime: gameState.nextRoundStartTime,
+          percentage: 100 - (timeLeft / ROUND_WAIT_DURATION_MS) * 100,
+          serverTime: now
+        }
+      });
+    }
+  }, 500); // Toutes les 500ms pour synchronisation fine
   
   // Démarrer automatiquement la première course après un court délai
   // La boucle automatique sera gérée par routes/rounds.js après le premier finish

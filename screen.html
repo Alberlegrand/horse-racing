@@ -491,12 +491,20 @@
                 const $progressBar = $('#progressBar');
 
                 if (timeLeft <= 0) {
-                    // Temps écoulé
+                    // Temps écoulé - Déclencher le clic automatique du bouton Start
                     clearInterval(countdownInterval);
                     countdownInterval = null;
-                    $('#countdownPanel').addClass('hidden');
                     $('#timeRemainingDisplay').text('00:00');
-                    $progressBar.css('width', '100%'); 
+                    $progressBar.css('width', '100%');
+                    
+                    // ✅ CLIC AUTOMATIQUE du bouton Start
+                    const $startButton = $('.start');
+                    if ($startButton.length > 0) {
+                        console.log('⚡ Timer local écoulé! Clic automatique du bouton Start');
+                        $startButton.css('visibility', 'visible').click();
+                    } else {
+                        console.warn('⚠️ Bouton Start non trouvé');
+                    }
                     return;
                 }
 
@@ -525,58 +533,13 @@
             }
 
             /**
-             * Fonction 1: Point d'entrée et boucle principale (POLLING).
-             * Interroge le serveur pour savoir quoi faire.
+             * ✅ Fonction 1 REMPLACÉE par WebSocket pur.
+             * La synchronisation est maintenant géée par le WebSocket au lieu du polling HTTP.
+             * Cette fonction est conservée pour compatibilité mais ne fait plus rien.
              */
             function gererCycleDeJeu() {
-                console.log('Interrogation du serveur pour le temps de lancement...');
-
-                $.ajax({
-                    url: '/api/v1/rounds/launch-time',
-                    method: 'GET',
-                    success: function (data) {
-                        var tempsRestantServeur = data.timeLeft;
-                        var delaiTotalAttente = data.delaiTotalAttente; // Récupère le délai total du serveur
-                        
-                        // Met à jour la variable locale pour le calcul de la progression
-                        totalDelayMs = delaiTotalAttente;
-
-                        if (tempsRestantServeur > 0) {
-                            // Minuteur en cours, on attend qu'il se termine
-                            console.log(`⏰ Synchronisation - attente de ${Math.round(tempsRestantServeur / 1000)}s avant lancement automatique`);
-
-                            // 1. Affiche le panneau et configure le minuteur
-                            $('#countdownPanel').removeClass('hidden');
-                            targetEndTime = Date.now() + tempsRestantServeur;
-
-                            if (countdownInterval) {
-                                clearInterval(countdownInterval); 
-                            }
-                            mettreAJourProgressBar(); // Mise à jour immédiate
-                            countdownInterval = setInterval(mettreAJourProgressBar, 250); // Mettre à jour toutes les 250ms
-
-                            // 2. Programme la relance de la boucle principale après la fin du compte à rebours
-                            setTimeout(gererCycleDeJeu, tempsRestantServeur + 500);
-                        } else {
-                            // Pas de minuteur (timeLeft est 0).
-                            // 1. Cache le panneau et arrête l'intervalle
-                            $('#countdownPanel').addClass('hidden');
-                            if (countdownInterval) {
-                                clearInterval(countdownInterval);
-                                countdownInterval = null;
-                            }
-                            
-                            // 2. Tente de démarrer la course
-                            console.log(`⚡ Serveur prêt (ou course en cours). Tentative de démarrage.`);
-                            tenterDeDemarrer();
-                        }
-                    },
-                    error: function (xhr, status, error) {
-                        console.error("❌ Erreur API : Impossible de joindre le serveur de temps -", error);
-                        // On retente la boucle principale après un délai
-                        setTimeout(gererCycleDeJeu, delaiRetryErreur);
-                    }
-                });
+                console.log('ℹ️ gererCycleDeJeu() est maintenant géré par WebSocket');
+                // Plus de polling HTTP - WebSocket gère tout
             }
 
             /**
@@ -766,7 +729,6 @@
                 // 8. Réinitialiser le timer et les variables
                 $('#progressBar').css('width', '0%').removeClass('bg-green-500 bg-yellow-500 bg-red-500');
                 $('#timeRemainingDisplay').text('00:00');
-                $('#countdownPanel').addClass('hidden');
                 targetEndTime = 0;
                 totalDelayMs = 0;
                 
@@ -838,77 +800,32 @@
              * Fonction de synchronisation au chargement de la page.
              * Récupère l'état actuel du serveur et affiche le bon écran.
              */
+            /**
+             * ✅ Synchronisation WebSocket pur au chargement.
+             * Plus de polling HTTP - tout passe par WebSocket.
+             */
             function synchroniserAuChargement() {
-                console.log('🔄 Synchronisation avec le serveur au chargement de la page...');
+                console.log('🔄 Synchronisation avec le serveur via WebSocket...');
                 
+                // Connecte au WebSocket (source de vérité unique)
+                connecterWebSocket();
+                
+                // Récupération optionnelle de l'état initial (fallback pour UI rapide)
                 $.ajax({
                     url: '/api/v1/rounds/status',
                     method: 'GET',
+                    timeout: 2000,
                     success: function (data) {
-                        console.log('✅ État serveur récupéré:', data);
-                        
-                        // Met à jour le currentRound si disponible
+                        console.log('✅ État initial:', data);
                         if (data.currentRound && data.currentRound.id) {
                             $('#currentRound').text('Round ' + data.currentRound.id);
                         }
-                        
-                        // Met à jour les 3 derniers gagnants
                         if (data.gameHistory) {
                             afficherDerniersGagnants(data.gameHistory);
                         }
-                        
-                        // Synchronise le timer si nécessaire
-                        if (data.timerTimeLeft > 0) {
-                            totalDelayMs = data.timerTotalDuration;
-                            targetEndTime = Date.now() + data.timerTimeLeft;
-                            $('#countdownPanel').removeClass('hidden');
-                            mettreAJourProgressBar();
-                            if (countdownInterval) clearInterval(countdownInterval);
-                            countdownInterval = setInterval(mettreAJourProgressBar, 250);
-                        }
-                        
-                        // Affiche le bon écran selon l'état du serveur
-                        if (data.screen === 'movie_screen') {
-                            console.log(`🎬 Course en cours depuis ${Math.round(data.timeInRace / 1000)}s, affichage movie_screen`);
-                            // Active movie_screen et simule le temps écoulé
-                            $('.screen').removeClass('active');
-                            $('.movie_screen').addClass('active');
-                            
-                            // Si la course est presque terminée, on passe directement au finish
-                            if (data.timeRemaining < 2000) {
-                                setTimeout(function() {
-                                    $('.movie_screen').removeClass('active');
-                                    $('.finish_screen').addClass('active');
-                                }, data.timeRemaining);
-                            }
-                        } else if (data.screen === 'finish_screen') {
-                            console.log(`🏁 Finish screen actif, ${Math.round(data.timeRemaining / 1000)}s restantes`);
-                            $('.screen').removeClass('active');
-                            $('.finish_screen').addClass('active');
-                            //$('.new_game').css('visibility', 'visible');
-                        } else {
-                            // game_screen
-                            console.log('📋 Affichage game_screen');
-                            $('.screen').removeClass('active');
-                            $('.game_screen').addClass('active');
-                        }
-                        
-                        // Démarre la connexion WebSocket pour la synchronisation en temps réel
-                        connecterWebSocket();
-                        
-                        // Lance la boucle principale
-                        gererCycleDeJeu();
-
-                        // Écoute l'événement du finish_screen pour mettre à jour localement l'historique
-                        $(document).off('round_winner.__winners').on('round_winner.__winners', function(e, payload) {
-                            ajouterGagnantHistoriqueDepuisFinish(payload);
-                        });
                     },
-                    error: function (xhr, status, error) {
-                        console.error('❌ Erreur lors de la synchronisation:', error);
-                        // Continue quand même avec la boucle normale
-                        connecterWebSocket();
-                        gererCycleDeJeu();
+                    error: function() {
+                        console.warn('⚠️ État initial non disponible, attente WebSocket...');
                     }
                 });
             }
@@ -989,10 +906,53 @@
                                 if (data.timer && data.timer.timeLeft > 0) {
                                     totalDelayMs = data.timer.totalDuration;
                                     targetEndTime = Date.now() + data.timer.timeLeft;
-                                    $('#countdownPanel').removeClass('hidden');
+                                    console.log(`⏱️ New round timer: ${Math.round(data.timer.timeLeft / 1000)}s restantes`);
                                     mettreAJourProgressBar();
                                     if (countdownInterval) clearInterval(countdownInterval);
                                     countdownInterval = setInterval(mettreAJourProgressBar, 250);
+                                }
+                                break;
+                                
+                            // ✅ NOUVEAU: Timer update périodique (resync tous les 500ms)
+                            case 'timer_update':
+                                if (data.timer && data.timer.timeLeft >= 0) {
+                                    // Resync le timer local avec le serveur
+                                    totalDelayMs = data.timer.totalDuration;
+                                    targetEndTime = data.serverTime + data.timer.timeLeft;
+                                    
+                                    console.log(`⏱️ Timer sync: ${Math.round(data.timer.timeLeft / 1000)}s restantes`);
+                                    
+                                    // Affiche le timer dans la barre de progression
+                                    if (data.timer.timeLeft > 0) {
+                                        // Timer actif - afficher et mettre à jour
+                                        mettreAJourProgressBar();
+                                        if (!countdownInterval) {
+                                            countdownInterval = setInterval(mettreAJourProgressBar, 250);
+                                        }
+                                    } else {
+                                        // Timer terminé - Déclencher le clic automatique du bouton Start
+                                        if (countdownInterval) {
+                                            clearInterval(countdownInterval);
+                                            countdownInterval = null;
+                                        }
+                                        $('#timeRemainingDisplay').text('00:00');
+                                        $('#progressBar').css('width', '100%');
+                                        
+                                        // ✅ CLIC AUTOMATIQUE du bouton Start
+                                        console.log('⚡ Timer écoulé! Clic automatique du bouton Start');
+                                        setTimeout(() => {
+                                            // Rendre le bouton visible
+                                            const $startButton = $('.start');
+                                            $startButton.css('visibility', 'visible');
+                                            
+                                            if ($startButton.length > 0) {
+                                                console.log('🎯 Démarrage automatique de la course...');
+                                                $startButton.click();
+                                            } else {
+                                                console.warn('⚠️ Bouton Start non trouvé');
+                                            }
+                                        }, 100); // Délai minimal pour s'assurer que l'UI est prête
+                                    }
                                 }
                                 break;
                         }
