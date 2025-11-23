@@ -1120,10 +1120,19 @@ class App {
 
         async function refreshCashierDashboard() {
             try {
-                // money
-                const moneyRes = await fetch('/api/v1/money/', { credentials: 'include' });
-                if (!moneyRes.ok) throw new Error(`HTTP ${moneyRes.status}`);
+                // 🚀 OPTIMISATION: Parallel API calls (Promise.all) instead of sequential
+                const [moneyRes, myBetsRes] = await Promise.all([
+                    fetch('/api/v1/money/', { credentials: 'include' }),
+                    fetch('/api/v1/my-bets/?limit=1000&page=1', { credentials: 'include' })
+                ]);
+
+                // Check responses
+                if (!moneyRes.ok) throw new Error(`Money API HTTP ${moneyRes.status}`);
+                if (!myBetsRes.ok) throw new Error(`My-bets API HTTP ${myBetsRes.status}`);
+
                 const moneyJson = await moneyRes.json();
+                const myBetsJson = await myBetsRes.json();
+
                 const moneyData = moneyJson.data || {};
                 state.currentBalance = Number(moneyData.money || 0);
                 state.totalReceipts = Number(moneyData.totalReceived || 0);
@@ -1137,9 +1146,6 @@ class App {
                 if (el('systemBalance')) el('systemBalance').textContent = state.currentBalance.toFixed(2) + ' HTG';
 
                 // tickets
-                const myBetsRes = await fetch('/api/v1/my-bets/?limit=1000&page=1', { credentials: 'include' });
-                if (!myBetsRes.ok) throw new Error(`HTTP ${myBetsRes.status}`);
-                const myBetsJson = await myBetsRes.json();
                 const myBetsData = myBetsJson.data || {};
                 const tickets = myBetsData.tickets || [];
 

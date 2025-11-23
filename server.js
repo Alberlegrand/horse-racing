@@ -9,11 +9,13 @@ import { fileURLToPath } from "url";
 // Imports de nos modules
 import { gameState, startNewRound, wrap, restoreGameStateFromRedis } from "./game.js";
 import createRoundsRouter from "./routes/rounds.js";
+import createInitRouter from "./routes/init.js";
 import createAuthRouter, { verifyToken, requireRole } from "./routes/auth.js";
 import createReceiptsRouter from "./routes/receipts.js";
 import createMyBetsRouter from "./routes/my_bets.js";
 import keepaliveRouter from "./routes/keepalive.js";
 import moneyRouter from "./routes/money.js";
+import statsRouter from "./routes/stats.js";
 import { SERVER_WEBSOCKET_CONFIG } from "./config/websocket.js";
 
 // Import ChaCha20 RNG pour sécurité des jeux d'argent
@@ -26,6 +28,7 @@ import { initializeDatabase } from "./config/db.js";
 import { initRedis, closeRedis } from "./config/redis.js";
 import { cacheResponse } from "./middleware/cache.js";
 import { sessionMiddleware } from "./middleware/session.js";
+import auditMiddleware from "./middleware/audit.js";
 
 // Recréation de __dirname
 const __filename = fileURLToPath(import.meta.url);
@@ -211,6 +214,10 @@ app.get("/my-bets", requireAuthHTML, (req, res) => res.sendFile(path.join(__dirn
 // Auth routes (no protection needed - public login endpoint)
 app.use('/api/v1/auth/', createAuthRouter());
 
+// Init routes - Fast game initialization (public endpoints)
+const initRouter = createInitRouter();
+app.use("/api/v1/init/", initRouter);
+
 // Keepalive route centralisée (no protection)
 app.use("/api/v1/keepalive/", keepaliveRouter);
 
@@ -235,6 +242,12 @@ app.use("/api/v1/receipts/", createReceiptsRouter(broadcast));
 app.use("/api/v1/my-bets/", verifyToken, createMyBetsRouter(broadcast));
 
 app.use("/api/v1/money/", verifyToken, requireRole('cashier', 'admin'), moneyRouter);
+
+// ✅ NOUVEAU: Stats & Audit routes (PostgreSQL + Redis strategy)
+app.use("/api/v1/stats/", statsRouter);
+
+// ✅ NOUVEAU: Audit middleware (enregistre automatiquement les actions)
+app.use(auditMiddleware);
 
 // ...existing code...
 // Remplacez/ajoutez la route keepalive par ce handler robuste :

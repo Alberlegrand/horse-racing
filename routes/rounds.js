@@ -342,9 +342,8 @@ export default function createRoundsRouter(broadcast) {
 
         console.debug(`[ROUNDS] Action reçue : ${action}`);
 
-        // === GET === Retourne le round actuel depuis la mémoire
+        // === GET === Retourne le round actuel depuis la mémoire (ZERO DB queries)
         if (action === "get") {
-            // Logique existante conservée
             const roundData = {
                 ...gameState.currentRound,
                 isRaceRunning: gameState.isRaceRunning,
@@ -352,21 +351,11 @@ export default function createRoundsRouter(broadcast) {
                 raceEndTime: gameState.raceEndTime,
                 nextRoundStartTime: gameState.nextRoundStartTime
             };
-            // Ajout : récupération du round courant en base pour debug
-            const rounds = await getRoundsHistory(1);
-            const currentRoundDb = rounds[0] || null;
-            // N'affiche le log que si le round courant a changé depuis le dernier log
-            if (roundData && roundData.id && roundData.id !== lastLoggedMemoryRoundId) {
-                console.log("[ROUNDS] Round courant mémoire:", roundData);
-                lastLoggedMemoryRoundId = roundData.id;
-            }
-
-            // Idem pour la base de données
-            const dbRoundNumber = currentRoundDb?.round_number || null;
-            if (dbRoundNumber && dbRoundNumber !== lastLoggedDbRoundId) {
-                console.log("[ROUNDS] Round courant DB:", currentRoundDb);
-                lastLoggedDbRoundId = dbRoundNumber;
-            }
+            
+            // ✅ OPTIMISATION: Cache headers for browser caching
+            res.set('Cache-Control', 'public, max-age=2');
+            res.set('X-Data-Source', 'memory');
+            
             return res.json(wrap(roundData));
         }
 

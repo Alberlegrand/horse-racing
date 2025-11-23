@@ -5,6 +5,7 @@ import { chacha20Random, chacha20RandomInt, chacha20Shuffle, initChaCha20 } from
 import { pool } from './config/db.js';
 import { getNextRoundNumber } from './utils/roundNumberManager.js';
 import { cacheSet, cacheGet, cacheDelPattern } from './config/redis.js';
+import dbStrategy from './config/db-strategy.js';
 
 // Initialiser ChaCha20 RNG au démarrage
 initChaCha20();
@@ -112,6 +113,10 @@ export async function startNewRound(broadcast) {
     // Await persistence so clients receive the new_round only after DB row exists.
     const persisted = await persistRound();
     gameState.currentRound.persisted = !!persisted;
+
+    // 🚀 OPTIMISATION: Initialiser le cache Redis pour ce nouveau round
+    // Cela permet de sauvegarder/supprimer les tickets sans requêtes DB
+    await dbStrategy.initRoundCache(newRoundId, gameState.currentRound);
 
     // 3️⃣ Démarre le timer de 2 minutes pour le prochain lancement
     // Le timer commence MAINTENANT, après que le client ait cliqué sur "new_game"

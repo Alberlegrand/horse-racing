@@ -10,6 +10,8 @@ import crypto from 'crypto';
 // DB models pour persistance des tickets
 import { createReceipt as dbCreateReceipt, createBet as dbCreateBet } from "../models/receiptModel.js";
 import { pool } from "../config/db.js";
+// Import cache strategy (Redis)
+import dbStrategy from "../config/db-strategy.js";
 
 /**
  * Crée le routeur pour les "receipts" (tickets).
@@ -654,7 +656,13 @@ export default function createReceiptsRouter(broadcast) {
       }
       gameState.currentRound.receipts.push(receipt);
 
-      // --- Persistance en base de données (asynchrone, avec retry pour FK) ---
+      // 🚀 OPTIMISATION: Ajouter le ticket au cache Redis (pas de DB queries!)
+      const cacheResult = await dbStrategy.addTicketToRoundCache(gameState.currentRound.id, receipt);
+      if (!cacheResult) {
+        console.warn(`⚠️ Failed to cache ticket ${receipt.id}, will persist to DB on race finish`);
+      }
+
+      console.log("✅ Ticket ajouté ID :", receipt.id, `(cache: ${cacheResult ? 'OK' : 'FALLBACK'})`);
       (async () => {
         // Attendre que le round soit créé en DB (avec retry)
         const waitForRound = async (roundId, maxRetries = 50, delayMs = 100) => {
@@ -792,8 +800,6 @@ export default function createReceiptsRouter(broadcast) {
         }
       })();
 
-      console.log("Ticket ajouté ID :", receipt.id);
-      
       // Broadcast WebSocket pour notifier les clients avec toutes les infos
       if (broadcast) {
         broadcast({
