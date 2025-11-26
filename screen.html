@@ -39,7 +39,13 @@
             display: flex;
             flex-direction: column;
             align-items: center;
+            justify-content: flex-start;
             overflow-y: hidden;
+            height: calc(100% - 80px);
+            width: 100%;
+            padding: 0;
+            margin-top: 80px;
+            padding-bottom: 100px;
         }
 
         .participants {
@@ -48,7 +54,8 @@
             grid-row-gap: 30px;
             grid-column-gap: 40px;
             justify-items: center;
-            height: 100vh;
+            align-items: start;
+            width: 100%;
         }
     </style>
     <style>
@@ -103,7 +110,7 @@
             }
         }
 
-        /* Styles pour la barre de progression du lancement */
+        /* ✨ HEADER ELEGANCE DESIGN - Gambling Style */
         #countdownPanel {
             position: fixed;
             top: 20px;
@@ -166,37 +173,116 @@
             letter-spacing: 0.5px;
         }
 
-        /* Styles pour le panel principal avec timer */
+        /* ✨ ELEGANT HEADER - Gambling Style */
         .panel-timer {
-            background-color: rgba(17, 24, 39, 0.95); /* bg-gray-900 bg-opacity-95 */
+            background: linear-gradient(135deg, #0f172a 0%, #1a1f3a 50%, #0f172a 100%);
             width: 100%;
-            padding: 16px;
-            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+            padding: 0;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.7),
+                        inset 0 1px 0 rgba(255, 255, 255, 0.1);
+            border-top: 1px solid rgba(59, 130, 246, 0.3);
+            border-bottom: 2px solid rgba(59, 130, 246, 0.5);
+            position: relative;
+            overflow: hidden;
+        }
+
+        /* Effet de lueur derrière le header */
+        .panel-timer::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 1px;
+            background: linear-gradient(90deg, transparent, rgba(59, 130, 246, 0.8), transparent);
+            opacity: 0.6;
         }
 
         .panel-content {
             width: 100%;
+            padding: 18px 24px;
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
         }
 
         .panel-top {
-            margin-bottom: 8px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 20px;
         }
 
         .panel-text {
             color: white;
             font-weight: 700;
             font-size: 1.1em;
-            letter-spacing: 0.5px;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        #currentRound {
+            color: #60a5fa;
+            font-size: 1.15em;
+            text-shadow: 0 0 10px rgba(96, 165, 250, 0.5);
+        }
+
+        #timeRemainingDisplay {
+            color: #fbbf24;
+            font-size: 1.4em;
+            font-weight: 800;
+            letter-spacing: 2px;
+            text-shadow: 0 0 15px rgba(251, 191, 36, 0.6);
+            font-family: 'Courier New', monospace;
+            min-width: 80px;
+            text-align: right;
         }
 
         .panel-timer .progress-container {
             position: relative;
             width: 100%;
-            height: 8px;
-            background-color: rgba(55, 65, 81, 0.8);
+            height: 12px;
+            background: linear-gradient(90deg, rgba(30, 41, 59, 0.8), rgba(15, 23, 42, 0.9));
             border-radius: 9999px;
             overflow: hidden;
-            margin-top: 8px;
+            box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.5);
+            border: 1px solid rgba(59, 130, 246, 0.2);
+        }
+
+        #progressBar {
+            height: 100%;
+            border-radius: 9999px;
+            transition: width 0.3s ease-out, background-color 0.2s ease;
+            position: relative;
+            box-shadow: 0 0 8px currentColor, inset 0 1px 2px rgba(255, 255, 255, 0.3);
+        }
+
+        #progressBar.bg-green-500 {
+            background: linear-gradient(90deg, #10b981 0%, #059669 100%);
+            box-shadow: 0 0 12px rgba(16, 185, 129, 0.8), inset 0 1px 2px rgba(255, 255, 255, 0.3);
+        }
+
+        #progressBar.bg-yellow-500 {
+            background: linear-gradient(90deg, #f59e0b 0%, #d97706 100%);
+            box-shadow: 0 0 12px rgba(245, 158, 11, 0.8), inset 0 1px 2px rgba(255, 255, 255, 0.3);
+        }
+
+        #progressBar.bg-red-500 {
+            background: linear-gradient(90deg, #ef4444 0%, #dc2626 100%);
+            box-shadow: 0 0 16px rgba(239, 68, 68, 0.9), inset 0 1px 2px rgba(255, 255, 255, 0.3);
+            animation: pulse-intense 0.8s ease-in-out infinite;
+        }
+
+        @keyframes pulse-intense {
+            0%, 100% {
+                opacity: 1;
+            }
+            50% {
+                opacity: 0.7;
+            }
         }
 
         /* Styles pour la section des gagnants (barre fixée en bas, n'affecte pas la hauteur) */
@@ -307,36 +393,15 @@
     <section class="money-horse-section js-money-horse-section">
         <div class="content">
             <div class="panel panel-timer">
-                <!-- <div class="title"></div> -->
-                <div class="btn_return_url" style="display: none;"></div>
-                
-                <!-- Barre de progression et minuterie pour le prochain départ -->
                 <div class="panel-content">
-                    <div class="panel-top flex justify-between items-center">
-                        <span id="currentRound" class="panel-text">Round 0</span>
+                    <div class="panel-top">
+                        <span id="currentRound" class="panel-text">🏁 Round 0</span>
                         <span id="timeRemainingDisplay" class="panel-text">00:00</span>
                     </div>
                     <div class="progress-container">
-                        <div id="progressBar"
-                            class="bg-green-500 rounded-full"
-                            style="width: 0%"></div>
+                        <div id="progressBar" class="bg-green-500 rounded-full" style="width: 0%"></div>
                     </div>
                 </div>
-                
-                <!-- Ancien countdownPanel gardé pour compatibilité -->
-               <!--  <div id="countdownPanel" class="p-4 rounded-lg bg-gray-900 bg-opacity-95 shadow-xl hidden">
-                    <div class="text-white flex justify-between items-center mb-2">
-                        <span class="text-sm font-semibold uppercase tracking-wide">⏱️ Prochain Départ:</span>
-                        <span class="text-yellow-400 text-lg font-bold">0.0s</span>
-                    </div>
-                    <div class="progress-container">
-                        <div class="bg-green-500 rounded-full"
-                            style="width: 0%"></div>
-                    </div>
-                    <div class="text-center mt-2 text-xs text-gray-400">
-                        Le jeu se lancera automatiquement
-                    </div>
-                </div> -->
             </div>
             <div class="screen game_screen active">
                 <div class="participants_container">
@@ -518,14 +583,24 @@
                 const seconds = secondsLeft % 60;
                 const timeDisplay = String(minutes).padStart(2, '0') + ':' + String(seconds).padStart(2, '0');
                 
-                $('#timeRemainingDisplay').text(timeDisplay);
+                // Affiche le temps avec emoji dynamique et style élégant
+                let emoji = '⏳';
+                if (progressPercent < 30) {
+                    emoji = '🟢'; // Vert - Confortable
+                } else if (progressPercent < 70) {
+                    emoji = '🟡'; // Jaune - Attention
+                } else {
+                    emoji = '🔴'; // Rouge - Urgent
+                }
+                
+                $('#timeRemainingDisplay').text(emoji + ' ' + timeDisplay);
                 $progressBar.css('width', progressPercent + '%');
 
                 // Changement de couleur dynamique (vert -> jaune -> rouge)
                 $progressBar.removeClass('bg-green-500 bg-yellow-500 bg-red-500');
                 if (progressPercent < 30) {
                     $progressBar.addClass('bg-green-500');
-                } else if (progressPercent < 80) {
+                } else if (progressPercent < 70) {
                     $progressBar.addClass('bg-yellow-500');
                 } else {
                     $progressBar.addClass('bg-red-500');
@@ -780,9 +855,9 @@
 
                                     // 4. Recharger la page après un court délai
                                     console.log('🔄 Rechargement de la page dans 1 seconde...');
-                                    setTimeout(function() {
-                                        window.location.reload();
-                                    }, 10);
+                                    //setTimeout(function() {
+                                      //  window.location.reload();
+                                   // }, 10);
                                 },
                                 error: function (xhr, status, error) {
                                     console.error('❌ Erreur lors de la création du nouveau round:', error);
@@ -818,7 +893,7 @@
                     success: function (data) {
                         console.log('✅ État initial:', data);
                         if (data.currentRound && data.currentRound.id) {
-                            $('#currentRound').text('Round ' + data.currentRound.id);
+                            $('#currentRound').text('🏁 Round ' + data.currentRound.id);
                         }
                         if (data.gameHistory) {
                             afficherDerniersGagnants(data.gameHistory);
@@ -880,7 +955,7 @@
                                 console.log('🆕 Nouveau round - synchronisation');
                                 // Met à jour le currentRound si disponible
                                 if (data.game && data.game.id) {
-                                    $('#currentRound').text('Round ' + data.game.id);
+                                    $('#currentRound').text('🏁 Round ' + data.game.id);
                                 }
                                 // Met à jour les gagnants si l'historique est fourni
                                 if (data.gameHistory) {
