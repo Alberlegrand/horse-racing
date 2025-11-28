@@ -10,10 +10,7 @@
     "test": "echo \"Error: no test specified\" && exit 1",
     "start": "node server.js",
     "dev": "nodemon server.js",
-    "build": "echo \"Aucun build spécifique requis : les assets statiques sont déjà prêts\"",
-    "vercel-build": "npm run build",
-    "deploy:vercel": "vercel deploy --prod --yes",
-    "deploy:netlify": "netlify deploy --prod --dir=static --functions=netlify/functions"
+    "build": "echo \"Aucun build spécifique requis : les assets statiques sont déjà prêts\""
   },
   "engines": {
     "node": ">=18.18.0",
