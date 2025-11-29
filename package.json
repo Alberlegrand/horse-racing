@@ -13,7 +13,7 @@
     "build": "echo \"Aucun build spécifique requis : les assets statiques sont déjà prêts\""
   },
   "engines": {
-    "node": ">=25.x",
+    "node": ">=25.2.1",
     "npm": ">=9.0.0"
   },
   "dependencies": {
