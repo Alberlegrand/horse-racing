@@ -44,15 +44,105 @@
         .participants {
             display: grid;
             grid-template-columns: repeat(3, 1fr);
-            grid-row-gap: 30px;
-            grid-column-gap: 40px;
+            grid-row-gap: 5px;
+            grid-column-gap: 5px;
             justify-items: center;
             height: 100vh;
+            padding: 5px;
         }
-    </style>
-    <style>
+
         .translated-content .ytCoreImageHost {
             visibility: visible;
+        }
+
+        /* Réduire modérément la taille pour iframe */
+        .money-horse-section .game_screen .participant {
+            width: 280px !important;
+            height: 140px !important;
+            transform: scale(0.9) !important;
+            transform-origin: top center !important;
+            margin: -5px 0 !important;
+        }
+
+        .money-horse-section .game_screen .participant .name {
+            font-size: 16px !important;
+        }
+
+        .money-horse-section .game_screen .participant .coeff {
+            font-size: 21px !important;
+        }
+
+        .money-horse-section .game_screen .participant .coeff_hint {
+            font-size: 11px !important;
+        }
+
+        .money-horse-section .game_screen .participant .bet {
+            height: 35px !important;
+        }
+
+        /* Réduire la taille des contrôles */
+        .money-horse-section .game_screen .controls {
+            margin-top: 5px !important;
+            display: flex !important;
+            gap: 5px !important;
+            justify-content: center !important;
+        }
+
+        .money-horse-section .game_screen .controls .button {
+            font-size: 16px !important;
+            padding: 10px 18px !important;
+            margin: 0 !important;
+            height: auto !important;
+            min-height: 40px !important;
+        }
+
+        /* Le conteneur des boutons */
+        .amount-grid {
+            display: none !important;
+            /* Crée 4 colonnes de largeur égale */
+            grid-template-columns: repeat(4, 1fr) !important;
+            /* Ajoute un espace entre les boutons */
+            gap: 5px !important;
+            margin-top: 8px !important;
+            margin-bottom: 8px !important;
+            padding: 8px !important;
+            width: 185px !important;
+            max-width: 320px !important;
+            background-color: #ffffff !important;
+            border: 1px solid #ddd !important;
+            border-radius: 4px !important;
+            box-sizing: border-box !important;
+        }
+
+        .amount-grid[style*="display: grid"] {
+            display: grid !important;
+        }
+
+        .amount-grid[style*="display: block"] {
+            display: grid !important;
+        }
+
+        /* Style optionnel pour rendre les boutons plus jolis */
+        .amount-btn {
+            width: 100% !important;
+            /* Le bouton prend toute la largeur de la colonne */
+            padding: 8px 6px !important;
+            /* Espace intérieur pour le confort du clic */
+            cursor: pointer !important;
+            background-color: #f0f0f0 !important;
+            border: 1px solid #ccc !important;
+            border-radius: 3px !important;
+            font-weight: bold !important;
+            font-size: 12px !important;
+            transition: background-color 0.2s !important;
+        }
+
+        .amount-btn:hover {
+            background-color: #e0e0e0 !important;
+        }
+
+        .amount-btn:active {
+            background-color: #d0d0d0 !important;
         }
     </style>
 </head>
@@ -68,7 +158,7 @@
             <div class="screen game_screen active">
                 <div class="participants_container">
                     <div class="participants">
-                        
+
                         <div class="js_template" style="display:none;">
                             <div class="avatar_background">
                                 <div class="avatar"></div>
@@ -80,9 +170,24 @@
                             </div>
                             <div class="bet">
                                 <form class="create">
-                                    <input type="number" placeholder="Bet" tabindex="1" class="value" min="0" step="0.01">
+                                    <input type="number" placeholder="Bet" tabindex="1" class="value" min="0"
+                                        step="0.01">
+
+                                    <div class="amount-grid">
+                                        <button type="button" class="amount-btn" data-amount="25">25</button>
+                                        <button type="button" class="amount-btn" data-amount="50">50</button>
+                                        <button type="button" class="amount-btn" data-amount="100">100</button>
+                                        <button type="button" class="amount-btn" data-amount="250">250</button>
+
+                                        <button type="button" class="amount-btn" data-amount="500">500</button>
+                                        <button type="button" class="amount-btn" data-amount="1000">1000</button>
+                                        <button type="button" class="amount-btn" data-amount="2500">2500</button>
+                                        <button type="button" class="amount-btn" data-amount="5000">5000</button>
+                                    </div>
+
                                     <input type="submit" value="ok" class="confirm">
                                 </form>
+
                                 <div class="view">
                                     <div class="value"></div>
                                     <div class="prize"></div>
@@ -90,7 +195,7 @@
                                 </div>
                             </div>
                         </div>
-                        </div>
+                    </div>
                 </div>
 
                 <div class="controls">
@@ -99,28 +204,7 @@
                         Receipts (<span class="count">0</span>)
                     </button>
                 </div>
-
-                <!-- <div class="receipts_container">
-                    <div class="receipts"></div>
-                </div> -->
             </div>
-
-            <div class="screen movie_screen">
-                <div id="movieContainer" class="movie_container">
-                    <div class="movie"></div>
-                </div>
-                </div>
-
-            <div class="screen finish_screen">
-                <div class="winner">
-                    <div class="title"></div>
-                    <div class="avatar_background">
-                        <div class="avatar"></div>
-                    </div>
-                    <div class="name"></div>
-                </div>
-                <table class="receipts"></table>
-                </div>
 
         </div>
 
@@ -164,6 +248,73 @@
     <script src="/js/jackpots.ws.js?v=33054"></script>
     <script src="/js/main.js?v=33054"></script>
     <link rel="stylesheet" href="/css/jackpots.css?v=33054">
+
+    <!-- Script pour gérer la grille de montants -->
+    <script>
+        // Utiliser jQuery pour mieux gérer les éléments dynamiques
+        $(document).on('focus', '.value', function () {
+            $(this).closest('.create').find('.amount-grid').show();
+            console.log('Grille affichée au focus');
+        });
+
+        $(document).on('blur', '.value', function () {
+            const $grid = $(this).closest('.create').find('.amount-grid');
+            setTimeout(() => {
+                $grid.hide();
+                console.log('Grille masquée au blur');
+            }, 100);
+        });
+
+        $(document).on('click', '.amount-btn', function (e) {
+            e.preventDefault();
+            e.stopPropagation();
+            e.stopImmediatePropagation();
+
+            const $button = $(this);
+            const amount = parseFloat($button.data('amount'));
+            const $form = $button.closest('.create');
+            const $input = $form.find('.value');
+            const $participantContainer = $form.closest('.participant');
+
+            console.log('Montant cliqué:', amount);
+            console.log('Input avant:', $input.val());
+
+            if ($input.length > 0) {
+                // Ajouter le montant au montant existant
+                const currentValue = parseFloat($input.val()) || 0;
+                const newValue = currentValue + amount;
+
+                console.log('Nouvelle valeur:', newValue);
+
+                // Mettre à jour l'input avec la nouvelle valeur
+                $input.val(newValue);
+
+                // Ajouter la classe has_value pour afficher le bouton ok
+                $form.addClass('has_value');
+
+                // Déclencher les événements change et input
+                $input.trigger('change');
+                $input.trigger('input');
+
+                // Mettre à jour l'affichage du prize (gain) si on peut le calculer
+                if ($participantContainer.length > 0) {
+                    const coeff = parseFloat($participantContainer.find('.coeff').text());
+                    if (!isNaN(coeff) && coeff > 0) {
+                        const prizeValue = newValue * coeff;
+                        $form.next('.view').find('.value').text(newValue.toFixed(2));
+                        $form.next('.view').find('.prize').text(prizeValue.toFixed(2));
+                    }
+                }
+
+                console.log('Input après:', $input.val());
+
+                // Garder le focus sur l'input
+                $input.focus();
+            }
+
+            return false;
+        });
+    </script>
 
 </body>
 

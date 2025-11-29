@@ -1401,14 +1401,23 @@ class App {
         });
 
         // Menu mobile
-        document.getElementById('mobileOpenBtn').addEventListener('click', () => {
-            document.getElementById('sidebar').classList.toggle('hidden');
-        });
+        const mobileOpenBtn = document.getElementById('mobileOpenBtn');
+        if (mobileOpenBtn) {
+            mobileOpenBtn.addEventListener('click', () => {
+                const sidebar = document.getElementById('sidebar');
+                if (sidebar) {
+                    sidebar.classList.toggle('hidden');
+                }
+            });
+        }
 
         // Déconnexion
-        document.getElementById('logoutBtn').addEventListener('click', () => {
-            this.logout();
-        });
+        const logoutBtn = document.getElementById('logoutBtn');
+        if (logoutBtn) {
+            logoutBtn.addEventListener('click', () => {
+                this.logout();
+            });
+        }
     }
 
     showFallbackPage(pageId, error) {

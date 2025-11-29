@@ -1,4 +1,4 @@
-/**
+﻿/**
  * @param context {Context}
  * @param onInit {() => void}
  * @param onStartRound {() => void}
@@ -269,14 +269,18 @@ GameScreenView.prototype.init = function () {
         let hasValue = !!($(this).val().length);
         $(this).parents(".create:first").toggleClass("has_value", hasValue);
     });
-    this._container.on("blur", ".create .value", $.proxy(function (event) {
-        let container = $(event.target).parents(".participant");
-        let bet = this._getBet(container);
-        if (bet) {
-            this._onAddBet(bet.number, bet.value);
-        }
-        return false;
-    }, this));
+    this._container.on("blur", ".create .value", $.proxy(function (event) {
+        // Mettre à jour l'affichage du .view sans soumettre le formulaire
+        let container = $(event.target).parents(".participant");
+        let bet = this._getBet(container);
+        if (bet && bet.value) {
+            const parsedValue = Currency.systemToPublic(bet.value).toFixed(Currency.visibleDigits);
+            const parsedPrize = bet.prize ? Currency.systemToPublic(bet.prize).toFixed(Currency.visibleDigits) : "0";
+            container.find(".bet .view .value").text(parsedValue);
+            container.find(".bet .view .prize").text(parsedPrize);
+        }
+        return false;
+    }, this));
     this._container.on("click", ".view .cancel", $.proxy(function (event) {
         let container = $(event.target).parents(".participant");
         let number = container.data("number");
@@ -421,13 +425,13 @@ GameScreenView.prototype.update = function (game) {
  * @param prize {Big | null}
  */
 GameScreenView.prototype.setBet = function (number, value, prize) {
-    let container = this._getParticipantContainer(number);
-    container.toggleClass("has_bet", !!(value && prize));
-    const parsedValue = value ? Currency.systemToPublic(value).toFixed(Currency.visibleDigits) : value;
-    const parsedPrize = prize ? Currency.systemToPublic(prize).toFixed(Currency.visibleDigits) : prize;
-    container.find(".bet .create .value").val(parsedValue);
-    container.find(".bet .view .value").text(parsedPrize);
-    container.find(".bet .view .prize").text(parsedPrize);
+    let container = this._getParticipantContainer(number);
+    container.toggleClass("has_bet", !!(value && prize));
+    const parsedValue = value ? Currency.systemToPublic(value).toFixed(Currency.visibleDigits) : value;
+    const parsedPrize = prize ? Currency.systemToPublic(prize).toFixed(Currency.visibleDigits) : prize;
+    container.find(".bet .create .value").val(parsedValue);
+    container.find(".bet .view .value").text(parsedValue);
+    container.find(".bet .view .prize").text(parsedPrize);
     if (!value) {
         container.find(".bet .create").removeClass("has_value");
         container.find(".bet .create .value").focus();
