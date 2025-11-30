@@ -6,6 +6,7 @@ import { pool } from './config/db.js';
 import { getNextRoundNumber } from './utils/roundNumberManager.js';
 import { cacheSet, cacheGet, cacheDelPattern } from './config/redis.js';
 import dbStrategy from './config/db-strategy.js';
+import { TIMER_DURATION_MS } from './config/app.config.js';
 
 // Initialiser ChaCha20 RNG au démarrage
 initChaCha20();
@@ -123,20 +124,12 @@ export async function startNewRound(broadcast) {
 
     // 3️⃣ Démarre le timer de 2 minutes pour le prochain lancement
     // Le timer commence MAINTENANT, après que le client ait cliqué sur "new_game"
-   // 3️⃣ Démarre le timer
-    // CORRECTION ICI : On utilise Number() pour convertir la string du .env en nombre
-    const envDuration = Number(process.env.ROUND_WAIT_DURATION_MS);
-    // Si la conversion échoue (NaN) ou vaut 0, on utilise 180000 par défaut
-    const ROUND_WAIT_DURATION_MS = (envDuration > 0) ? envDuration : 180000; 
-    
+    // 3️⃣ Démarre le timer
+    // ✅ Utiliser la constante CENTRALISÉE depuis config/app.config.js
     const now = Date.now();
+    gameState.nextRoundStartTime = now + TIMER_DURATION_MS;
     
-    // Maintenant l'addition sera mathématique (Nombre + Nombre)
-    gameState.nextRoundStartTime = now + ROUND_WAIT_DURATION_MS;
-    
-    console.log(`⏰ Timer démarré : nouveau tour dans ${ROUND_WAIT_DURATION_MS / 1000} secondes (fin: ${new Date(gameState.nextRoundStartTime).toLocaleTimeString()})`);
-
-    // Schedule a pre-start broadcast 5 seconds before the next round starts.
+    console.log(`⏰ Timer démarré : nouveau tour dans ${TIMER_DURATION_MS / 1000} secondes (fin: ${new Date(gameState.nextRoundStartTime).toLocaleTimeString()})`);    // Schedule a pre-start broadcast 5 seconds before the next round starts.
     const schedulePreStart = (broadcastFn) => {
         try {
             // Clear any previous pre-start timer
@@ -176,8 +169,8 @@ export async function startNewRound(broadcast) {
             game: JSON.parse(JSON.stringify(gameState.currentRound)),
             currentRound: JSON.parse(JSON.stringify(gameState.currentRound)),
             timer: {
-                timeLeft: ROUND_WAIT_DURATION_MS,
-                totalDuration: ROUND_WAIT_DURATION_MS,
+                timeLeft: TIMER_DURATION_MS,
+                totalDuration: TIMER_DURATION_MS,
                 startTime: now,
                 endTime: gameState.nextRoundStartTime
             },

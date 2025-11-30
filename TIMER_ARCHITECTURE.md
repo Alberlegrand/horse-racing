@@ -9,7 +9,7 @@ Le projet présente une **confusion sur la durée du timer** entre plusieurs fic
 | Source | Valeur | Type |
 |--------|--------|------|
 | `config/app.config.js` | 20 secondes | TIMER_DURATION_SECONDS |
-| `routes/rounds.js` | 180000 ms (3 min) | ROUND_WAIT_DURATION_MS |
+| `routes/rounds.js` | 60000 ms (3 min) | ROUND_WAIT_DURATION_MS |
 | `CHANGELOG_TIMER_20S.md` | 20 secondes | Documentation |
 | `SCREEN_AUTO_START.md` | 10 secondes | Docs anciennes |
 
@@ -25,7 +25,7 @@ export const TIMER_DURATION_MS = 20 * 1000 = 20000 ms
 **En `routes/rounds.js`**, remplacer:
 ```javascript
 // ❌ ANCIEN
-const ROUND_WAIT_DURATION_MS = parseInt(process.env.ROUND_WAIT_DURATION_MS) || 180000;
+const ROUND_WAIT_DURATION_MS = parseInt(process.env.ROUND_WAIT_DURATION_MS) || 60000;
 
 // ✅ NOUVEAU (à implémenter)
 import { TIMER_DURATION_MS } from "../config/app.config.js";

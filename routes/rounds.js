@@ -22,29 +22,36 @@ import { pool } from "../config/db.js";
 // Import du gestionnaire de numéro de round pour éviter les doublons
 import { getNextRoundNumber } from "../utils/roundNumberManager.js";
 
-// ✅ IMPORTER LES TIMERS DE LA CONFIG CENTRALISÉE
+// ✅ IMPORTER TOUTES LES CONSTANTES DE TIMER DE LA CONFIG CENTRALISÉE
 import { 
   TIMER_DURATION_MS,
-  TIMER_UPDATE_INTERVAL_MS
+  TIMER_UPDATE_INTERVAL_MS,
+  MOVIE_SCREEN_DURATION_MS,
+  FINISH_SCREEN_DURATION_MS,
+  TOTAL_RACE_TIME_MS,
+  NEW_ROUND_PREPARE_DELAY_MS
 } from "../config/app.config.js";
 
 function generateRoundId() {
     return Math.floor(96908000 + chacha20Random() * 1000);
 }
 
-// --- CONFIGURATION ---
-// ✅ TOUS LES TIMERS VIENNENT DE config/app.config.js
-// ROUND_WAIT_DURATION_MS = durée d'attente avant la prochaine race
+// --- CONFIGURATION CENTRALISÉE DES TIMERS ---
+// ✅ TOUS LES TIMERS VIENNENT DE config/app.config.js POUR COHÉRENCE GLOBALE
+// ✅ TOUTES LES VALEURS SONT EN MILLISECONDES (MS)
 const ROUND_WAIT_DURATION_MS = TIMER_DURATION_MS;
 
-// Timers pour la race elle-même
-const MOVIE_SCREEN_DURATION_MS = 20000; // 20 secondes pour l'animation
-const FINISH_SCREEN_DURATION_MS = 5000; // 5 secondes pour affichage résultat
-const TOTAL_RACE_TIME_MS = MOVIE_SCREEN_DURATION_MS + FINISH_SCREEN_DURATION_MS; // 25 secondes total
-
-console.log(`⏰ [ROUNDS] Timer attente: ${ROUND_WAIT_DURATION_MS}ms`);
-console.log(`🎬 [ROUNDS] Movie screen: ${MOVIE_SCREEN_DURATION_MS}ms`);
-console.log(`🏁 [ROUNDS] Finish screen: ${FINISH_SCREEN_DURATION_MS}ms`);
+console.log(`
+========================================
+⏰ [ROUNDS] Configuration des timers:
+========================================
+🕐 Attente avant course: ${ROUND_WAIT_DURATION_MS}ms
+🎬 Movie screen: ${MOVIE_SCREEN_DURATION_MS}ms
+🏁 Finish screen: ${FINISH_SCREEN_DURATION_MS}ms
+📊 Total race: ${TOTAL_RACE_TIME_MS}ms
+🆕 Préparation nouveau round: ${NEW_ROUND_PREPARE_DELAY_MS}ms
+======================================== 
+`);
 
 // --- INITIALISATION DE L'ÉTAT ---
 // Stocke le timestamp exact du début du prochain round.
@@ -53,33 +60,154 @@ if (typeof gameState.nextRoundStartTime === 'undefined') {
     gameState.nextRoundStartTime = null; 
 }
 
+// ✅ AJOUTER LES FLAGS DE PROTECTION GLOBAUX
+if (typeof gameState._finishInProgress === 'undefined') {
+    gameState._finishInProgress = false;
+}
+if (typeof gameState._scheduledAutoFinishTimer === 'undefined') {
+    gameState._scheduledAutoFinishTimer = null;
+}
+
 
 /**
- * Helper to trigger an automatic race finish and start the next round.
- * Called by the auto-loop or scheduled timer.
+ * ✅ CLASSE POUR GÉRER LES TIMERS DE MANIÈRE ROBUSTE
+ * Centralise tous les timers d'une course pour éviter les conflits et les doublons
  */
-let pendingAutoFinish = false;
-
-async function triggerAutoFinish(broadcastFn) {
-    if (pendingAutoFinish || gameState.isRaceRunning) {
-        console.warn('[AUTO-FINISH] Déjà en cours ou course active, skip');
-        return;
+class RaceTimerManager {
+    constructor() {
+        this.timers = new Map(); // { raceId: { start: timeout, prepare: timeout, finish: timeout, autoStart: timeout } }
+        this.activeRaces = new Set(); // { raceId }
     }
-    pendingAutoFinish = true;
-    try {
-        console.log('[AUTO-FINISH] Déclenchement du finish automatique');
-        // Simulate the finish action by calling the embedded logic
-        // This mimics what the finish route does
-        const finishReq = { query: { action: 'finish' } };
-        const finishRes = {
-            json: (data) => console.log('[AUTO-FINISH] Response:', data),
-            status: (code) => ({ json: (data) => console.log(`[AUTO-FINISH] Status ${code}:`, data) })
+
+    /**
+     * Créer une séquence complète de timers pour une course
+     * Timeline: T=0 race_start → T=10 create_new_round → T=20 finish_logic
+     */
+    startRaceSequence(raceId, callbacks) {
+        console.log(`[TIMER] 🚀 Démarrage séquence course #${raceId}`);
+        
+        // Éviter les doublons
+        if (this.activeRaces.has(raceId)) {
+            console.warn(`[TIMER] ⚠️ Séquence déjà active pour race #${raceId}, ignorée`);
+            return false;
+        }
+
+        // Marquer la course comme active
+        this.activeRaces.add(raceId);
+        const timers = {};
+
+        try {
+            // T=0: Race start
+            console.log(`[TIMER] T+0s: Broadcasting race_start`);
+            if (callbacks.onRaceStart) {
+                callbacks.onRaceStart();
+            }
+
+            // T=10s: Créer le nouveau round
+            timers.prepare = setTimeout(() => {
+                console.log(`[TIMER] T+10s: Préparation du nouveau round`);
+                if (callbacks.onPrepareNewRound) {
+                    callbacks.onPrepareNewRound();
+                }
+            }, NEW_ROUND_PREPARE_DELAY_MS);
+
+            // T=20s: Exécuter la logique de fin de course
+            timers.finish = setTimeout(() => {
+                console.log(`[TIMER] T+20s: Exécution de la fin de course`);
+                if (callbacks.onFinishRace) {
+                    callbacks.onFinishRace();
+                }
+            }, MOVIE_SCREEN_DURATION_MS);
+
+            // T=25s: Nettoyage et réinitialisation
+            timers.cleanup = setTimeout(() => {
+                console.log(`[TIMER] T+25s: Nettoyage post-race`);
+                this.clearRaceSequence(raceId);
+                if (callbacks.onCleanup) {
+                    callbacks.onCleanup();
+                }
+            }, TOTAL_RACE_TIME_MS);
+
+            // Stocker les timers
+            this.timers.set(raceId, timers);
+            return true;
+
+        } catch (err) {
+            console.error(`[TIMER] ❌ Erreur création séquence:`, err.message);
+            this.clearRaceSequence(raceId);
+            return false;
+        }
+    }
+
+    /**
+     * Programmer le lancement automatique du prochain round
+     */
+    scheduleNextRaceStart(nextRaceId, delayMs, callbacks) {
+        console.log(`[TIMER] 📅 Auto-start programmé pour race #${nextRaceId} dans ${delayMs}ms`);
+        
+        const timerId = setTimeout(async () => {
+            console.log(`[TIMER] ⏱️ Auto-start déclenché pour race #${nextRaceId}`);
+            try {
+                // Vérifier que pas une autre race en cours
+                if (gameState.isRaceRunning) {
+                    console.warn(`[TIMER] ⚠️ Une course est déjà en cours, auto-start ignoré`);
+                    return;
+                }
+
+                if (callbacks.onAutoStart) {
+                    await callbacks.onAutoStart();
+                }
+            } catch (err) {
+                console.error(`[TIMER] ❌ Erreur auto-start:`, err.message);
+            }
+        }, delayMs);
+
+        // Stocker l'ID du timer pour nettoyage futur
+        if (!this.timers.has(nextRaceId)) {
+            this.timers.set(nextRaceId, {});
+        }
+        this.timers.get(nextRaceId).autoStart = timerId;
+    }
+
+    /**
+     * Nettoyer tous les timers d'une course
+     */
+    clearRaceSequence(raceId) {
+        console.log(`[TIMER] 🧹 Nettoyage timers pour race #${raceId}`);
+        
+        const timers = this.timers.get(raceId);
+        if (timers) {
+            Object.values(timers).forEach(timerId => {
+                if (timerId) clearTimeout(timerId);
+            });
+            this.timers.delete(raceId);
+        }
+        this.activeRaces.delete(raceId);
+    }
+
+    /**
+     * Nettoyer tous les timers actifs (catastrophe recovery)
+     */
+    clearAllTimers() {
+        console.log(`[TIMER] 🔴 Nettoyage GLOBAL de tous les timers`);
+        
+        for (const [raceId, timers] of this.timers.entries()) {
+            Object.values(timers).forEach(timerId => {
+                if (timerId) clearTimeout(timerId);
+            });
+        }
+        this.timers.clear();
+        this.activeRaces.clear();
+    }
+
+    /**
+     * Obtenir l'état des timers (pour debugging)
+     */
+    getStatus() {
+        return {
+            activeRaces: Array.from(this.activeRaces),
+            timerCount: this.timers.size
         };
-        // Call the finish handler inline (would need to be extracted as a separate function)
-        // For now, we'll just note that this needs the finish logic to be callable
-        console.log('[AUTO-FINISH] Note: finish logic should be callable from here');
-    } finally {
-        pendingAutoFinish = false;
     }
 }
 
@@ -91,91 +219,211 @@ async function triggerAutoFinish(broadcastFn) {
 export default function createRoundsRouter(broadcast) {
     const router = express.Router();
 
+    // ✅ INSTANCE CENTRALISÉE DU GESTIONNAIRE DE TIMERS
+    const raceTimerManager = new RaceTimerManager();
+
     // Petit cache de logging pour éviter d'écrire la même ligne de log plusieurs fois
     // (ex : plusieurs clients pollent l'API /rounds/ à intervalle très court)
     let lastLoggedMemoryRoundId = null;
     let lastLoggedDbRoundId = null;
 
-    // Store the finish handler so we can call it from auto-start
-    let finishHandler = null;
-
-    // Helper: Extract the finish logic into a reusable function
-    const executeFinish = async () => {
-        console.log('[FINISH] Exécution du finish');
+    // Helper: Extraire la vraie logique de fin de course (SÉPARÉE et RÉUTILISABLE)
+    const executeRaceFinish = async () => {
+        console.log('[RACE-FINISH] Exécution de la logique de fin de course');
         
-        // Marque le début de la course pour la synchronisation
-        const raceStartTime = Date.now();
-        gameState.isRaceRunning = true;
-        gameState.raceStartTime = raceStartTime;
-        gameState.raceEndTime = null;
+        const finishedRoundData = gameState.runningRoundData || gameState.currentRound;
+        const participants = Array.isArray(finishedRoundData.participants) ? finishedRoundData.participants : [];
+        
+        if (participants.length === 0) {
+            console.error('[RACE-FINISH] Aucun participant -> annulation');
+            return;
+        }
 
-        // Broadcast complet avec toutes les informations de synchronisation
-        broadcast({ 
-            event: "race_start", 
-            roundId: gameState.currentRound.id,
-            raceStartTime: raceStartTime,
-            currentRound: JSON.parse(JSON.stringify(gameState.currentRound)),
-            isRaceRunning: true
+        // Calculer le gagnant
+        const winner = participants[chacha20RandomInt(participants.length)];
+        const winnerWithPlace = { ...winner, place: 1, family: winner.family ?? 0 };
+
+        // Mettre à jour les participants
+        finishedRoundData.participants = participants.map(p =>
+            (p.number === winner.number ? winnerWithPlace : p)
+        );
+
+        // Calculer les gains pour chaque ticket
+        let totalPrizeAll = 0;
+        const receipts = Array.isArray(finishedRoundData.receipts) ? finishedRoundData.receipts : [];
+
+        receipts.forEach(receipt => {
+            let totalPrizeForReceipt = 0;
+            if (Array.isArray(receipt.bets)) {
+                receipt.bets.forEach(bet => {
+                    if (Number(bet.number) === Number(winner.number)) {
+                        const betValue = Number(bet.value) || 0;
+                        const coeff = Number(winner.coeff) || 0;
+                        totalPrizeForReceipt += betValue * coeff;
+                    }
+                });
+            }
+            receipt.prize = totalPrizeForReceipt;
+            console.log(`[RACE-FINISH] Ticket #${receipt.id} gain: ${receipt.prize} HTG`);
+            totalPrizeAll += totalPrizeForReceipt;
         });
 
-        // IMPORTANT: La durée réelle du movie_screen côté client est ~20 secondes
-        // On doit attendre 20 secondes avant d'envoyer race_end pour que movie_screen se termine
-        const NEW_ROUND_PREPARE_DELAY_MS = 10000; // 10 secondes : créer le nouveau round pour permettre les paris
-        
-        // Créer le nouveau round après 10 secondes pour permettre aux caissiers de placer des paris
-        // même si la course précédente continue
-        setTimeout(async () => {
-            console.log('🆕 Préparation du nouveau round (10s après le début de la course)');
+        // Mettre à jour les statuts des tickets en DB
+        (async () => {
+            for (const receipt of receipts) {
+                try {
+                    const newStatus = receipt.prize > 0 ? 'won' : 'lost';
+                    await updateReceiptStatus(receipt.id, newStatus, receipt.prize || 0);
+                    console.log(`[DB] ✓ Ticket #${receipt.id} mis à jour: status=${newStatus}, prize=${receipt.prize}`);
+                } catch (err) {
+                    console.error(`[DB] ✗ Erreur mise à jour ticket #${receipt.id}:`, err.message);
+                }
+            }
+        })();
+
+        finishedRoundData.totalPrize = totalPrizeAll;
+
+        // Marquer la fin de la course
+        gameState.raceEndTime = Date.now();
+
+        // Archiver l'ancien round en DB
+        const finishedRoundId = finishedRoundData.id;
+        if (finishedRoundId) {
+            const finishedRound = {
+                id: finishedRoundId,
+                receipts: finishedRoundData.receipts || [],
+                participants: finishedRoundData.participants || [],
+                totalPrize: totalPrizeAll,
+                winner: winnerWithPlace,
+            };
             
-            // Sauvegarder l'ancien round pour la fin de course
+            // Évite la duplication accidentelle
+            if (!gameState.gameHistory.some(r => r.id === finishedRound.id)) {
+                gameState.gameHistory.push(finishedRound);
+            } else {
+                console.warn(`[RACE-FINISH] Round ${finishedRound.id} déjà présent dans gameHistory, saut`);
+            }
+            
+            // Garde seulement les 10 derniers tours
+            if (gameState.gameHistory.length > 10) gameState.gameHistory.shift();
+            
+            // Sauvegarder en DB
+            try {
+                let winnerParticipantId = null;
+                try {
+                    const participantsDb = await getParticipants();
+                    const winnerRow = participantsDb.find(p => Number(p.number) === Number(winner.number));
+                    if (winnerRow) {
+                        winnerParticipantId = winnerRow.participant_id;
+                        console.log(`[RACE-FINISH] ✓ Winner résolu: number=${winner.number} -> participant_id=${winnerParticipantId}`);
+                    } else {
+                        console.warn(`[RACE-FINISH] ⚠️ Participant winner non trouvé: number=${winner.number}`);
+                    }
+                } catch (lookupErr) {
+                    console.error('[RACE-FINISH] Erreur lookup participant:', lookupErr);
+                }
+
+                await finishRound(finishedRoundId, winnerParticipantId, totalPrizeAll, new Date());
+                console.log(`[RACE-FINISH] Round ${finishedRoundId} archivé en DB avec winner ${winnerParticipantId}`);
+            } catch (dbError) {
+                console.error(`[RACE-FINISH] Erreur archivage round:`, dbError);
+            }
+        }
+
+        // Nettoyer la sauvegarde de l'ancien round
+        gameState.runningRoundData = null;
+
+        // Broadcast complet avec résultats
+        broadcast({
+            event: "race_end",
+            roundId: finishedRoundId,
+            winner: winnerWithPlace,
+            receipts: JSON.parse(JSON.stringify(receipts)),
+            prize: totalPrizeAll,
+            totalPrize: totalPrizeAll,
+            raceEndTime: gameState.raceEndTime,
+            currentRound: JSON.parse(JSON.stringify(finishedRoundData)),
+            participants: finishedRoundData.participants || []
+        });
+        
+        console.log(`✅ Course #${finishedRoundId} terminée, nouveau round #${gameState.currentRound.id} actif`);
+
+        // Marquer la fin complète après le finish_screen
+        setTimeout(() => {
+            gameState.isRaceRunning = false;
+            gameState.raceStartTime = null;
+            gameState.raceEndTime = null;
+            console.log('[RACE-FINISH] État réinitialisé après finish_screen');
+        }, FINISH_SCREEN_DURATION_MS);
+    };
+
+    // ✅ DÉFINIR LES CALLBACKS DE LA SÉQUENCE DE COURSE
+    const raceCallbacks = {
+        // T=0: Race commence
+        onRaceStart: () => {
+            const raceStartTime = Date.now();
+            gameState.isRaceRunning = true;
+            gameState.raceStartTime = raceStartTime;
+            gameState.raceEndTime = null;
+
+            broadcast({
+                event: "race_start",
+                roundId: gameState.currentRound.id,
+                raceStartTime: raceStartTime,
+                currentRound: JSON.parse(JSON.stringify(gameState.currentRound)),
+                isRaceRunning: true
+            });
+        },
+
+        // T=10s: Préparer le nouveau round
+        onPrepareNewRound: async () => {
+            console.log('[RACE-SEQ] Préparation nouveau round');
+            
+            // Sauvegarder l'ancien round
             const oldRoundId = gameState.currentRound.id;
             gameState.runningRoundData = JSON.parse(JSON.stringify(gameState.currentRound));
-            
-            // Créer le nouveau round maintenant
+
+            // Créer le nouveau round
             const newRoundId = generateRoundId();
             const basePlaces = Array.from({ length: BASE_PARTICIPANTS.length }, (_, i) => i + 1);
-            
-            // Mélange Fisher-Yates avec ChaCha20 (cryptographiquement sécurisé)
             const shuffledPlaces = chacha20Shuffle(basePlaces);
-            
-            // Créer le nouveau round et le mettre dans currentRound (les nouveaux tickets iront dans ce round)
+
             const newRound = {
                 id: newRoundId,
                 participants: BASE_PARTICIPANTS.map((p, i) => ({
                     ...p,
                     place: shuffledPlaces[i],
                 })),
-            receipts: [],
-            lastReceiptId: 3,
-            totalPrize: 0,
-            persisted: false  // Mark as not yet persisted in DB
-        };
-            
-            // Remplacer currentRound par le nouveau round (les tickets iront maintenant dans le nouveau round)
+                receipts: [],
+                lastReceiptId: 3,
+                totalPrize: 0,
+                persisted: false
+            };
+
             gameState.currentRound = newRound;
 
-            // Persist this new round to DB BEFORE broadcasting so cashier can create tickets safely
+            // Persist to DB
             try {
                 const roundNum = getNextRoundNumber();
-                const insertRes = await pool.query(
+                await pool.query(
                     `INSERT INTO rounds (round_id, round_number, status, created_at) 
                      VALUES ($1, $2, 'waiting', CURRENT_TIMESTAMP) 
                      ON CONFLICT (round_id) DO UPDATE SET updated_at = CURRENT_TIMESTAMP
                      RETURNING round_id`,
                     [newRoundId, roundNum]
                 );
-                console.log(`✅ Round #${roundNum} (ID: ${newRoundId}) créé en DB (during race)`);
+                console.log(`✅ Round #${roundNum} (ID: ${newRoundId}) créé en DB`);
                 gameState.currentRound.persisted = true;
             } catch (err) {
-                console.error('[DB] Erreur création round (during race):', err);
+                console.error('[DB] Erreur création round:', err);
                 gameState.currentRound.persisted = false;
             }
 
-            // Démarre le timer pour le prochain lancement
+            // Programmer le prochain lancement
             const now = Date.now();
             gameState.nextRoundStartTime = now + ROUND_WAIT_DURATION_MS;
 
-            // Broadcast le nouveau round pour que les caissiers puissent commencer à placer des paris
+            // Broadcast du nouveau round
             broadcast({
                 event: "new_round",
                 roundId: newRoundId,
@@ -188,60 +436,93 @@ export default function createRoundsRouter(broadcast) {
                     endTime: gameState.nextRoundStartTime
                 },
                 nextRoundStartTime: gameState.nextRoundStartTime,
-                isRaceRunning: true, // La course précédente continue
+                isRaceRunning: true,
                 raceStartTime: gameState.raceStartTime,
                 raceEndTime: null
             });
 
-            console.log(`✅ Nouveau round #${newRoundId} activé et disponible pour les paris (course précédente #${oldRoundId} continue)`);
+            console.log(`✅ Nouveau round #${newRoundId} activé (ancien #${oldRoundId} en cours)`);
 
-            // Schedule automatic race start for this new round when its timer expires
+            // ✅ PROGRAMMER LE PROCHAIN AUTO-START
             const autoStartDelay = gameState.nextRoundStartTime - Date.now();
-            console.log(`[AUTO-START] Programmé pour démarrer dans ${autoStartDelay}ms`);
-
-            // Store this scheduled timer so it can be cleared if needed
-            if (gameState.nextRoundAutoStartTimer) {
-                clearTimeout(gameState.nextRoundAutoStartTimer);
-            }
-            gameState.nextRoundAutoStartTimer = setTimeout(async () => {
-                console.log(`[AUTO-START] ⏱️ Lancement automatique du round #${newRoundId}`);
-                try {
-                    const resp = await fetch('http://localhost:8080/api/v1/rounds/auto-finish', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' }
-                    });
-                    if (!resp.ok) {
-                        console.error('[AUTO-START] Erreur auto-finish:', resp.status, resp.statusText);
+            raceTimerManager.scheduleNextRaceStart(newRoundId, autoStartDelay, {
+                onAutoStart: async () => {
+                    // Appeler /auto-finish via une vraie requête HTTP
+                    try {
+                        const protocol = process.env.NODE_ENV === 'production' ? 'https' : 'http';
+                        const host = process.env.SERVER_HOST || 'localhost';
+                        const port = process.env.PORT || 8080;
+                        const url = `${protocol}://${host}:${port}/api/v1/rounds/auto-finish`;
+                        
+                        const resp = await fetch(url, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' }
+                        });
+                        if (!resp.ok) {
+                            console.error('[AUTO-START] Erreur auto-finish:', resp.status);
+                        }
+                    } catch (err) {
+                        console.error('[AUTO-START] Erreur:', err && err.message ? err.message : err);
                     }
-                } catch (err) {
-                    console.error('[AUTO-START] Erreur appel auto-finish:', err && err.message ? err.message : err);
                 }
-            }, autoStartDelay);
-        }, NEW_ROUND_PREPARE_DELAY_MS);
-        
-        // Simule la durée de la course (20 secondes pour correspondre à movie_screen)
-        setTimeout(async () => {
-            // ... rest of the race finish logic (same as current)
-            console.log('[FINISH] Continuation de la logique finish à T+20s');
-            // NOTE: Le reste de la logique finish existante devrait continuer ici
-        }, MOVIE_SCREEN_DURATION_MS);
+            });
+        },
+
+        // T=20s: Exécuter la logique de fin
+        onFinishRace: async () => {
+            console.log('[RACE-SEQ] Exécution logique fin de course');
+            await executeRaceFinish();
+        },
+
+        // T=25s: Nettoyage
+        onCleanup: () => {
+            console.log('[RACE-SEQ] Nettoyage post-race');
+            gameState.isRaceRunning = false;
+            gameState.raceStartTime = null;
+            gameState.raceEndTime = null;
+            gameState._finishInProgress = false;
+        }
     };
+
     
     // -----------------------------------------------------------------
     // --- API AJOUTÉE : POST /api/v1/rounds/auto-finish (internal) ---
     // -----------------------------------------------------------------
     /**
-     * Endpoint interne pour déclencher le finish automatiquement.
+     * Endpoint interne pour déclencher la course automatiquement.
      * Appelé par le serveur quand le timer du nouveau round expire.
+     * ✅ UTILISE LE GESTIONNAIRE CENTRALISÉ DE TIMERS
      */
     router.post("/auto-finish", async (req, res) => {
         console.log('[AUTO-FINISH] Requête reçue');
+        
+        // ✅ PROTECTION: Vérifier que pas déjà en cours
+        if (gameState._finishInProgress) {
+            console.warn('[AUTO-FINISH] Déjà en cours, ignoré');
+            return res.json(wrap({ skipped: true, reason: 'finish already in progress' }));
+        }
+
+        // ✅ PROTECTION: Vérifier qu'une race n'est pas déjà en cours
+        if (gameState.isRaceRunning) {
+            console.warn('[AUTO-FINISH] Une course est déjà en cours, ignoré');
+            return res.json(wrap({ skipped: true, reason: 'race already running' }));
+        }
+
         try {
-            await executeFinish();
-            res.json(wrap({ success: true, auto: true }));
+            gameState._finishInProgress = true;
+            const raceId = gameState.currentRound.id;
+            
+            // ✅ UTILISER LE GESTIONNAIRE CENTRALISÉ
+            const success = raceTimerManager.startRaceSequence(raceId, raceCallbacks);
+            
+            if (!success) {
+                return res.json(wrap({ skipped: true, reason: 'race sequence already active' }));
+            }
+
+            res.json(wrap({ success: true }));
         } catch (err) {
             console.error('[AUTO-FINISH] Erreur:', err && err.message ? err.message : err);
-            res.status(500).json({ error: 'Erreur executeFinish' });
+            res.status(500).json({ error: 'Erreur startRaceSequence' });
         }
     });
 
@@ -283,9 +564,8 @@ export default function createRoundsRouter(broadcast) {
      */
     router.get("/status", cacheResponse(5), async (req, res) => {
         const now = Date.now();
-        const MOVIE_SCREEN_DURATION_MS = 25000;
-        const FINISH_DURATION_MS = 5000;
-        const TOTAL_RACE_TIME_MS = MOVIE_SCREEN_DURATION_MS + FINISH_DURATION_MS;
+        // ✅ UTILISER LES CONSTANTES UNIFIÉES IMPORTÉES DE config/app.config.js
+        // Pas de redéfinition locale des timers!
 
         // ✅ TIMER GUARD: Vérifier si le timer est bloqué
         if (!gameState.isRaceRunning && 
@@ -316,7 +596,7 @@ export default function createRoundsRouter(broadcast) {
                 screen = "finish_screen";
                 timeRemaining = TOTAL_RACE_TIME_MS - timeInRace;
             } else {
-                // Course terminée depuis plus de 25s, retour à game_screen
+                // Course terminée depuis plus de TOTAL_RACE_TIME_MS, retour à game_screen
                 screen = "game_screen";
                 gameState.isRaceRunning = false;
                 gameState.raceStartTime = null;
@@ -377,145 +657,40 @@ export default function createRoundsRouter(broadcast) {
             return res.json(wrap(roundData));
         }
 
-        // === FINISH === Archiver le round en mémoire ET en base
+        // === FINISH === Déclencher la séquence de course
         if (action === "finish") {
-            // Logique existante conservée
-            res.json(wrap({ success: true }));
-            // Appeler la logique extraite
-            executeFinish();
-            
-            // Simule la durée de la course (20 secondes pour correspondre à movie_screen)
-            setTimeout(async () => {
+            // ✅ PROTECTION: Vérifier que pas déjà en cours
+            if (gameState._finishInProgress) {
+                console.warn('[FINISH] Déjà en cours, ignoré');
+                return res.json(wrap({ skipped: true, reason: 'finish already in progress' }));
+            }
+
+            // ✅ PROTECTION: Vérifier qu'une race n'est pas déjà en cours
+            if (gameState.isRaceRunning) {
+                console.warn('[FINISH] Une course est déjà en cours, ignoré');
+                return res.json(wrap({ skipped: true, reason: 'race already running' }));
+            }
+
+            try {
+                gameState._finishInProgress = true;
+                const raceId = gameState.currentRound.id;
                 
-                // --- VOTRE LOGIQUE DE JEU ORIGINALE (Règlement de la course) ---
-                // Utiliser les données de l'ancien round sauvegardé
-                const finishedRoundData = gameState.runningRoundData || gameState.currentRound;
-                const participants = Array.isArray(finishedRoundData.participants) ? finishedRoundData.participants : [];
-                if (participants.length === 0) {
-                    console.error("finish: aucun participant -> annulation.");
-                    return;
+                // ✅ UTILISER LE GESTIONNAIRE CENTRALISÉ
+                const success = raceTimerManager.startRaceSequence(raceId, raceCallbacks);
+                
+                if (!success) {
+                    return res.json(wrap({ skipped: true, reason: 'race sequence already active' }));
                 }
 
-                const winner = participants[chacha20RandomInt(participants.length)];
-                
-                const winnerWithPlace = { ...winner, place: 1, family: winner.family ?? 0 };
+                // Répondre immédiatement au client
+                res.json(wrap({ success: true }));
 
-                // Mettre à jour les participants dans finishedRoundData
-                finishedRoundData.participants = participants.map(p =>
-                    (p.number === winner.number ? winnerWithPlace : p)
-                );
-
-                let totalPrizeAll = 0;
-                const receipts = Array.isArray(finishedRoundData.receipts) ? finishedRoundData.receipts : [];
-
-                receipts.forEach(receipt => {
-                    let totalPrizeForReceipt = 0;
-                    if (Array.isArray(receipt.bets)) {
-                        receipt.bets.forEach(bet => {
-                            if (Number(bet.number) === Number(winner.number)) {
-                                const betValue = Number(bet.value) || 0;
-                                const coeff = Number(winner.coeff) || 0;
-                                totalPrizeForReceipt += betValue * coeff;
-                            }
-                        });
-                    }
-                    receipt.prize = totalPrizeForReceipt;
-                    console.log(`Ticket #${receipt.id} gain : ${receipt.prize} HTG`);
-                    totalPrizeAll += totalPrizeForReceipt;
-                });
-
-                // Mettre à jour les statuts des tickets en DB (won/lost) avec les prizes calculés
-                (async () => {
-                  for (const receipt of receipts) {
-                    try {
-                      const newStatus = receipt.prize > 0 ? 'won' : 'lost';
-                      await updateReceiptStatus(receipt.id, newStatus, receipt.prize || 0);
-                      console.log(`[DB] ✓ Ticket #${receipt.id} mis à jour: status=${newStatus}, prize=${receipt.prize}`);
-                    } catch (err) {
-                      console.error(`[DB] ✗ Erreur mise à jour ticket #${receipt.id}:`, err.message);
-                    }
-                  }
-                })();
-
-                // Utiliser les données de l'ancien round sauvegardé (avant qu'il soit remplacé par le nouveau round)
-                finishedRoundData.totalPrize = totalPrizeAll;
-
-                // Marque la fin de la course (fin du movie_screen, début du finish_screen)
-                gameState.raceEndTime = Date.now();
-
-                // Archiver l'ancien round
-                const finishedRoundId = finishedRoundData.id;
-                if (finishedRoundId) {
-                    const finishedRound = {
-                        id: finishedRoundId,
-                        receipts: finishedRoundData.receipts || [],
-                        participants: finishedRoundData.participants || [],
-                        totalPrize: totalPrizeAll,
-                        winner: winnerWithPlace,
-                    };
-                    // Evite la duplication accidentelle : n'ajoute l'entrée que si elle n'existe pas déjà
-                    if (!gameState.gameHistory.some(r => r.id === finishedRound.id)) {
-                        gameState.gameHistory.push(finishedRound);
-                    } else {
-                        console.warn(`[ROUNDS] Round ${finishedRound.id} déjà présent dans gameHistory, saut de duplication.`);
-                    }
-                    // Garde seulement les 10 derniers tours
-                    if (gameState.gameHistory.length > 10) gameState.gameHistory.shift();
-                    
-                    // Sauvegarder le round terminé dans la base de données
-                    try {
-                        // Résoudre le winner_id attendu par la BDD (participant_id)
-                        let winnerParticipantId = null;
-                        try {
-                            const participantsDb = await getParticipants();
-                            const winnerRow = participantsDb.find(p => Number(p.number) === Number(winner.number));
-                            if (winnerRow) {
-                                winnerParticipantId = winnerRow.participant_id;
-                                console.log(`[ROUNDS] ✓ Participant winner résolu: number=${winner.number} -> participant_id=${winnerParticipantId}`);
-                            } else {
-                                console.warn(`[ROUNDS] ⚠️ Impossible de trouver participant en base pour number=${winner.number}; winner_id sera NULL`);
-                            }
-                        } catch (lookupErr) {
-                            console.error('[ROUNDS] Erreur lookup participant by number:', lookupErr);
-                        }
-
-                        await finishRound(finishedRoundId, winnerParticipantId, totalPrizeAll, new Date());
-                        console.log(`[ROUNDS] Round ${finishedRoundId} archivé en base de données avec winner participant_id=${winnerParticipantId} (number=${winner.number})`);
-                    } catch (dbError) {
-                        console.error(`[ROUNDS] Erreur lors de l'archivage du round en base :`, dbError);
-                    }
+            } catch (err) {
+                console.error('[FINISH] Erreur:', err && err.message ? err.message : err);
+                if (!res.headersSent) {
+                    res.status(500).json({ error: 'Erreur startRaceSequence' });
                 }
-
-                // Nettoyer la sauvegarde de l'ancien round
-                gameState.runningRoundData = null;
-
-                // Broadcast complet avec toutes les informations de fin de course (utilise l'ancien round ID)
-                broadcast({
-                    event: "race_end",
-                    roundId: finishedRoundId, // Utilise l'ancien round ID pour la fin de course
-                    winner: winnerWithPlace,
-                    receipts: JSON.parse(JSON.stringify(receipts)),
-                    prize: totalPrizeAll,
-                    totalPrize: totalPrizeAll,
-                    raceEndTime: gameState.raceEndTime,
-                    currentRound: JSON.parse(JSON.stringify(finishedRoundData)), // Utilise les données de l'ancien round
-                    participants: finishedRoundData.participants || []
-                });
-                
-                // Le nouveau round est déjà dans currentRound et disponible pour les paris
-                console.log(`✅ Course #${finishedRoundId} terminée, nouveau round #${gameState.currentRound.id} actif`);
-                
-                // --- FIN DE VOTRE LOGIQUE DE JEU ORIGINALE ---
-                
-                // Marque la fin complète de la course après finish_screen
-                setTimeout(() => {
-                    gameState.isRaceRunning = false;
-                    gameState.raceStartTime = null;
-                    gameState.raceEndTime = null;
-                }, 5000); // Après 5 secondes de finish_screen
-
-            }, MOVIE_SCREEN_DURATION_MS); // 20s pour correspondre à la durée réelle du movie_screen
-                                          // + 5s de finish_screen = 25s total
+            }
 
             return;
         }

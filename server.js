@@ -17,6 +17,12 @@ import keepaliveRouter from "./routes/keepalive.js";
 import moneyRouter from "./routes/money.js";
 import statsRouter from "./routes/stats.js";
 import { SERVER_WEBSOCKET_CONFIG, logWebSocketConfig } from "./config/websocket.js";
+import { 
+  TIMER_DURATION_MS,
+  MOVIE_SCREEN_DURATION_MS,
+  FINISH_SCREEN_DURATION_MS,
+  TOTAL_RACE_TIME_MS
+} from "./config/app.config.js";
 
 // Import ChaCha20 RNG pour sécurité des jeux d'argent
 import { initChaCha20 } from "./chacha20.js";
@@ -130,9 +136,7 @@ function setupWebSocket() {
     
     // Calcule l'état actuel pour envoyer au nouveau client
     const now = Date.now();
-    const MOVIE_SCREEN_DURATION_MS = 20000; // 20 secondes pour movie_screen
-    const FINISH_DURATION_MS = 5000; // 5 secondes pour finish_screen
-    const TOTAL_RACE_TIME_MS = MOVIE_SCREEN_DURATION_MS + FINISH_DURATION_MS; // 25 secondes total
+    // ✅ Tous les timers importés depuis config/app.config.js (single source of truth)
     
     let screen = "game_screen";
     let timeInRace = 0;
@@ -384,18 +388,17 @@ httpServer.listen(PORT, async () => {
     const now = Date.now();
     if (gameState.nextRoundStartTime && gameState.nextRoundStartTime > now) {
       const timeLeft = gameState.nextRoundStartTime - now;
-      const envDuration = Number(process.env.ROUND_WAIT_DURATION_MS);
-      const ROUND_WAIT_DURATION_MS = (envDuration > 0) ? envDuration : 180000;
+      // ✅ Utilise TIMER_DURATION_MS importé depuis config/app.config.js
       
       broadcast({
         event: 'timer_update',
         roundId: gameState.currentRound?.id,
         timer: {
           timeLeft: Math.max(0, timeLeft),
-          totalDuration: ROUND_WAIT_DURATION_MS,
-          startTime: gameState.nextRoundStartTime - ROUND_WAIT_DURATION_MS,
+          totalDuration: TIMER_DURATION_MS,
+          startTime: gameState.nextRoundStartTime - TIMER_DURATION_MS,
           endTime: gameState.nextRoundStartTime,
-          percentage: 100 - (timeLeft / ROUND_WAIT_DURATION_MS) * 100,
+          percentage: 100 - (timeLeft / TIMER_DURATION_MS) * 100,
           serverTime: now
         }
       });

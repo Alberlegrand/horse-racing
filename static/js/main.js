@@ -211,7 +211,6 @@ function scheduleWsReconnect() {
 }
 
 function handleWebSocketMessage(data) {
-  console.log('📨 main.js WebSocket:', data.event, 'Round:', data.roundId);
 
   // TOUJOURS transférer à app.js EN PREMIER pour une synchronisation complète
   if (window.app && window.app.handleWebSocketMessage) {

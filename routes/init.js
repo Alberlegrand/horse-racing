@@ -29,7 +29,7 @@ export default function createInitRouter() {
     // ✅ ZERO DB QUERIES - Toutes les données sont en mémoire
     const timeLeft = gameState.nextRoundStartTime ? Math.max(0, gameState.nextRoundStartTime - now) : 0;
     const envDuration = Number(process.env.ROUND_WAIT_DURATION_MS);
-    const ROUND_WAIT_DURATION_MS = (envDuration > 0) ? envDuration : 180000;
+    const ROUND_WAIT_DURATION_MS = (envDuration > 0) ? envDuration : 60000;
 
     const initData = {
       // Round data
@@ -86,7 +86,7 @@ export default function createInitRouter() {
       
       timer: {
         timeLeft: Math.max(0, gameState.nextRoundStartTime - now),
-        totalDuration: Number(process.env.ROUND_WAIT_DURATION_MS) || 180000,
+        totalDuration: Number(process.env.ROUND_WAIT_DURATION_MS) || 60000,
         serverTime: now
       },
 

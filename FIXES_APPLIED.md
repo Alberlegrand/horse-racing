@@ -74,7 +74,7 @@ import { BASE_PARTICIPANTS } from "../game.js";
 ### 3. ✅ **Timer Incohérent (180s vs 20s)**
 
 **Problème**:
-- `ROUND_WAIT_DURATION_MS = 180000` (3 minutes) dans `rounds.js`
+- `ROUND_WAIT_DURATION_MS = 60000` (3 minutes) dans `rounds.js`
 - `TIMER_DURATION_SECONDS = 20` (20 sec) dans `config/app.config.js`
 - Documentation mentionne 10s, 20s, ET 180s
 - Impossible de savoir la vraie valeur
