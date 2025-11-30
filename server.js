@@ -22,7 +22,7 @@ import { SERVER_WEBSOCKET_CONFIG } from "./config/websocket.js";
 import { initChaCha20 } from "./chacha20.js";
 
 // Import base de données
-import { initializeDatabase } from "./config/db.js";
+import { initializeDatabase, pool } from "./config/db.js";
 
 // Import Redis pour cache et sessions
 import { initRedis, closeRedis } from "./config/redis.js";
