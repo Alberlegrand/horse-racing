@@ -930,9 +930,21 @@
                         switch(data.event) {
                             case 'race_start':
                                 console.log('🏁 Course démarrée - synchronisation movie_screen');
+                                // ✅ Arrêter le timer d'attente du round
+                                if (countdownInterval) {
+                                    clearInterval(countdownInterval);
+                                    countdownInterval = null;
+                                }
+                                // ✅ MASQUER complètement le progress bar pendant la course
+                                $('#currentRound').hide();
+                                $('#timeRemainingDisplay').hide();
+                                $('.progress-container').hide();
+                                
+                                // Afficher l'écran de course
                                 $('.screen').removeClass('active');
                                 $('.movie_screen').addClass('active');
-                                // Surveille la fin de la course
+                                
+                                // Surveille la fin de la course (pas de timer local ici!)
                                 attendreFinDeCourse();
                                 break;
                                 
@@ -953,6 +965,9 @@
                                 
                             case 'new_round':
                                 console.log('🆕 Nouveau round - synchronisation');
+                                // ✅ NOUVEAU: Réafficher la barre de timer du round
+                                $('#currentRound, #timeRemainingDisplay, .progress-container').show();
+                                
                                 // Met à jour le currentRound si disponible
                                 if (data.game && data.game.id) {
                                     $('#currentRound').text('🏁 Round ' + data.game.id);

@@ -270,12 +270,79 @@ app.all(/^\/api\/v1\/keepalive(\/.*)?$/, (req, res) => {
 // =================================================================
 // ===           DÉMARRAGE                                       ===
 // =================================================================
-app.listen(PORT, () => {
-  console.log(`✅ Serveur de jeu lancé sur http://localhost:${PORT}`);
-  // Démarre le premier tour au lancement
-  startNewRound(broadcast);
+
+// ✅ Job scheduler avec retry logic pour initialiser le jeu avec robustesse
+async function initializeGameWithRetry(maxAttempts = 3) {
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      console.log(`🚀 [STARTUP] Tentative ${attempt}/${maxAttempts} d'initialisation...`);
+      
+      // ⏱️ Mesurer le temps d'initialisation
+      const startTime = Date.now();
+      
+      console.log('📊 [STARTUP] Initialisation de la base de données...');
+      // Vérifier que la connexion DB est prête
+      const testQuery = await pool.query('SELECT NOW()');
+      console.log(`✅ [STARTUP] Base de données prête (latence: ${Date.now() - startTime}ms)`);
+      
+      console.log('📡 [STARTUP] Vérification du système WebSocket...');
+      if (!broadcast || typeof broadcast !== 'function') {
+        throw new Error('Fonction broadcast non disponible');
+      }
+      console.log('✅ [STARTUP] WebSocket système OK');
+      
+      console.log('🎮 [STARTUP] Lancement du premier round...');
+      await startNewRound(broadcast);
+      console.log(`✅ [STARTUP] Premier round lancé avec succès (durée totale: ${Date.now() - startTime}ms)`);
+      
+      return true;
+    } catch (error) {
+      console.error(`❌ [STARTUP] Tentative ${attempt} échouée:`, error.message);
+      
+      if (attempt < maxAttempts) {
+        const delayMs = 1000 * attempt; // Délai progressif: 1s, 2s, 3s...
+        console.log(`⏳ [STARTUP] Attente ${delayMs}ms avant prochaine tentative...`);
+        await new Promise(resolve => setTimeout(resolve, delayMs));
+      }
+    }
+  }
   
-  // ✅ NOUVEAU: Broadcast le timer toutes les 500ms pour synchronisation client
+  console.error('❌ [STARTUP] Impossible d\'initialiser le jeu après 3 tentatives');
+  return false;
+}
+
+// ✅ Scheduler pour auto-lancer les courses et vérifier l'état du timer
+function scheduleAutoStartRound() {
+  console.log('✅ [SCHEDULER] Auto-start programmé (intervalle: 2s)');
+  
+  // Vérifier toutes les 2 secondes que le timer est actif
+  setInterval(() => {
+    const now = Date.now();
+    
+    // Si gameState.nextRoundStartTime est null ou dans le passé, redémarrer
+    if (!gameState.nextRoundStartTime || gameState.nextRoundStartTime <= now) {
+      console.warn('⚠️ [AUTO-RECOVERY] Timer bloqué détecté, relancement du round...');
+      startNewRound(broadcast).catch(err => {
+        console.error('❌ [AUTO-RECOVERY] Erreur lors du relancement:', err.message);
+      });
+    }
+  }, 2000); // Vérification toutes les 2 secondes
+}
+
+app.listen(PORT, async () => {
+  console.log(`✅ Serveur de jeu lancé sur http://localhost:${PORT}`);
+  
+  // ✅ Initialiser le jeu avec retry logic
+  const initialized = await initializeGameWithRetry(3);
+  
+  if (!initialized) {
+    console.error('⚠️ [STARTUP] Initialisation échouée, le serveur continue mais le jeu n\'est pas prêt');
+  }
+  
+  // ✅ Démarrer le scheduler de vérification même si l'initialisation échoue
+  scheduleAutoStartRound();
+  
+  // ✅ BROADCAST TIMER: Synchronisation client toutes les 500ms
   // Cela permet aux clients de rester synchronisés même s'ils dérivent
   setInterval(() => {
     const now = Date.now();
@@ -286,10 +353,10 @@ app.listen(PORT, () => {
       
       broadcast({
         event: 'timer_update',
-        roundId: gameState.currentRound?.id, // ✅ Inclure le roundId
+        roundId: gameState.currentRound?.id,
         timer: {
           timeLeft: Math.max(0, timeLeft),
-          totalDuration: ROUND_WAIT_DURATION_MS, // ✅ Utiliser la vraie durée
+          totalDuration: ROUND_WAIT_DURATION_MS,
           startTime: gameState.nextRoundStartTime - ROUND_WAIT_DURATION_MS,
           endTime: gameState.nextRoundStartTime,
           percentage: 100 - (timeLeft / ROUND_WAIT_DURATION_MS) * 100,
@@ -297,10 +364,9 @@ app.listen(PORT, () => {
         }
       });
     }
-  }, 500); // Toutes les 500ms pour synchronisation fine
+  }, 500);
   
   // Démarrer automatiquement la première course après un court délai
-  // La boucle automatique sera gérée par routes/rounds.js après le premier finish
   setTimeout(() => {
     if (roundsRouter.autoStartRace) {
       console.log('🚀 Démarrage automatique de la première course...');
@@ -308,7 +374,7 @@ app.listen(PORT, () => {
     } else {
       console.log('⚠️ autoStartRace non disponible, attendre action finish manuelle');
     }
-  }, 1000); // Délai pour s'assurer que le round est bien initialisé
+  }, 1000);
 });
 
 wss.on("listening", () => {

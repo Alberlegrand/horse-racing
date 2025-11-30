@@ -277,12 +277,27 @@ export default function createRoundsRouter(broadcast) {
     /**
      * Retourne l'état actuel du jeu pour la synchronisation au chargement de la page.
      * Permet de savoir quel écran afficher et le temps restant.
+     * 
+     * ⚠️ TIMER GUARD: Si le timer est bloqué (nextRoundStartTime null/passé et pas de race),
+     * déclencher automatiquement un nouveau round pour la robustesse sur Render.
      */
-    router.get("/status", cacheResponse(5), (req, res) => {
+    router.get("/status", cacheResponse(5), async (req, res) => {
         const now = Date.now();
-        const MOVIE_SCREEN_DURATION_MS = 25000; // 25 secondes pour movie_screen (correspond à la durée côté client)
-        const FINISH_DURATION_MS = 5000; // 5 secondes pour finish_screen
-        const TOTAL_RACE_TIME_MS = MOVIE_SCREEN_DURATION_MS + FINISH_DURATION_MS; // 25 secondes total
+        const MOVIE_SCREEN_DURATION_MS = 25000;
+        const FINISH_DURATION_MS = 5000;
+        const TOTAL_RACE_TIME_MS = MOVIE_SCREEN_DURATION_MS + FINISH_DURATION_MS;
+
+        // ✅ TIMER GUARD: Vérifier si le timer est bloqué
+        if (!gameState.isRaceRunning && 
+            (!gameState.nextRoundStartTime || gameState.nextRoundStartTime <= now)) {
+          console.warn('⚠️ [TIMER-GUARD] Timer bloqué détecté dans /status, redémarrage du round...');
+          try {
+            await startNewRound(broadcast);
+            console.log('✅ [TIMER-GUARD] Round redémarré avec succès');
+          } catch (error) {
+            console.error('❌ [TIMER-GUARD] Erreur lors du redémarrage:', error.message);
+          }
+        }
 
         let screen = "game_screen"; // Par défaut
         let timeRemaining = 0;

@@ -930,6 +930,16 @@
                         switch(data.event) {
                             case 'race_start':
                                 console.log('🏁 Course démarrée - synchronisation movie_screen');
+                                // ✅ Arrêter le timer d'attente du round
+                                if (countdownInterval) {
+                                    clearInterval(countdownInterval);
+                                    countdownInterval = null;
+                                }
+                                // ✅ MASQUER complètement le progress bar pendant la course
+                                $('#currentRound').hide();
+                                $('#timeRemainingDisplay').hide();
+                                $('.progress-container').hide();
+                                
                                 $('.screen').removeClass('active');
                                 $('.movie_screen').addClass('active');
                                 // Surveille la fin de la course
