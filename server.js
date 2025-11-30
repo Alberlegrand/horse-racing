@@ -16,7 +16,7 @@ import createMyBetsRouter from "./routes/my_bets.js";
 import keepaliveRouter from "./routes/keepalive.js";
 import moneyRouter from "./routes/money.js";
 import statsRouter from "./routes/stats.js";
-import { SERVER_WEBSOCKET_CONFIG } from "./config/websocket.js";
+import { SERVER_WEBSOCKET_CONFIG, logWebSocketConfig } from "./config/websocket.js";
 
 // Import ChaCha20 RNG pour sécurité des jeux d'argent
 import { initChaCha20 } from "./chacha20.js";
@@ -36,6 +36,18 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 const PORT = 8080;
+const NODE_ENV = process.env.NODE_ENV || "development";
+
+// ✅ Afficher l'environnement au démarrage
+console.log(`
+════════════════════════════════════════════════════════
+🚀 Démarrage du serveur
+════════════════════════════════════════════════════════
+Mode: ${NODE_ENV.toUpperCase()}
+Port Express: ${PORT}
+Timestamp: ${new Date().toISOString()}
+════════════════════════════════════════════════════════
+`);
 
 // Initialiser ChaCha20 RNG au démarrage
 initChaCha20();
@@ -378,5 +390,6 @@ app.listen(PORT, async () => {
 });
 
 wss.on("listening", () => {
-  console.log(`✅ Serveur WebSocket lancé sur ws://localhost:${SERVER_WEBSOCKET_CONFIG.port}${SERVER_WEBSOCKET_CONFIG.path}`);
+  // Afficher la configuration WebSocket complète
+  logWebSocketConfig();
 });
