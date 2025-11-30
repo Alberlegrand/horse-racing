@@ -454,7 +454,8 @@ const createTables = async () => {
     if (cashierCount === 0) {
       await client.query(`
         INSERT INTO users (username, email, password, role, email_verified, is_active)
-        VALUES ('caissier', 'cashier@horseracing.local', 'caissier123', 'cashier', true, true)
+        VALUES ('caissier', 'cashier@horseracing.local', 'caissier123', 'cashier', true, true),
+               ('caissier2', 'cashier2@horseracing.local', 'caissier123', 'cashier', true, true)
       `);
       console.log("👤 Utilisateur caissier créé (username: caissier, password: caissier123)");
     } else {

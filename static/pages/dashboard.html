@@ -36,9 +36,12 @@
         }
 
         @keyframes pulse {
-            0%, 100% {
+
+            0%,
+            100% {
                 opacity: 1;
             }
+
             50% {
                 opacity: 0.8;
             }
@@ -58,6 +61,7 @@
             display: flex;
             align-items: center;
             justify-content: center;
+            overflow: hidden;
         }
 
         #betFrame {
@@ -67,52 +71,62 @@
             border: none;
         }
 
-
         /* Tickets section fixed to bottom with small internal scroll */
         .page-content.active {
-            padding-bottom: 200px; /* space for the fixed tickets section */
+            padding-bottom: 120px;
+            /* space for the fixed tickets section */
+            overflow: hidden;
         }
 
-        /* Prevent the fixed tickets panel from overlapping the sidebar.
-           Use --sidebar-width to match your layout (fallback 260px) */
+        /* Section fixée en bas avec hauteur fixe */
         #ticketsSection {
             position: fixed;
             bottom: 0;
-            left: calc(var(--sidebar-width, 260px) + 1rem);
-            right: 1rem;
+            left: 0;
+            right: 0;
+            height: 100px;
+            /* RÉDUIT - 2 tickets seulement */
             z-index: 40;
-            margin: 0;
-            width: calc(100% - (var(--sidebar-width, 260px) + 2rem));
-            border-radius: 0.75rem;
-            background: rgba(17,24,39,0.95);
-            box-shadow: 0 -8px 24px rgba(2,6,23,0.6);
+            background: rgba(17, 24, 39, 0.95);
+            border-radius: 0.75rem 0.75rem 0 0;
+            box-shadow: 0 -8px 24px rgba(2, 6, 23, 0.6);
+            display: flex;
+            flex-direction: column;
         }
 
-        /* make the table area scrollable without moving the whole page
-           Show only header + 2 rows; scrolling happens only here */
-        #ticketsSection .overflow-x-auto {
-            max-height: 140px; /* header + ~2 rows */
+        /* Header tickets */
+        #ticketsHeader {
+            padding: 0.5rem;
+            flex-shrink: 0;
+            border-bottom: 1px solid rgba(71, 85, 105, 0.5);
+        }
+
+        /* Scroll interne – la clé absolue 💛 */
+        #ticketsScroll {
+            flex: 1;
             overflow-y: auto;
             overflow-x: hidden;
-            padding-right: 0.5rem;
+            min-height: 0;
         }
 
-        /* Thin subtle scrollbar for modern browsers */
-        #ticketsSection .overflow-x-auto::-webkit-scrollbar {
+        /* Scrollbar plus élégant */
+        #ticketsScroll::-webkit-scrollbar {
             width: 8px;
-            height: 8px;
         }
-        #ticketsSection .overflow-x-auto::-webkit-scrollbar-thumb {
-            background: rgba(148,163,184,0.25);
-            border-radius: 9999px;
+
+        #ticketsScroll::-webkit-scrollbar-thumb {
+            background: rgba(148, 163, 184, 0.25);
+            border-radius: 10px;
         }
-        #ticketsSection .overflow-x-auto::-webkit-scrollbar-track {
-            background: transparent;
+
+        #ticketsScroll::-webkit-scrollbar-thumb:hover {
+            background: rgba(148, 163, 184, 0.4);
         }
     </style>
 
     <!-- Overlay Course en cours -->
-    <div id="raceOverlay" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center hidden">
+    <div id="raceOverlay"
+        class="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center hidden">
         <div class="bg-slate-900 rounded-2xl p-8 border-2 border-yellow-500 shadow-2xl max-w-md w-full mx-4">
             <div class="text-center">
                 <div class="mb-6">
@@ -169,26 +183,28 @@
         <div class="bg-slate-800 rounded-lg p-0  flex flex-col overflow-hidden">
             <div id="betFrameContainer" class="relative w-700 flex-1 min-h-0 overflow-hidden">
                 <iframe id="betFrame" src="/bet_frame" style="width: 90%; height:77vh;"></iframe>
-                <div id="betFrameOverlay" class="absolute inset-0 bg-black/60 flex items-center justify-center text-white text-sm hidden pointer-events-auto transition-opacity duration-300 z-10">
-                  <div class="flex flex-col items-center gap-3">
-                    <div id="betFrameOverlayText" class="bg-black/50 px-3 py-1.5 rounded text-sm">Jeu en cours...</div>
-                    <div id="betLaunchProgress" class="w-11/12 max-w-md bg-white/10 rounded-full h-2 overflow-hidden">
-                      <div id="betLaunchProgressBar" class="bg-green-400 h-full w-0" style="transition: width 0.2s linear;"></div>
+                <div id="betFrameOverlay"
+                    class="absolute inset-0 bg-black/60 flex items-center justify-center text-white text-sm hidden pointer-events-auto transition-opacity duration-300 z-10">
+                    <div class="flex flex-col items-center gap-3">
+                        <div id="betFrameOverlayText" class="bg-black/50 px-3 py-1.5 rounded text-sm">Jeu en cours...
+                        </div>
+                        <div id="betLaunchProgress"
+                            class="w-11/12 max-w-md bg-white/10 rounded-full h-2 overflow-hidden">
+                            <div id="betLaunchProgressBar" class="bg-green-400 h-full w-0"
+                                style="transition: width 0.2s linear;"></div>
+                        </div>
+                        <div id="betLaunchTimer" class="text-xs opacity-80">--s</div>
                     </div>
-                    <div id="betLaunchTimer" class="text-xs opacity-80">--s</div>
-                  </div>
                 </div>
             </div>
         </div>
     </section>
 
-    <!-- Tickets Table - Fixed footer with internal scroll -->
-    <section id="ticketsSection" class="bg-slate-800 rounded-lg p-2">
-        <div class="sr-only"><!-- header removed as requested -->10 derniers tickets</div>
+    <section id="ticketsSection">
 
-        <div class="overflow-x-auto">
+        <div id="ticketsScroll" class="tickets-scroll">
             <table class="w-full text-left text-xs">
-                <thead class="text-slate-400 text-xs uppercase border-b border-slate-700">
+                <thead class="text-slate-400 text-xs uppercase border-b border-slate-700 sticky top-0 bg-slate-800">
                     <tr>
                         <th class="p-1">ID</th>
                         <th class="p-1">Date</th>
@@ -199,14 +215,15 @@
                         <th class="p-1">Actions</th>
                     </tr>
                 </thead>
-                <tbody id="ticketsTable" class="divide-y divide-slate-700">
-                    <tr>
-                        <td colspan="7" class="p-3 text-slate-400 text-center">Chargement...</td>
-                    </tr>
-                </tbody>
+
+                <tbody id="ticketsTable"></tbody>
             </table>
         </div>
     </section>
+
+
+
+
     <!-- Scripts de jeu (conservés tels quels) -->
     <script src="/js/print.min.js?v=33054"></script>
     <script src="/js/big_min.js?v=33054"></script>
@@ -232,34 +249,34 @@
     <script src="/js/jackpots.ws.js?v=33054"></script>
     <script src="/js/main.js?v=33054"></script>
     <script>
-    (function () {
-        async function fetchCashierBalance() {
-            try {
-                const res = await fetch('/api/v1/money/');
-                const json = await res.json();
-                const payload = json && json.data ? json.data : json;
-                const balance = payload && (payload.cashBalance !== undefined ? payload.cashBalance : (payload.cashBalanceHTG || null));
-                const el = document.getElementById('cashierBalance');
-                if (el) {
-                    if (balance === null || balance === undefined) {
-                        el.textContent = '-- HTG';
-                    } else {
-                        // assume API returns numeric HTG value
-                        el.textContent = Number(balance).toFixed(2) + ' HTG';
+        (function () {
+            async function fetchCashierBalance() {
+                try {
+                    const res = await fetch('/api/v1/money/');
+                    const json = await res.json();
+                    const payload = json && json.data ? json.data : json;
+                    const balance = payload && (payload.cashBalance !== undefined ? payload.cashBalance : (payload.cashBalanceHTG || null));
+                    const el = document.getElementById('cashierBalance');
+                    if (el) {
+                        if (balance === null || balance === undefined) {
+                            el.textContent = '-- HTG';
+                        } else {
+                            // assume API returns numeric HTG value
+                            el.textContent = Number(balance).toFixed(2) + ' HTG';
+                        }
                     }
+                } catch (err) {
+                    console.error('Erreur fetch cashier balance:', err);
                 }
-            } catch (err) {
-                console.error('Erreur fetch cashier balance:', err);
             }
-        }
 
-        // initial fetch
-        fetchCashierBalance();
-        // periodic refresh
-        setInterval(fetchCashierBalance, 10000);
+            // initial fetch
+            fetchCashierBalance();
+            // periodic refresh
+            setInterval(fetchCashierBalance, 10000);
 
-        const btn = document.getElementById('refreshCashierBalance');
-        if (btn) btn.addEventListener('click', fetchCashierBalance);
-    })();
+            const btn = document.getElementById('refreshCashierBalance');
+            if (btn) btn.addEventListener('click', fetchCashierBalance);
+        })();
     </script>
 </div>
