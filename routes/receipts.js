@@ -12,6 +12,8 @@ import { createReceipt as dbCreateReceipt, createBet as dbCreateBet } from "../m
 import { pool } from "../config/db.js";
 // Import cache strategy (Redis)
 import dbStrategy from "../config/db-strategy.js";
+// Import validation des montants
+import { MIN_BET_AMOUNT, MAX_BET_AMOUNT } from "../config/app.config.js";
 
 /**
  * Crée le routeur pour les "receipts" (tickets).
@@ -582,10 +584,44 @@ export default function createReceiptsRouter(broadcast) {
       }
 
       // Vérifier que TOUS les participants du ticket existent dans le round
-      const currentParticipantNumbers = (gameState.currentRound.participants || []).map(p => p.number);
+      let currentParticipantNumbers = (gameState.currentRound.participants || []).map(p => p.number);
+      
+      // ✅ SECURITÉ: Si pas de participants, charger depuis BASE_PARTICIPANTS
+      if (currentParticipantNumbers.length === 0) {
+        console.warn(`[VALIDATION] ⚠️ currentRound.participants vide, chargement depuis BASE_PARTICIPANTS`);
+        try {
+          const gameModule = await import('../game.js');
+          const BASE_PARTICIPANTS = gameModule.BASE_PARTICIPANTS;
+          currentParticipantNumbers = BASE_PARTICIPANTS.map(p => p.number);
+        } catch (importErr) {
+          console.error('[VALIDATION] Erreur import BASE_PARTICIPANTS:', importErr);
+        }
+      }
+      
+      // 🔍 DEBUG DÉTAILLÉ
+      console.log(`[DEBUG] Rebet validation détaillé:`, {
+        roundId: gameState.currentRound.id,
+        participantsCount: currentParticipantNumbers.length,
+        participantsAvailable: currentParticipantNumbers,
+        betsCount: receipt.bets?.length || 0,
+        betsDetail: receipt.bets?.map(b => ({
+          number: b.number,
+          participant: b.participant,
+          participantNumber: b.participant?.number
+        })) || [],
+        requestedParticipants: receipt.bets?.map(b => {
+          const num = b.participant?.number || b.number;
+          console.log(`  - Bet participant number: ${num}, included in list: ${currentParticipantNumbers.includes(num)}`);
+          return num;
+        }) || []
+      });
+      
       const invalidBets = receipt.bets.filter(bet => {
         const participantNumber = bet.participant?.number || bet.number;
-        return !currentParticipantNumbers.includes(participantNumber);
+        // ✅ IMPORTANT: Convertir en nombre pour la comparaison (au cas où l'un soit string et l'autre number)
+        const numToCheck = Number(participantNumber);
+        const isValid = currentParticipantNumbers.map(n => Number(n)).includes(numToCheck);
+        return !isValid;
       });
 
       if (invalidBets.length > 0) {
@@ -594,6 +630,26 @@ export default function createReceiptsRouter(broadcast) {
           error: "Un ou plusieurs participants ne sont pas valides pour ce tour",
           code: "INVALID_PARTICIPANTS",
           invalidParticipants: invalidBets.map(b => b.participant?.number || b.number)
+        });
+      }
+
+      // ✅ VALIDATION: Vérifier les limites de montants pour chaque pari
+      const invalidAmountBets = receipt.bets.filter(bet => {
+        const betAmount = parseFloat(bet.value) || 0;
+        return betAmount < MIN_BET_AMOUNT || betAmount > MAX_BET_AMOUNT;
+      });
+
+      if (invalidAmountBets.length > 0) {
+        console.warn(`[VALIDATION] ❌ Montants invalides (min: ${MIN_BET_AMOUNT}, max: ${MAX_BET_AMOUNT}):`, invalidAmountBets.map(b => `${b.participant?.number}: ${b.value}`).join(', '));
+        return res.status(400).json({
+          error: `Les montants doivent être entre ${systemToPublic(MIN_BET_AMOUNT)} et ${systemToPublic(MAX_BET_AMOUNT)} HTG`,
+          code: "INVALID_BET_AMOUNT",
+          minBet: systemToPublic(MIN_BET_AMOUNT),
+          maxBet: systemToPublic(MAX_BET_AMOUNT),
+          invalidBets: invalidAmountBets.map(b => ({ 
+            participant: b.participant?.number, 
+            amount: systemToPublic(b.value) 
+          }))
         });
       }
 
@@ -614,6 +670,7 @@ export default function createReceiptsRouter(broadcast) {
         }
         return {
           ...bet,
+          participant: bet.participant, // ✅ IMPORTANT: Conserver participant pour rebet
           number: bet.participant.number,
           value: bet.value,
           prize: bet.prize || 0

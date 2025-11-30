@@ -10,14 +10,17 @@ import dbStrategy from './config/db-strategy.js';
 // Initialiser ChaCha20 RNG au démarrage
 initChaCha20();
 
-// Données de base
-const BASE_PARTICIPANTS = [
+// ========================================
+// Participants de base - SOURCE DE VÉRITÉ UNIQUE
+// ⚠️ Utiliser UNIQUEMENT cette constante pour initialiser les participants
+// ========================================
+export const BASE_PARTICIPANTS = [
     { number: 6, name: "De Bruyne", coeff: 5.5, family: 0, place: 0 },
-    { number: 7, name: "Ronaldo", coeff: 4.7, family: 1 },
-    { number: 8, name: "Mbappe", coeff: 7.2, family: 2 },
-    { number: 9, name: "Halland", coeff: 5.8, family: 3 },
-    { number: 10, name: "Messi", coeff: 8.1, family: 4 },
-    { number: 54, name: "Vinicius", coeff: 4.5, family: 5 }
+    { number: 7, name: "Ronaldo", coeff: 4.7, family: 1, place: 0 },
+    { number: 8, name: "Mbappe", coeff: 7.2, family: 2, place: 0 },
+    { number: 9, name: "Halland", coeff: 5.8, family: 3, place: 0 },
+    { number: 10, name: "Messi", coeff: 8.1, family: 4, place: 0 },
+    { number: 54, name: "Vinicius", coeff: 4.5, family: 5, place: 0 }
 ];
 
 // L'état est encapsulé dans un objet pour être partageable

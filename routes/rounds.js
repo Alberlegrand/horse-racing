@@ -2,7 +2,7 @@
 
 import express from "express";
 // On suppose que gameState est un objet partagé que nous pouvons modifier
-import { gameState, startNewRound, wrap } from "../game.js";
+import { gameState, startNewRound, wrap, BASE_PARTICIPANTS } from "../game.js";
 
 // Import ChaCha20 pour la sécurité des positions
 import { chacha20Random, chacha20RandomInt, chacha20Shuffle, initChaCha20 } from "../chacha20.js";
@@ -22,26 +22,29 @@ import { pool } from "../config/db.js";
 // Import du gestionnaire de numéro de round pour éviter les doublons
 import { getNextRoundNumber } from "../utils/roundNumberManager.js";
 
-const BASE_PARTICIPANTS = [
-    { number: 6, name: "De Bruyne", coeff: 5.5, family: 0, place: 0 },
-    { number: 7, name: "Ronaldo", coeff: 4.7, family: 1 },
-    { number: 8, name: "Mbappe", coeff: 7.2, family: 2 },
-    { number: 9, name: "Halland", coeff: 5.8, family: 3 },
-    { number: 10, name: "Messi", coeff: 8.1, family: 4 },
-    { number: 54, name: "Vinicius", coeff: 4.5, family: 5 }
-];
+// ✅ IMPORTER LES TIMERS DE LA CONFIG CENTRALISÉE
+import { 
+  TIMER_DURATION_MS,
+  TIMER_UPDATE_INTERVAL_MS
+} from "../config/app.config.js";
 
 function generateRoundId() {
     return Math.floor(96908000 + chacha20Random() * 1000);
 }
 
 // --- CONFIGURATION ---
-// La valeur fixe que vous voulez pour l'intervalle d'attente.
-// Nous utilisons directement cette valeur (60000 ms = 2 minutes) et non un minuteur externe.
-const ROUND_WAIT_DURATION_MS = parseInt(process.env.ROUND_WAIT_DURATION_MS) || 180000; // 3 minutes (60000 ms)
-const MOVIE_SCREEN_DURATION_MS = 20000; // 20 secondes pour movie_screen
-const FINISH_SCREEN_DURATION_MS = 5000; // 5 secondes pour finish_screen
+// ✅ TOUS LES TIMERS VIENNENT DE config/app.config.js
+// ROUND_WAIT_DURATION_MS = durée d'attente avant la prochaine race
+const ROUND_WAIT_DURATION_MS = TIMER_DURATION_MS;
+
+// Timers pour la race elle-même
+const MOVIE_SCREEN_DURATION_MS = 20000; // 20 secondes pour l'animation
+const FINISH_SCREEN_DURATION_MS = 5000; // 5 secondes pour affichage résultat
 const TOTAL_RACE_TIME_MS = MOVIE_SCREEN_DURATION_MS + FINISH_SCREEN_DURATION_MS; // 25 secondes total
+
+console.log(`⏰ [ROUNDS] Timer attente: ${ROUND_WAIT_DURATION_MS}ms`);
+console.log(`🎬 [ROUNDS] Movie screen: ${MOVIE_SCREEN_DURATION_MS}ms`);
+console.log(`🏁 [ROUNDS] Finish screen: ${FINISH_SCREEN_DURATION_MS}ms`);
 
 // --- INITIALISATION DE L'ÉTAT ---
 // Stocke le timestamp exact du début du prochain round.

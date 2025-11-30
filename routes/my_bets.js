@@ -110,8 +110,16 @@ router.get("/:id", async (req, res) => {
         if (dbReceipt) {
           // charger les bets
           const dbBets = await getBetsByReceipt(ticketId);
-          // normaliser la forme attendue
-          dbReceipt.bets = dbBets.map(b => ({ number: b.participant_number, value: b.value, participant: { name: b.participant_name, coeff: b.coefficient } }));
+          // normaliser la forme attendue - INCLURE LE NUMBER dans participant!
+          dbReceipt.bets = dbBets.map(b => ({ 
+            number: b.participant_number, 
+            value: b.value, 
+            participant: { 
+              number: b.participant_number,  // ✅ IMPORTANT: Ajouter number
+              name: b.participant_name, 
+              coeff: b.coefficient 
+            } 
+          }));
           receipt = dbReceipt;
           roundId = dbReceipt.round_id;
           isRoundFinished = dbReceipt.status !== 'pending';
