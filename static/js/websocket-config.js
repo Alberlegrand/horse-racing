@@ -25,16 +25,11 @@
     const env = getEnvironment();
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const hostname = window.location.hostname;
-    const port = window.location.port ? `:${window.location.port === '8080' ? '8081' : window.location.port}` : '';
+    const port = window.location.port ? `:${window.location.port}` : '';
     
-    if (env === 'development') {
-      // En développement, utilise le port 8081 spécifiquement
-      const wsPort = hostname === 'localhost' || hostname === '127.0.0.1' ? ':8081' : port;
-      return `${protocol.replace('https:', 'wss:').replace('http:', 'ws:')}//${hostname}${wsPort}/connection/websocket`;
-    } else {
-      // En production, utilise le même host mais avec wss
-      return `wss://${hostname}/connection/websocket`;
-    }
+    // WebSocket est maintenant sur le MÊME port que Express (8080 dev, 80/443 prod)
+    // Plus besoin de redirection vers 8081
+    return `${protocol}//${hostname}${port}/connection/websocket`;
   }
 
   // Configuration par défaut

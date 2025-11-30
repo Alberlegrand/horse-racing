@@ -913,12 +913,9 @@
              */
             function connecterWebSocket() {
                 try {
-                    // Détecte l'URL WebSocket depuis le serveur ou utilise la config par défaut
-                    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-                    const wsHost = window.location.hostname;
-                    const wsPort = '8081'; // Port WebSocket par défaut
-                    const wsPath = '/connection/websocket';
-                    const wsUrl = `${wsProtocol}//${wsHost}:${wsPort}${wsPath}`;
+                    // Utilise la configuration WebSocket centralisée (définie dans websocket-config.js)
+                    const wsUrl = window.wsConfig?.connectionString || 'ws://localhost:8080/connection/websocket';
+                    console.log('🔌 Connexion WebSocket URL:', wsUrl);
                     
                     ws = new WebSocket(wsUrl);
                     
