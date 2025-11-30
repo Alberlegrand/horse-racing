@@ -38,6 +38,10 @@ const app = express();
 const PORT = 8080;
 const NODE_ENV = process.env.NODE_ENV || "development";
 
+// ✅ Créer le serveur HTTP manuellement pour pouvoir l'utiliser avec WebSocket
+const http = await import('http');
+const httpServer = http.createServer(app);
+
 // ✅ Afficher l'environnement au démarrage
 console.log(`
 ════════════════════════════════════════════════════════
@@ -96,10 +100,9 @@ app.use('/fonts', express.static(path.join(__dirname, 'static', 'fonts')));
 // =================================================================
 // ===           SERVEUR WEBSOCKET                               ===
 // =================================================================
-const wss = new WebSocketServer({ 
-  port: SERVER_WEBSOCKET_CONFIG.port, 
-  path: SERVER_WEBSOCKET_CONFIG.path 
-});
+// ✅ En production (Render), attacher le WebSocket au serveur HTTP existant
+// ✅ En développement local, créer un serveur WebSocket séparé
+let wss;
 
 /**
  * Diffuse des données à tous les clients WebSocket connectés.
@@ -118,48 +121,58 @@ function broadcast(data) {
   });
 }
 
-wss.on("connection", (ws) => {
-  console.log("📡 Client connecté au WebSocket local");
-  
-  // Calcule l'état actuel pour envoyer au nouveau client
-  const now = Date.now();
-  const MOVIE_SCREEN_DURATION_MS = 20000; // 20 secondes pour movie_screen
-  const FINISH_DURATION_MS = 5000; // 5 secondes pour finish_screen
-  const TOTAL_RACE_TIME_MS = MOVIE_SCREEN_DURATION_MS + FINISH_DURATION_MS; // 25 secondes total
-  
-  let screen = "game_screen";
-  let timeInRace = 0;
-  
-  if (gameState.isRaceRunning && gameState.raceStartTime) {
-    timeInRace = now - gameState.raceStartTime;
-    if (timeInRace < MOVIE_SCREEN_DURATION_MS) {
-      screen = "movie_screen";
-    } else if (timeInRace < TOTAL_RACE_TIME_MS) {
-      screen = "finish_screen";
+/**
+ * Configure tous les handlers WebSocket après que wss soit créé
+ */
+function setupWebSocket() {
+  wss.on("connection", (ws) => {
+    console.log("📡 Client connecté au WebSocket local");
+    
+    // Calcule l'état actuel pour envoyer au nouveau client
+    const now = Date.now();
+    const MOVIE_SCREEN_DURATION_MS = 20000; // 20 secondes pour movie_screen
+    const FINISH_DURATION_MS = 5000; // 5 secondes pour finish_screen
+    const TOTAL_RACE_TIME_MS = MOVIE_SCREEN_DURATION_MS + FINISH_DURATION_MS; // 25 secondes total
+    
+    let screen = "game_screen";
+    let timeInRace = 0;
+    
+    if (gameState.isRaceRunning && gameState.raceStartTime) {
+      timeInRace = now - gameState.raceStartTime;
+      if (timeInRace < MOVIE_SCREEN_DURATION_MS) {
+        screen = "movie_screen";
+      } else if (timeInRace < TOTAL_RACE_TIME_MS) {
+        screen = "finish_screen";
+      }
     }
-  }
+    
+    // Envoie l'état complet au nouveau client pour synchronisation
+    ws.send(JSON.stringify({ 
+      event: "connected", 
+      serverTime: Date.now(), // ✅ SYNC: Timestamp serveur pour synchronisation client
+      roundId: gameState.currentRound?.id || null,
+      screen: screen,
+      isRaceRunning: gameState.isRaceRunning,
+      raceStartTime: gameState.raceStartTime,
+      raceEndTime: gameState.raceEndTime,
+      timeInRace: timeInRace,
+      nextRoundStartTime: gameState.nextRoundStartTime,
+      timerTimeLeft: gameState.nextRoundStartTime && gameState.nextRoundStartTime > now 
+        ? gameState.nextRoundStartTime - now 
+        : 0,
+      currentRound: JSON.parse(JSON.stringify(gameState.currentRound || {})),
+      totalReceipts: (gameState.currentRound?.receipts || []).length,
+      totalPrize: gameState.currentRound?.totalPrize || 0
+    }));
+  });
   
-  // Envoie l'état complet au nouveau client pour synchronisation
-  ws.send(JSON.stringify({ 
-    event: "connected", 
-    serverTime: Date.now(), // ✅ SYNC: Timestamp serveur pour synchronisation client
-    roundId: gameState.currentRound?.id || null,
-    screen: screen,
-    isRaceRunning: gameState.isRaceRunning,
-    raceStartTime: gameState.raceStartTime,
-    raceEndTime: gameState.raceEndTime,
-    timeInRace: timeInRace,
-    nextRoundStartTime: gameState.nextRoundStartTime,
-    timerTimeLeft: gameState.nextRoundStartTime && gameState.nextRoundStartTime > now 
-      ? gameState.nextRoundStartTime - now 
-      : 0,
-    currentRound: JSON.parse(JSON.stringify(gameState.currentRound || {})),
-    totalReceipts: (gameState.currentRound?.receipts || []).length,
-    totalPrize: gameState.currentRound?.totalPrize || 0
-  }));
-});
+  // Event: WebSocket server listening
+  wss.on("listening", () => {
+    logWebSocketConfig();
+  });
+}
 
-// =================================================================
+// ========================================================================
 // ===           ROUTES DE L'APPLICATION                         ===
 // =================================================================
 
@@ -341,8 +354,19 @@ function scheduleAutoStartRound() {
   }, 2000); // Vérification toutes les 2 secondes
 }
 
-app.listen(PORT, async () => {
+httpServer.listen(PORT, async () => {
   console.log(`✅ Serveur de jeu lancé sur http://localhost:${PORT}`);
+  
+  // ✅ Créer le WebSocket après que le serveur HTTP soit en train de tourner
+  wss = new WebSocketServer({
+    server: httpServer,
+    path: SERVER_WEBSOCKET_CONFIG.path
+  });
+  
+  console.log(`📡 WebSocket attaché au serveur HTTP sur le chemin ${SERVER_WEBSOCKET_CONFIG.path}`);
+  
+  // ✅ Configurer les handlers WebSocket
+  setupWebSocket();
   
   // ✅ Initialiser le jeu avec retry logic
   const initialized = await initializeGameWithRetry(3);
@@ -386,10 +410,5 @@ app.listen(PORT, async () => {
     } else {
       console.log('⚠️ autoStartRace non disponible, attendre action finish manuelle');
     }
-  }, 1000);
-});
-
-wss.on("listening", () => {
-  // Afficher la configuration WebSocket complète
-  logWebSocketConfig();
+    }, 1000);
 });
