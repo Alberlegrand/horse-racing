@@ -21,7 +21,7 @@ export const WEBSOCKET_CONFIG = {
     },
     production: {
       protocol: "wss",
-      host: "wss.paryajpam.com",
+      host: "wss.horse-racing-gmqj.onrender.com", // Remplacez par votre domaine wss ",
       port: null, // Utilise le port standard pour wss (443)
       path: "/connection/websocket"
     }
