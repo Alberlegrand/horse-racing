@@ -333,10 +333,15 @@
 		position: relative!important;
 		/*top: -76px!important;*/
 		border: 0;
+		display: flex;
+		align-items: center;
+		justify-content: center;
 	}
 	.money-horse-section .movie_screen .movie canvas {
 		width: 100%!important;
-		height: 100vh!important;
+		height: 100%!important;
+		max-width: 100vw!important;
+		max-height: 100vh!important;
 	}
 	.money-horse-section .movie_screen.skippable .skip {
 		display: block;

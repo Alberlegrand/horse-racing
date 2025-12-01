@@ -168,3 +168,15 @@ GameManager.prototype._decodeBet = function (response) {
 GameManager.prototype.getGame = function () {
     return this._game;
 };
+
+/**
+ * ✅ MET À JOUR LE GAME DEPUIS LE WEBSOCKET (race_start event)
+ * @param gameData {import("./types").Game}
+ */
+GameManager.prototype.updateGameFromWebSocket = function (gameData) {
+    console.log('[GameManager] Mise à jour du game depuis WebSocket:', gameData);
+    if (gameData) {
+        this._game = this._decodeGame(gameData);
+        console.log('[GameManager] ✅ Game mis à jour avec les données du WebSocket');
+    }
+};

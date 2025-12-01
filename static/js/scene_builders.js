@@ -226,7 +226,9 @@ GameSceneBuilder.prototype._addFinishFlag = function() {
 };
 
 GameSceneBuilder.prototype._addFinishLine = function() {
-    for (let y = 93; y < 500; y += 47) {
+    // ✅ UTILISER LA HAUTEUR DYNAMIQUE DU VIEWPORT AU LIEU DE LA VALEUR FIXE 500
+    let screenHeight = Crafty.viewport.height || 500;
+    for (let y = 93; y < screenHeight; y += 47) {
         Crafty.e("FinishLine").attr({x: GameParams.TRACK_LENGTH, y: y});
     }
 };

@@ -1961,6 +1961,14 @@ class App {
 
             case 'race_start':
                 console.log('🏁 Course démarrée - Round:', data.roundId);
+                
+                // ✅ MET À JOUR LE GAMEMANAGER AVEC LES DONNÉES DU WEBSOCKET
+                // Cela garantit que le movie screen aura les données correctes
+                if (data.currentRound) {
+                    client._context.getGameManager().updateGameFromWebSocket(data.currentRound);
+                    console.log('✅ GameManager mis à jour avec race_start data');
+                }
+                
                 // Mettre à jour l'état de la course
                 this.isRaceRunning = true;
                 // Mettre à jour le round si nécessaire

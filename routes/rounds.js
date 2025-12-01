@@ -36,6 +36,20 @@ function generateRoundId() {
     return Math.floor(96908000 + chacha20Random() * 1000);
 }
 
+/**
+ * ✅ Helper pour nettoyer TOUS les timers de gameState
+ * Doit être appelé avant chaque nouvelle assignation de timer
+ */
+function clearAllTimers() {
+    console.log('[TIMERS] 🧹 Nettoyage de tous les timers');
+    Object.keys(gameState.timers).forEach(key => {
+        if (gameState.timers[key]) {
+            clearTimeout(gameState.timers[key]);
+            gameState.timers[key] = null;
+        }
+    });
+}
+
 // --- CONFIGURATION CENTRALISÉE DES TIMERS ---
 // ✅ TOUS LES TIMERS VIENNENT DE config/app.config.js POUR COHÉRENCE GLOBALE
 // ✅ TOUTES LES VALEURS SONT EN MILLISECONDES (MS)
@@ -54,34 +68,24 @@ console.log(`
 `);
 
 // --- INITIALISATION DE L'ÉTAT ---
-// Stocke le timestamp exact du début du prochain round.
+// Les timers sont maintenant centralisés dans gameState.timers
 if (typeof gameState.nextRoundStartTime === 'undefined') {
-    // null signifie qu'aucun minuteur d'attente n'est en cours (une course est active)
     gameState.nextRoundStartTime = null; 
-}
-
-// ✅ AJOUTER LES FLAGS DE PROTECTION GLOBAUX
-if (typeof gameState._finishInProgress === 'undefined') {
-    gameState._finishInProgress = false;
-}
-if (typeof gameState._scheduledAutoFinishTimer === 'undefined') {
-    gameState._scheduledAutoFinishTimer = null;
 }
 
 
 /**
  * ✅ CLASSE POUR GÉRER LES TIMERS DE MANIÈRE ROBUSTE
- * Centralise tous les timers d'une course pour éviter les conflits et les doublons
+ * Centralise tous les timers dans gameState.timers pour éviter les conflits et les doublons
  */
 class RaceTimerManager {
     constructor() {
-        this.timers = new Map(); // { raceId: { start: timeout, prepare: timeout, finish: timeout, autoStart: timeout } }
         this.activeRaces = new Set(); // { raceId }
     }
 
     /**
      * Créer une séquence complète de timers pour une course
-     * Timeline: T=0 race_start → T=10 create_new_round → T=20 finish_logic
+     * Timeline: T=0 race_start → T=10 create_new_round → T=20 finish_logic → T=25 cleanup
      */
     startRaceSequence(raceId, callbacks) {
         console.log(`[TIMER] 🚀 Démarrage séquence course #${raceId}`);
@@ -92,9 +96,11 @@ class RaceTimerManager {
             return false;
         }
 
+        // ✅ NETTOYER TOUS LES TIMERS AVANT DE COMMENCER
+        clearAllTimers();
+
         // Marquer la course comme active
         this.activeRaces.add(raceId);
-        const timers = {};
 
         try {
             // T=0: Race start
@@ -104,7 +110,8 @@ class RaceTimerManager {
             }
 
             // T=10s: Créer le nouveau round
-            timers.prepare = setTimeout(() => {
+            console.log('[TIMER] ⏱️ Programmation T+10s: Préparation du nouveau round');
+            gameState.timers.prepare = setTimeout(() => {
                 console.log(`[TIMER] T+10s: Préparation du nouveau round`);
                 if (callbacks.onPrepareNewRound) {
                     callbacks.onPrepareNewRound();
@@ -112,7 +119,8 @@ class RaceTimerManager {
             }, NEW_ROUND_PREPARE_DELAY_MS);
 
             // T=20s: Exécuter la logique de fin de course
-            timers.finish = setTimeout(() => {
+            console.log('[TIMER] ⏱️ Programmation T+20s: Exécution fin de course');
+            gameState.timers.finish = setTimeout(() => {
                 console.log(`[TIMER] T+20s: Exécution de la fin de course`);
                 if (callbacks.onFinishRace) {
                     callbacks.onFinishRace();
@@ -120,32 +128,40 @@ class RaceTimerManager {
             }, MOVIE_SCREEN_DURATION_MS);
 
             // T=25s: Nettoyage et réinitialisation
-            timers.cleanup = setTimeout(() => {
+            console.log('[TIMER] ⏱️ Programmation T+25s: Nettoyage post-race');
+            gameState.timers.cleanup = setTimeout(() => {
                 console.log(`[TIMER] T+25s: Nettoyage post-race`);
-                this.clearRaceSequence(raceId);
+                this.activeRaces.delete(raceId);
+                clearAllTimers();
                 if (callbacks.onCleanup) {
                     callbacks.onCleanup();
                 }
             }, TOTAL_RACE_TIME_MS);
 
-            // Stocker les timers
-            this.timers.set(raceId, timers);
             return true;
 
         } catch (err) {
             console.error(`[TIMER] ❌ Erreur création séquence:`, err.message);
-            this.clearRaceSequence(raceId);
+            clearAllTimers();
+            this.activeRaces.delete(raceId);
             return false;
         }
     }
 
     /**
      * Programmer le lancement automatique du prochain round
+     * ✅ UTILISE gameState.timers.nextRound
      */
     scheduleNextRaceStart(nextRaceId, delayMs, callbacks) {
         console.log(`[TIMER] 📅 Auto-start programmé pour race #${nextRaceId} dans ${delayMs}ms`);
         
-        const timerId = setTimeout(async () => {
+        // ✅ NETTOYER LE TIMER PRÉCÉDENT
+        if (gameState.timers.nextRound) {
+            clearTimeout(gameState.timers.nextRound);
+            gameState.timers.nextRound = null;
+        }
+
+        gameState.timers.nextRound = setTimeout(async () => {
             console.log(`[TIMER] ⏱️ Auto-start déclenché pour race #${nextRaceId}`);
             try {
                 // Vérifier que pas une autre race en cours
@@ -161,42 +177,14 @@ class RaceTimerManager {
                 console.error(`[TIMER] ❌ Erreur auto-start:`, err.message);
             }
         }, delayMs);
-
-        // Stocker l'ID du timer pour nettoyage futur
-        if (!this.timers.has(nextRaceId)) {
-            this.timers.set(nextRaceId, {});
-        }
-        this.timers.get(nextRaceId).autoStart = timerId;
     }
 
     /**
-     * Nettoyer tous les timers d'une course
-     */
-    clearRaceSequence(raceId) {
-        console.log(`[TIMER] 🧹 Nettoyage timers pour race #${raceId}`);
-        
-        const timers = this.timers.get(raceId);
-        if (timers) {
-            Object.values(timers).forEach(timerId => {
-                if (timerId) clearTimeout(timerId);
-            });
-            this.timers.delete(raceId);
-        }
-        this.activeRaces.delete(raceId);
-    }
-
-    /**
-     * Nettoyer tous les timers actifs (catastrophe recovery)
+     * Nettoyer tous les timers (catastrophe recovery)
      */
     clearAllTimers() {
         console.log(`[TIMER] 🔴 Nettoyage GLOBAL de tous les timers`);
-        
-        for (const [raceId, timers] of this.timers.entries()) {
-            Object.values(timers).forEach(timerId => {
-                if (timerId) clearTimeout(timerId);
-            });
-        }
-        this.timers.clear();
+        clearAllTimers();
         this.activeRaces.clear();
     }
 
@@ -206,7 +194,12 @@ class RaceTimerManager {
     getStatus() {
         return {
             activeRaces: Array.from(this.activeRaces),
-            timerCount: this.timers.size
+            timers: {
+                nextRound: gameState.timers.nextRound ? 'active' : 'inactive',
+                prepare: gameState.timers.prepare ? 'active' : 'inactive',
+                finish: gameState.timers.finish ? 'active' : 'inactive',
+                cleanup: gameState.timers.cleanup ? 'active' : 'inactive'
+            }
         };
     }
 }
@@ -231,130 +224,145 @@ export default function createRoundsRouter(broadcast) {
     const executeRaceFinish = async () => {
         console.log('[RACE-FINISH] Exécution de la logique de fin de course');
         
-        const finishedRoundData = gameState.runningRoundData || gameState.currentRound;
-        const participants = Array.isArray(finishedRoundData.participants) ? finishedRoundData.participants : [];
-        
-        if (participants.length === 0) {
-            console.error('[RACE-FINISH] Aucun participant -> annulation');
+        // ✅ LOCK GLOBAL: Éviter les exécutions multiples simultanées
+        if (gameState.finishLock) {
+            console.warn('[RACE-FINISH] ⚠️ Déjà en cours (lock actif), ignoré');
             return;
         }
-
-        // Calculer le gagnant
-        const winner = participants[chacha20RandomInt(participants.length)];
-        const winnerWithPlace = { ...winner, place: 1, family: winner.family ?? 0 };
-
-        // Mettre à jour les participants
-        finishedRoundData.participants = participants.map(p =>
-            (p.number === winner.number ? winnerWithPlace : p)
-        );
-
-        // Calculer les gains pour chaque ticket
-        let totalPrizeAll = 0;
-        const receipts = Array.isArray(finishedRoundData.receipts) ? finishedRoundData.receipts : [];
-
-        receipts.forEach(receipt => {
-            let totalPrizeForReceipt = 0;
-            if (Array.isArray(receipt.bets)) {
-                receipt.bets.forEach(bet => {
-                    if (Number(bet.number) === Number(winner.number)) {
-                        const betValue = Number(bet.value) || 0;
-                        const coeff = Number(winner.coeff) || 0;
-                        totalPrizeForReceipt += betValue * coeff;
-                    }
-                });
-            }
-            receipt.prize = totalPrizeForReceipt;
-            console.log(`[RACE-FINISH] Ticket #${receipt.id} gain: ${receipt.prize} HTG`);
-            totalPrizeAll += totalPrizeForReceipt;
-        });
-
-        // Mettre à jour les statuts des tickets en DB
-        (async () => {
-            for (const receipt of receipts) {
-                try {
-                    const newStatus = receipt.prize > 0 ? 'won' : 'lost';
-                    await updateReceiptStatus(receipt.id, newStatus, receipt.prize || 0);
-                    console.log(`[DB] ✓ Ticket #${receipt.id} mis à jour: status=${newStatus}, prize=${receipt.prize}`);
-                } catch (err) {
-                    console.error(`[DB] ✗ Erreur mise à jour ticket #${receipt.id}:`, err.message);
-                }
-            }
-        })();
-
-        finishedRoundData.totalPrize = totalPrizeAll;
-
-        // Marquer la fin de la course
-        gameState.raceEndTime = Date.now();
-
-        // Archiver l'ancien round en DB
-        const finishedRoundId = finishedRoundData.id;
-        if (finishedRoundId) {
-            const finishedRound = {
-                id: finishedRoundId,
-                receipts: finishedRoundData.receipts || [],
-                participants: finishedRoundData.participants || [],
-                totalPrize: totalPrizeAll,
-                winner: winnerWithPlace,
-            };
-            
-            // Évite la duplication accidentelle
-            if (!gameState.gameHistory.some(r => r.id === finishedRound.id)) {
-                gameState.gameHistory.push(finishedRound);
-            } else {
-                console.warn(`[RACE-FINISH] Round ${finishedRound.id} déjà présent dans gameHistory, saut`);
-            }
-            
-            // Garde seulement les 10 derniers tours
-            if (gameState.gameHistory.length > 10) gameState.gameHistory.shift();
-            
-            // Sauvegarder en DB
-            try {
-                let winnerParticipantId = null;
-                try {
-                    const participantsDb = await getParticipants();
-                    const winnerRow = participantsDb.find(p => Number(p.number) === Number(winner.number));
-                    if (winnerRow) {
-                        winnerParticipantId = winnerRow.participant_id;
-                        console.log(`[RACE-FINISH] ✓ Winner résolu: number=${winner.number} -> participant_id=${winnerParticipantId}`);
-                    } else {
-                        console.warn(`[RACE-FINISH] ⚠️ Participant winner non trouvé: number=${winner.number}`);
-                    }
-                } catch (lookupErr) {
-                    console.error('[RACE-FINISH] Erreur lookup participant:', lookupErr);
-                }
-
-                await finishRound(finishedRoundId, winnerParticipantId, totalPrizeAll, new Date());
-                console.log(`[RACE-FINISH] Round ${finishedRoundId} archivé en DB avec winner ${winnerParticipantId}`);
-            } catch (dbError) {
-                console.error(`[RACE-FINISH] Erreur archivage round:`, dbError);
-            }
-        }
-
-        // Nettoyer la sauvegarde de l'ancien round
-        gameState.runningRoundData = null;
-
-        // Broadcast complet avec résultats
-        broadcast({
-            event: "race_end",
-            roundId: finishedRoundId,
-            winner: winnerWithPlace,
-            receipts: JSON.parse(JSON.stringify(receipts)),
-            prize: totalPrizeAll,
-            totalPrize: totalPrizeAll,
-            raceEndTime: gameState.raceEndTime,
-            currentRound: JSON.parse(JSON.stringify(finishedRoundData)),
-            participants: finishedRoundData.participants || []
-        });
+        gameState.finishLock = true;
         
-        console.log(`✅ Course #${finishedRoundId} terminée, nouveau round #${gameState.currentRound.id} actif`);
+        try {
+            const finishedRoundData = gameState.runningRoundData || gameState.currentRound;
+            const participants = Array.isArray(finishedRoundData.participants) ? finishedRoundData.participants : [];
+            
+            if (participants.length === 0) {
+                console.error('[RACE-FINISH] Aucun participant -> annulation');
+                gameState.finishLock = false;
+                return;
+            }
 
-        // Marquer la fin complète après le finish_screen
-        setTimeout(() => {
-            gameState.isRaceRunning = false;
-            gameState.raceStartTime = null;
-            gameState.raceEndTime = null;
-            console.log('[RACE-FINISH] État réinitialisé après finish_screen');
-        }, FINISH_SCREEN_DURATION_MS);
+            // Calculer le gagnant
+            const winner = participants[chacha20RandomInt(participants.length)];
+            const winnerWithPlace = { ...winner, place: 1, family: winner.family ?? 0 };
+
+            // Mettre à jour les participants
+            finishedRoundData.participants = participants.map(p =>
+                (p.number === winner.number ? winnerWithPlace : p)
+            );
+
+            // Calculer les gains pour chaque ticket
+            let totalPrizeAll = 0;
+            const receipts = Array.isArray(finishedRoundData.receipts) ? finishedRoundData.receipts : [];
+
+            receipts.forEach(receipt => {
+                let totalPrizeForReceipt = 0;
+                if (Array.isArray(receipt.bets)) {
+                    receipt.bets.forEach(bet => {
+                        if (Number(bet.number) === Number(winner.number)) {
+                            const betValue = Number(bet.value) || 0;
+                            const coeff = Number(winner.coeff) || 0;
+                            totalPrizeForReceipt += betValue * coeff;
+                        }
+                    });
+                }
+                receipt.prize = totalPrizeForReceipt;
+                console.log(`[RACE-FINISH] Ticket #${receipt.id} gain: ${receipt.prize} HTG`);
+                totalPrizeAll += totalPrizeForReceipt;
+            });
+
+            // Mettre à jour les statuts des tickets en DB
+            (async () => {
+                for (const receipt of receipts) {
+                    try {
+                        const newStatus = receipt.prize > 0 ? 'won' : 'lost';
+                        await updateReceiptStatus(receipt.id, newStatus, receipt.prize || 0);
+                        console.log(`[DB] ✓ Ticket #${receipt.id} mis à jour: status=${newStatus}, prize=${receipt.prize}`);
+                    } catch (err) {
+                        console.error(`[DB] ✗ Erreur mise à jour ticket #${receipt.id}:`, err.message);
+                    }
+                }
+            })();
+
+            finishedRoundData.totalPrize = totalPrizeAll;
+
+            // Marquer la fin de la course
+            gameState.raceEndTime = Date.now();
+
+            // Archiver l'ancien round en DB
+            const finishedRoundId = finishedRoundData.id;
+            if (finishedRoundId) {
+                const finishedRound = {
+                    id: finishedRoundId,
+                    receipts: finishedRoundData.receipts || [],
+                    participants: finishedRoundData.participants || [],
+                    totalPrize: totalPrizeAll,
+                    winner: winnerWithPlace,
+                };
+                
+                // Évite la duplication accidentelle
+                if (!gameState.gameHistory.some(r => r.id === finishedRound.id)) {
+                    gameState.gameHistory.push(finishedRound);
+                } else {
+                    console.warn(`[RACE-FINISH] Round ${finishedRound.id} déjà présent dans gameHistory, saut`);
+                }
+                
+                // Garde seulement les 10 derniers tours
+                if (gameState.gameHistory.length > 10) gameState.gameHistory.shift();
+                
+                // Sauvegarder en DB
+                try {
+                    let winnerParticipantId = null;
+                    try {
+                        const participantsDb = await getParticipants();
+                        const winnerRow = participantsDb.find(p => Number(p.number) === Number(winner.number));
+                        if (winnerRow) {
+                            winnerParticipantId = winnerRow.participant_id;
+                            console.log(`[RACE-FINISH] ✓ Winner résolu: number=${winner.number} -> participant_id=${winnerParticipantId}`);
+                        } else {
+                            console.warn(`[RACE-FINISH] ⚠️ Participant winner non trouvé: number=${winner.number}`);
+                        }
+                    } catch (lookupErr) {
+                        console.error('[RACE-FINISH] Erreur lookup participant:', lookupErr);
+                    }
+
+                    await finishRound(finishedRoundId, winnerParticipantId, totalPrizeAll, new Date());
+                    console.log(`[RACE-FINISH] Round ${finishedRoundId} archivé en DB avec winner ${winnerParticipantId}`);
+                } catch (dbError) {
+                    console.error(`[RACE-FINISH] Erreur archivage round:`, dbError);
+                }
+            }
+
+            // Nettoyer la sauvegarde de l'ancien round
+            gameState.runningRoundData = null;
+
+            // Broadcast complet avec résultats
+            broadcast({
+                event: "race_end",
+                roundId: finishedRoundId,
+                winner: winnerWithPlace,
+                receipts: JSON.parse(JSON.stringify(receipts)),
+                prize: totalPrizeAll,
+                totalPrize: totalPrizeAll,
+                raceEndTime: gameState.raceEndTime,
+                currentRound: JSON.parse(JSON.stringify(finishedRoundData)),
+                participants: finishedRoundData.participants || []
+            });
+            
+            console.log(`✅ Course #${finishedRoundId} terminée, nouveau round #${gameState.currentRound.id} actif`);
+
+            // Marquer la fin complète après le finish_screen
+            setTimeout(() => {
+                gameState.isRaceRunning = false;
+                gameState.raceStartTime = null;
+                gameState.raceEndTime = null;
+                gameState.finishLock = false;  // ✅ LIBÉRER LE LOCK
+                console.log('[RACE-FINISH] État réinitialisé après finish_screen, lock libéré');
+            }, FINISH_SCREEN_DURATION_MS);
+
+        } catch (err) {
+            console.error('[RACE-FINISH] ❌ Erreur:', err.message || err);
+            gameState.finishLock = false;  // ✅ LIBÉRER LE LOCK EN CAS D'ERREUR
+        }
     };
 
     // ✅ DÉFINIR LES CALLBACKS DE LA SÉQUENCE DE COURSE
@@ -365,6 +373,8 @@ export default function createRoundsRouter(broadcast) {
             gameState.isRaceRunning = true;
             gameState.raceStartTime = raceStartTime;
             gameState.raceEndTime = null;
+            // ✅ RESET LE TIMER POUR ÉVITER LE PETIT TIMER PENDANT LE FINISH SCREEN
+            gameState.nextRoundStartTime = null;
 
             broadcast({
                 event: "race_start",
@@ -496,12 +506,6 @@ export default function createRoundsRouter(broadcast) {
     router.post("/auto-finish", async (req, res) => {
         console.log('[AUTO-FINISH] Requête reçue');
         
-        // ✅ PROTECTION: Vérifier que pas déjà en cours
-        if (gameState._finishInProgress) {
-            console.warn('[AUTO-FINISH] Déjà en cours, ignoré');
-            return res.json(wrap({ skipped: true, reason: 'finish already in progress' }));
-        }
-
         // ✅ PROTECTION: Vérifier qu'une race n'est pas déjà en cours
         if (gameState.isRaceRunning) {
             console.warn('[AUTO-FINISH] Une course est déjà en cours, ignoré');
@@ -509,7 +513,6 @@ export default function createRoundsRouter(broadcast) {
         }
 
         try {
-            gameState._finishInProgress = true;
             const raceId = gameState.currentRound.id;
             
             // ✅ UTILISER LE GESTIONNAIRE CENTRALISÉ
@@ -659,12 +662,6 @@ export default function createRoundsRouter(broadcast) {
 
         // === FINISH === Déclencher la séquence de course
         if (action === "finish") {
-            // ✅ PROTECTION: Vérifier que pas déjà en cours
-            if (gameState._finishInProgress) {
-                console.warn('[FINISH] Déjà en cours, ignoré');
-                return res.json(wrap({ skipped: true, reason: 'finish already in progress' }));
-            }
-
             // ✅ PROTECTION: Vérifier qu'une race n'est pas déjà en cours
             if (gameState.isRaceRunning) {
                 console.warn('[FINISH] Une course est déjà en cours, ignoré');
@@ -672,7 +669,6 @@ export default function createRoundsRouter(broadcast) {
             }
 
             try {
-                gameState._finishInProgress = true;
                 const raceId = gameState.currentRound.id;
                 
                 // ✅ UTILISER LE GESTIONNAIRE CENTRALISÉ

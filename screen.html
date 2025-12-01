@@ -858,9 +858,9 @@
 
                                     // 4. Recharger la page après un court délai
                                     console.log('🔄 Rechargement de la page dans 1 seconde...');
-                                    //setTimeout(function() {
-                                      //  window.location.reload();
-                                   // }, 10);
+                                    setTimeout(function() {
+                                        window.location.reload();
+                                    }, 10);
                                 },
                                 error: function (xhr, status, error) {
                                     console.error('❌ Erreur lors de la création du nouveau round:', error);

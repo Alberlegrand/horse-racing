@@ -35,6 +35,15 @@ export const gameState = {
     raceEndTime: null, // Timestamp de la fin de la course actuelle
     isRaceRunning: false, // Indique si une course est actuellement en cours
     runningRoundData: null, // Sauvegarde de l'ancien round pendant qu'une course est en cours
+    // ✅ CENTRALISATION DE TOUS LES TIMERS
+    timers: {
+        nextRound: null,  // Timer du prochain round (avant la course)
+        finish: null,     // Timer pour la fin de la course
+        prepare: null,    // Timer pour préparer le nouveau round
+        cleanup: null     // Timer pour nettoyer après la course
+    },
+    // ✅ LOCK GLOBAL POUR ÉVITER LES EXÉCUTIONS MULTIPLES
+    finishLock: false  // Lock pour executeRaceFinish
 };
 
 function generateRoundId() {
