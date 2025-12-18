@@ -359,9 +359,11 @@ export default function createRoundsRouter(broadcast) {
                 event: "race_end",
                 roundId: oldRoundId,
                 // ❌ PAS DE RÉSULTATS: winner, receipts, prize
-                // Les résultats seront calculés à T=60s et broadcastés via race_results
+                // Les résultats seront calculés à T=35s et broadcastés via race_results
                 raceEndTime: gameState.raceEndTime,
-                // Juste: finish_screen est maintenant active, attendez 30s
+                currentScreen: "finish_screen",  // ✅ NOUVEAU: Indiquer l'écran actuel
+                timeInRace: elapsed,            // ✅ NOUVEAU: Temps écoulé depuis le début
+                // Juste: finish_screen est maintenant active, attendez les résultats
             });
             
             console.log(`[RACE-FINISH] ✅ Signal race_end broadcasté, attente du calcul à T=60s`);
@@ -443,7 +445,9 @@ export default function createRoundsRouter(broadcast) {
                 const raceResults = await calculateRaceResults();
                 
                 if (raceResults) {
-                    // Broadcaster les résultats complets à T=35s
+                    // ✅ Broadcaster les résultats complets à T=35s
+                    // ✅ IMPORTANT: Ne PAS changer l'écran, juste mettre à jour les données
+                    // Le finish_screen est déjà affiché depuis race_end (T=30s)
                     broadcast({
                         event: "race_results",
                         roundId: raceResults.roundId,
@@ -451,7 +455,9 @@ export default function createRoundsRouter(broadcast) {
                         receipts: JSON.parse(JSON.stringify(raceResults.receipts)),
                         totalPrize: raceResults.totalPrize,
                         participants: raceResults.participants,
-                        gameHistory: gameState.gameHistory || []
+                        gameHistory: gameState.gameHistory || [],
+                        currentScreen: "finish_screen",  // ✅ NOUVEAU: Confirmer l'écran actuel
+                        // ✅ NE PAS inclure isRaceRunning=false ici - cela sera dans new_round
                     });
                     console.log(`[RACE-SEQ] ✅ Résultats broadcasters: winner=${raceResults.winner?.number}, totalPrize=${raceResults.totalPrize}`);
                 }

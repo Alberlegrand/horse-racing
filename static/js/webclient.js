@@ -57,6 +57,13 @@ WebClient.prototype._activateMovieScreen = function () {
 };
 
 WebClient.prototype._activateFinishScreen = function () {
+    // ✅ CORRECTION: Vérifier si WebSocket gère déjà les transitions
+    // Si WebSocket gère les transitions (screen.html), ne pas activer finish_screen automatiquement
+    if (window.websocketManagedTransitions) {
+        console.log('⚠️ [WebClient] Activation finish_screen ignorée - WebSocket gère les transitions');
+        return; // Ne pas activer finish_screen, laisser WebSocket le faire
+    }
+    
     let screen = new FinishScreen(this._context, $.proxy(this._updatePanel, this), $.proxy(this._activateGameScreen, this));
     this._activateScreen(screen);
 };
