@@ -18,7 +18,7 @@ import moneyRouter from "./routes/money.js";
 import statsRouter from "./routes/stats.js";
 import { SERVER_WEBSOCKET_CONFIG, logWebSocketConfig } from "./config/websocket.js";
 import { 
-  TIMER_DURATION_MS,
+  ROUND_WAIT_DURATION_MS,
   MOVIE_SCREEN_DURATION_MS,
   FINISH_SCREEN_DURATION_MS,
   TOTAL_RACE_TIME_MS
@@ -119,18 +119,29 @@ let wss;
 /**
  * Diffuse des données à tous les clients WebSocket connectés.
  * ✅ Ajoute automatiquement serverTime pour synchronisation
+ * ✅ Vérifie que wss existe avant de broadcaster (évite erreurs si WebSocket pas encore initialisé)
  */
 function broadcast(data) {
+  // ✅ Vérifier que WebSocket est initialisé
+  if (!wss) {
+    console.warn('[BROADCAST] ⚠️ WebSocket non initialisé, broadcast ignoré');
+    return;
+  }
+  
   const enhancedData = {
     ...data,
     serverTime: Date.now() // ✅ SYNC: Timestamp serveur pour tous les broadcasts
   };
   
-  wss.clients.forEach((client) => {
-    if (client.readyState === 1) { // 1 = WebSocket.OPEN
-      client.send(JSON.stringify(enhancedData));
-    }
-  });
+  try {
+    wss.clients.forEach((client) => {
+      if (client.readyState === 1) { // 1 = WebSocket.OPEN
+        client.send(JSON.stringify(enhancedData));
+      }
+    });
+  } catch (err) {
+    console.error('[BROADCAST] ❌ Erreur lors du broadcast:', err.message);
+  }
 }
 
 /**
@@ -162,10 +173,11 @@ function setupWebSocket() {
       serverTime: Date.now(), // ✅ SYNC: Timestamp serveur pour synchronisation client
       roundId: gameState.currentRound?.id || null,
       screen: screen,
+      currentScreen: screen,  // ✅ NOUVEAU: Alias pour cohérence
       isRaceRunning: gameState.isRaceRunning,
       raceStartTime: gameState.raceStartTime,
       raceEndTime: gameState.raceEndTime,
-      timeInRace: timeInRace,
+      timeInRace: timeInRace,  // ✅ NOUVEAU: Temps écoulé depuis le début de la course
       nextRoundStartTime: gameState.nextRoundStartTime,
       timerTimeLeft: gameState.nextRoundStartTime && gameState.nextRoundStartTime > now 
         ? gameState.nextRoundStartTime - now 
@@ -397,17 +409,17 @@ httpServer.listen(PORT, async () => {
     const now = Date.now();
     if (gameState.nextRoundStartTime && gameState.nextRoundStartTime > now) {
       const timeLeft = gameState.nextRoundStartTime - now;
-      // ✅ Utilise TIMER_DURATION_MS importé depuis config/app.config.js
+          // ✅ Utilise ROUND_WAIT_DURATION_MS importé depuis config/app.config.js
       
       broadcast({
         event: 'timer_update',
         roundId: gameState.currentRound?.id,
         timer: {
           timeLeft: Math.max(0, timeLeft),
-          totalDuration: TIMER_DURATION_MS,
-          startTime: gameState.nextRoundStartTime - TIMER_DURATION_MS,
+          totalDuration: ROUND_WAIT_DURATION_MS,
+          startTime: gameState.nextRoundStartTime - ROUND_WAIT_DURATION_MS,
           endTime: gameState.nextRoundStartTime,
-          percentage: 100 - (timeLeft / TIMER_DURATION_MS) * 100,
+          percentage: 100 - (timeLeft / ROUND_WAIT_DURATION_MS) * 100,
           serverTime: now
         }
       });

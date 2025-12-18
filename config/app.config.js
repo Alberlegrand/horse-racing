@@ -7,18 +7,24 @@
  * ========================================
  * TIMERS GLOBAUX (d'attente avant course)
  * ========================================
+ * ⚠️ DÉPRÉCIÉ: TIMER_DURATION_MS est maintenant ROUND_WAIT_DURATION_MS
+ * Utiliser ROUND_WAIT_DURATION_MS pour cohérence
  */
 
 /**
  * Durée d'attente avant de lancer une nouvelle course (en secondes)
+ * ⚠️ DÉPRÉCIÉ: Utiliser ROUND_WAIT_DURATION_SECONDS à la place
  * Peut être surchargée via variable d'environnement TIMER_DURATION_SECONDS
  * Par défaut: 60 secondes (1 minute)
+ * @deprecated Utiliser ROUND_WAIT_DURATION_SECONDS
  */
-export const TIMER_DURATION_SECONDS = parseInt(process.env.TIMER_DURATION_SECONDS || '60', 10);
+export const TIMER_DURATION_SECONDS = parseInt(process.env.TIMER_DURATION_SECONDS || process.env.ROUND_WAIT_DURATION_SECONDS || '60', 10);
 
 /**
  * Durée d'attente avant course en MILLISECONDES
+ * ⚠️ DÉPRÉCIÉ: Utiliser ROUND_WAIT_DURATION_MS à la place
  * ✅ TOUTES LES VALEURS DOIVENT ÊTRE EN MS
+ * @deprecated Utiliser ROUND_WAIT_DURATION_MS
  */
 export const TIMER_DURATION_MS = TIMER_DURATION_SECONDS * 1000;
 
@@ -81,14 +87,16 @@ export const TOTAL_RACE_TIME_MS = MOVIE_SCREEN_DURATION_MS + FINISH_SCREEN_DURAT
 /**
  * Délai d'attente après un round AVANT de lancer le prochain (en secondes)
  * Permet aux caissiers de voir les résultats et aux joueurs de placer les paris
- * Peut être surchargée via ROUND_WAIT_DURATION_SECONDS
- * Par défaut: 60 secondes (1 minute) si TIMER_DURATION_SECONDS n'est pas défini
+ * Peut être surchargée via ROUND_WAIT_DURATION_SECONDS ou TIMER_DURATION_SECONDS (pour compatibilité)
+ * Par défaut: 60 secondes (1 minute)
+ * ✅ SOURCE DE VÉRITÉ UNIQUE pour le timer d'attente entre rounds
  */
-export const ROUND_WAIT_DURATION_SECONDS = parseInt(process.env.ROUND_WAIT_DURATION_SECONDS || '60', 10);
+export const ROUND_WAIT_DURATION_SECONDS = parseInt(process.env.ROUND_WAIT_DURATION_SECONDS || process.env.TIMER_DURATION_SECONDS || '60', 10);
 
 /**
  * Durée d'attente avant prochain round en MILLISECONDES
  * ✅ EN MS POUR COHÉRENCE GLOBALE
+ * ✅ SOURCE DE VÉRITÉ UNIQUE - Utiliser cette constante partout au lieu de TIMER_DURATION_MS
  */
 export const ROUND_WAIT_DURATION_MS = ROUND_WAIT_DURATION_SECONDS * 1000;
 
@@ -135,11 +143,9 @@ console.log(`
 ========================================
 ⏰ CONFIGURATION DES TIMERS (tous en MS)
 ========================================
-🕐 TIMER D'ATTENTE AVANT COURSE:
-   ${TIMER_DURATION_SECONDS}s = ${TIMER_DURATION_MS}ms
-
-⏳ TIMER D'ATTENTE APRÈS ROUND:
+⏳ TIMER D'ATTENTE ENTRE ROUNDS (ROUND_WAIT):
    ${ROUND_WAIT_DURATION_SECONDS}s = ${ROUND_WAIT_DURATION_MS}ms
+   (TIMER_DURATION_MS est déprécié, utiliser ROUND_WAIT_DURATION_MS)
 
 🎬 TIMERS DE RACE:
    Movie screen: ${MOVIE_SCREEN_DURATION_SECONDS}s = ${MOVIE_SCREEN_DURATION_MS}ms

@@ -6,7 +6,7 @@ import { pool } from './config/db.js';
 import { getNextRoundNumber } from './utils/roundNumberManager.js';
 import { cacheSet, cacheGet, cacheDelPattern } from './config/redis.js';
 import dbStrategy from './config/db-strategy.js';
-import { TIMER_DURATION_MS } from './config/app.config.js';
+import { ROUND_WAIT_DURATION_MS } from './config/app.config.js';
 
 // Initialiser ChaCha20 RNG au démarrage
 initChaCha20();
@@ -34,7 +34,7 @@ export const gameState = {
     raceStartTime: null, // Timestamp du début de la course actuelle (pour synchronisation)
     raceEndTime: null, // Timestamp de la fin de la course actuelle
     isRaceRunning: false, // Indique si une course est actuellement en cours
-    runningRoundData: null, // Sauvegarde de l'ancien round pendant qu'une course est en cours
+    // ✅ SUPPRIMÉ: runningRoundData - Utiliser currentRound directement et sauvegarder en DB avant de créer le nouveau round
     // ✅ CENTRALISATION DE TOUS LES TIMERS
     timers: {
         nextRound: null,  // Timer du prochain round (avant la course)
@@ -42,9 +42,9 @@ export const gameState = {
         prepare: null,    // Timer pour préparer le nouveau round
         cleanup: null     // Timer pour nettoyer après la course
     },
-    // ✅ LOCK GLOBAL POUR ÉVITER LES EXÉCUTIONS MULTIPLES
-    finishLock: false,  // Lock pour executeRaceFinish
-    roundCreationLock: false  // ✅ Lock pour éviter la double création de round
+    // ✅ LOCK GLOBAL UNIFIÉ POUR ÉVITER LES EXÉCUTIONS MULTIPLES
+    // Remplace finishLock et roundCreationLock par un seul lock unifié
+    operationLock: false  // ✅ Lock unifié pour toutes les opérations critiques (race finish, round creation)
 };
 
 // ✅ COMPTEUR GLOBAL POUR IDS SEQUENTIELS
@@ -81,11 +81,12 @@ export async function createNewRound(options = {}) {
 
     // 1️⃣ GÉRER LE LOCK: Éviter la double création
     if (checkLock) {
-        if (gameState.roundCreationLock) {
-            console.warn('[ROUND-CREATE] ⚠️ Création de round déjà en cours, ignorée');
+        if (gameState.operationLock) {
+            console.warn('[ROUND-CREATE] ⚠️ Opération déjà en cours, ignorée');
             return null;
         }
-        gameState.roundCreationLock = true;
+        gameState.operationLock = true;
+        console.log('[LOCK] 🔒 operationLock acquis par createNewRound()');
     }
 
     try {
@@ -112,8 +113,7 @@ export async function createNewRound(options = {}) {
                 gameState.gameHistory.shift();
             }
 
-            // Sauvegarder l'ancien round pour synchronisation avec les clients
-            gameState.runningRoundData = JSON.parse(JSON.stringify(finishedRound));
+            // ✅ SUPPRIMÉ: runningRoundData - Les données sont déjà dans gameHistory et seront sauvegardées en DB
         }
 
         // 3️⃣ CRÉER LE NOUVEAU ROUND
@@ -179,10 +179,10 @@ export async function createNewRound(options = {}) {
                 raceEndTime: gameState.isRaceRunning ? gameState.raceEndTime : null,
                 gameHistory: gameState.gameHistory || [],
                 timer: {
-                    timeLeft: TIMER_DURATION_MS,
-                    totalDuration: TIMER_DURATION_MS,
+                    timeLeft: ROUND_WAIT_DURATION_MS,
+                    totalDuration: ROUND_WAIT_DURATION_MS,
                     startTime: now,
-                    endTime: now + TIMER_DURATION_MS
+                    endTime: now + ROUND_WAIT_DURATION_MS
                 }
             });
         } else {
@@ -204,8 +204,8 @@ export async function createNewRound(options = {}) {
     } finally {
         // 8️⃣ LIBÉRER LE LOCK
         if (checkLock) {
-            gameState.roundCreationLock = false;
-            console.log('[ROUND-CREATE] 🔓 Lock libéré');
+            gameState.operationLock = false;
+            console.log('[LOCK] 🔓 operationLock libéré par createNewRound()');
         }
     }
 }
@@ -256,7 +256,11 @@ export async function restoreGameStateFromRedis() {
             gameState.raceStartTime = savedState.raceStartTime;
             gameState.raceEndTime = savedState.raceEndTime;
             gameState.isRaceRunning = savedState.isRaceRunning;
-            console.log(`✅ [CACHE] GameState restauré depuis Redis`);
+            
+            // ✅ CRITIQUE: Réinitialiser TOUS les locks au redémarrage
+            // Les locks ne doivent JAMAIS être persistés en Redis
+            gameState.operationLock = false;
+            console.log(`✅ [CACHE] GameState restauré depuis Redis (locks réinitialisés)`);
             return true;
         }
         return false;

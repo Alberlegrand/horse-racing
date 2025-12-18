@@ -548,9 +548,37 @@
             var delaiApresFinCourse = 5000; // Délai local avant de nettoyer l'UI (5s)
             var delaiRetryErreur = 10000; // Délai avant de retenter en cas d'erreur API
             var delaiPoll = 2000; // Délai de re-vérification si le bouton .start n'est pas prêt
-            const RACE_DURATION_MS = 25000; // 23 secondes pour movie_screen
-            const FINISH_DURATION_MS = 5000; // 5 secondes pour finish_screen
-            const TOTAL_RACE_TIME_MS = 35000; // Total: movie + finish
+            
+            // ✅ TIMERS CHARGÉS DEPUIS LE SERVEUR (source de vérité unique)
+            var RACE_DURATION_MS = 30000; // Valeur par défaut (sera remplacée par l'API)
+            var FINISH_DURATION_MS = 5000; // Valeur par défaut (sera remplacée par l'API)
+            var TOTAL_RACE_TIME_MS = 35000; // Valeur par défaut (sera remplacée par l'API)
+            
+            // ✅ Charger les timers depuis le serveur au démarrage
+            async function loadTimersFromServer() {
+                try {
+                    const response = await fetch('/api/v1/rounds/config/timers');
+                    if (response.ok) {
+                        const timers = await response.json();
+                        RACE_DURATION_MS = timers.MOVIE_SCREEN_DURATION_MS || 30000;
+                        FINISH_DURATION_MS = timers.FINISH_SCREEN_DURATION_MS || 5000;
+                        TOTAL_RACE_TIME_MS = timers.TOTAL_RACE_TIME_MS || 35000;
+                        console.log('✅ [TIMERS] Timers chargés depuis le serveur:', {
+                            RACE_DURATION_MS,
+                            FINISH_DURATION_MS,
+                            TOTAL_RACE_TIME_MS
+                        });
+                    } else {
+                        console.warn('⚠️ [TIMERS] Impossible de charger les timers, utilisation des valeurs par défaut');
+                    }
+                } catch (err) {
+                    console.error('❌ [TIMERS] Erreur chargement timers:', err);
+                    // Utiliser les valeurs par défaut en cas d'erreur
+                }
+            }
+            
+            // Charger les timers immédiatement
+            loadTimersFromServer();
 
             // ✅ AJOUTER UN GESTIONNAIRE POUR CLIQUER LE BOUTON .new_game
             // Recharger la page pour obtenir les nouvelles données

@@ -31,7 +31,6 @@ import { getNextRoundNumber } from "../utils/roundNumberManager.js";
 
 // ✅ IMPORTER TOUTES LES CONSTANTES DE TIMER DE LA CONFIG CENTRALISÉE
 import { 
-  TIMER_DURATION_MS,
   ROUND_WAIT_DURATION_MS,
   TIMER_UPDATE_INTERVAL_MS,
   MOVIE_SCREEN_DURATION_MS,
@@ -199,22 +198,22 @@ export default function createRoundsRouter(broadcast) {
     let lastLoggedDbRoundId = null;
 
     // Helper: Calculer les résultats et mettre à jour en DB
-    // ✅ NOUVEAU: Appelé à T=60s (onCleanup) au lieu de T=30s
+    // ✅ NOUVEAU: Appelé à T=35s (onCleanup) - Utilise currentRound directement
+    // ✅ CORRECTION #2: Plus de runningRoundData - Utiliser currentRound comme source unique
     const calculateRaceResults = async () => {
-        console.log('[RACE-RESULTS] Calcul des résultats de course à T=60s');
+        console.log('[RACE-RESULTS] Calcul des résultats de course');
         
-        // Vérifier que runningRoundData existe
-        if (!gameState.runningRoundData) {
-            console.error('[RACE-RESULTS] ❌ runningRoundData est null');
-            if (!gameState.currentRound || !gameState.currentRound.id) {
-                console.error('[RACE-RESULTS] ❌ Aucune donnée de round disponible');
-                return null;
-            }
-            console.warn('[RACE-RESULTS] ⚠️ Utilisation de currentRound comme fallback');
+        // ✅ SOURCE UNIQUE: Utiliser currentRound directement
+        // Le round actuel contient toutes les données nécessaires (tickets, participants, etc.)
+        if (!gameState.currentRound || !gameState.currentRound.id) {
+            console.error('[RACE-RESULTS] ❌ Aucune donnée de round disponible dans currentRound');
+            return null;
         }
         
-        const finishedRoundData = gameState.runningRoundData || gameState.currentRound;
-        const savedRoundData = JSON.parse(JSON.stringify(finishedRoundData));
+        // ✅ Faire une copie locale (variable locale, pas dans gameState)
+        // Cela évite de modifier currentRound pendant le calcul
+        const finishedRoundData = JSON.parse(JSON.stringify(gameState.currentRound));
+        const savedRoundData = finishedRoundData;
         const participants = Array.isArray(savedRoundData.participants) ? savedRoundData.participants : [];
         
         if (participants.length === 0) {
@@ -310,7 +309,7 @@ export default function createRoundsRouter(broadcast) {
             }
         }
 
-        gameState.runningRoundData = null;
+        // ✅ Plus besoin de nettoyer runningRoundData - n'existe plus
         
         return {
             roundId: finishedRoundId,
@@ -327,20 +326,24 @@ export default function createRoundsRouter(broadcast) {
     const executeRaceFinish = async () => {
         console.log('[RACE-FINISH] Signal de fin de course à T=30s (résultats calculés à T=60s)');
         
-        // Sauvegarder les données du round AVANT de passer au suivant
-        const oldRoundId = gameState.currentRound?.id;
-        if (oldRoundId && gameState.currentRound) {
-            gameState.runningRoundData = JSON.parse(JSON.stringify({
-                ...gameState.currentRound,
-                receipts: gameState.currentRound.receipts || [],
-                participants: gameState.currentRound.participants || [],
-                totalPrize: gameState.currentRound.totalPrize || 0
-            }));
-            console.log(`[RACE-FINISH] ✅ Données du round #${oldRoundId} sauvegardées pour calcul ultérieur`);
+        // ✅ ACQUÉRIR LE LOCK pour éviter les exécutions multiples
+        if (gameState.operationLock) {
+            console.warn('[RACE-FINISH] ⚠️ Opération déjà en cours, ignorée');
+            return;
         }
+        gameState.operationLock = true;
+        console.log('[LOCK] 🔒 operationLock acquis par executeRaceFinish()');
         
-        // Marquer la fin de la course
-        gameState.raceEndTime = Date.now();
+        try {
+            // ✅ CORRECTION #2: Plus besoin de sauvegarder dans runningRoundData
+            // Les données restent dans currentRound jusqu'à ce que calculateRaceResults() les utilise
+            const oldRoundId = gameState.currentRound?.id;
+            if (oldRoundId) {
+                console.log(`[RACE-FINISH] ✅ Round #${oldRoundId} prêt pour calcul des résultats (données dans currentRound)`);
+            }
+            
+            // Marquer la fin de la course
+            gameState.raceEndTime = Date.now();
         
         // Broadcaster SIMPLE: juste dire que la course est finie, sans résultats
         const raceStartTime = gameState.raceStartTime;
@@ -352,16 +355,21 @@ export default function createRoundsRouter(broadcast) {
             console.warn(`[RACE-FINISH] ⚠️ WARNING: race_end is ${elapsed - MOVIE_SCREEN_DURATION_MS}ms off schedule!`);
         }
         
-        broadcast({
-            event: "race_end",
-            roundId: oldRoundId,
-            // ❌ PAS DE RÉSULTATS: winner, receipts, prize
-            // Les résultats seront calculés à T=60s et broadcastés via race_results
-            raceEndTime: gameState.raceEndTime,
-            // Juste: finish_screen est maintenant active, attendez 30s
-        });
-        
-        console.log(`[RACE-FINISH] ✅ Signal race_end broadcasté, attente du calcul à T=60s`);
+            broadcast({
+                event: "race_end",
+                roundId: oldRoundId,
+                // ❌ PAS DE RÉSULTATS: winner, receipts, prize
+                // Les résultats seront calculés à T=60s et broadcastés via race_results
+                raceEndTime: gameState.raceEndTime,
+                // Juste: finish_screen est maintenant active, attendez 30s
+            });
+            
+            console.log(`[RACE-FINISH] ✅ Signal race_end broadcasté, attente du calcul à T=60s`);
+        } finally {
+            // ✅ TOUJOURS libérer le lock
+            gameState.operationLock = false;
+            console.log('[LOCK] 🔓 operationLock libéré par executeRaceFinish()');
+        }
     };
 
     // ✅ DÉFINIR LES CALLBACKS DE LA SÉQUENCE DE COURSE
@@ -375,12 +383,20 @@ export default function createRoundsRouter(broadcast) {
             // ✅ RESET LE TIMER POUR ÉVITER LE PETIT TIMER PENDANT LE FINISH SCREEN
             gameState.nextRoundStartTime = null;
 
+            // ✅ Calculer l'écran actuel et le temps écoulé pour synchronisation
+            const now = Date.now();
+            const timeInRace = 0; // Au début de la course
+            const currentScreen = "movie_screen";
+            
             broadcast({
                 event: "race_start",
                 roundId: gameState.currentRound.id,
                 raceStartTime: raceStartTime,
                 currentRound: JSON.parse(JSON.stringify(gameState.currentRound)),
-                isRaceRunning: true
+                isRaceRunning: true,
+                currentScreen: currentScreen,  // ✅ NOUVEAU: Écran actuel
+                timeInRace: timeInRace,       // ✅ NOUVEAU: Temps écoulé depuis le début
+                serverTime: now               // ✅ NOUVEAU: Timestamp serveur pour sync
             });
         },
 
@@ -405,25 +421,25 @@ export default function createRoundsRouter(broadcast) {
             
             try {
                 // ✅ ACQUÉRIR LE LOCK avant de créer le round
-                if (gameState.roundCreationLock) {
-                    console.warn('[RACE-SEQ] ⚠️ Création de round déjà en cours dans onCleanup, ignorée');
-                    return;
-                }
-                gameState.roundCreationLock = true;
-                console.log('[LOCK] 🔒 roundCreationLock acquis par onCleanup()');
-                
-                // ✅ ATTENDRE que executeRaceFinish soit complètement fini
-                if (gameState.finishLock) {
-                    console.warn('[RACE-SEQ] ⚠️ executeRaceFinish encore en cours, attente...');
+                if (gameState.operationLock) {
+                    console.warn('[RACE-SEQ] ⚠️ Opération déjà en cours dans onCleanup, attente...');
                     let waitCount = 0;
-                    while (gameState.finishLock && waitCount < 20) {
+                    while (gameState.operationLock && waitCount < 20) {
                         await new Promise(resolve => setTimeout(resolve, 50));
                         waitCount++;
                     }
+                    if (gameState.operationLock) {
+                        console.warn('[RACE-SEQ] ⚠️ Timeout attente lock, ignorée');
+                        return;
+                    }
                 }
+                gameState.operationLock = true;
+                console.log('[LOCK] 🔒 operationLock acquis par onCleanup()');
                 
                 // ✅ ÉTAPE 1: CALCULER LES RÉSULTATS MAINTENANT (T=35s)
-                console.log('[RACE-SEQ] ÉTAPE 1: Calcul des résultats');
+                // ✅ CORRECTION #2: calculateRaceResults() utilise currentRound directement
+                // Les données sont sauvegardées en DB dans calculateRaceResults()
+                console.log('[RACE-SEQ] ÉTAPE 1: Calcul des résultats (utilise currentRound)');
                 const raceResults = await calculateRaceResults();
                 
                 if (raceResults) {
@@ -487,8 +503,8 @@ export default function createRoundsRouter(broadcast) {
                 throw error;
             } finally {
                 // ✅ TOUJOURS libérer le lock à la fin (succès ou erreur)
-                gameState.roundCreationLock = false;
-                console.log('[LOCK] 🔓 roundCreationLock libéré par onCleanup()');
+                gameState.operationLock = false;
+                console.log('[LOCK] 🔓 operationLock libéré par onCleanup()');
             }
         }
     };
@@ -500,6 +516,24 @@ export default function createRoundsRouter(broadcast) {
     // ✅ SUPPRESSION: /auto-finish n'est plus nécessaire
     // Le client clique automatiquement quand le timer s'écoule via mettreAJourProgressBar()
     
+    // -----------------------------------------------------------------
+    // --- API AJOUTÉE : GET /api/v1/rounds/config/timers ---
+    // -----------------------------------------------------------------
+    /**
+     * ✅ NOUVEAU: Endpoint pour récupérer les vraies durées des timers
+     * Permet au client de synchroniser ses timers avec le serveur
+     * Source de vérité unique pour les durées de timers
+     */
+    router.get("/config/timers", cacheResponse(3600), (req, res) => {
+        res.json({
+            MOVIE_SCREEN_DURATION_MS,
+            FINISH_SCREEN_DURATION_MS,
+            TOTAL_RACE_TIME_MS,
+            ROUND_WAIT_DURATION_MS,
+            TIMER_UPDATE_INTERVAL_MS
+        });
+    });
+
     // -----------------------------------------------------------------
     // --- API AJOUTÉE : GET /api/v1/rounds/launch-time ---
     // -----------------------------------------------------------------
@@ -542,9 +576,9 @@ export default function createRoundsRouter(broadcast) {
         // Pas de redéfinition locale des timers!
 
         // ✅ TIMER GUARD: Vérifier si le timer est bloqué
-        // MAIS: ne pas déclencher si une création de round est en cours
+        // MAIS: ne pas déclencher si une opération est en cours
         if (!gameState.isRaceRunning && 
-            !gameState.roundCreationLock &&
+            !gameState.operationLock &&
             (!gameState.nextRoundStartTime || gameState.nextRoundStartTime <= now)) {
           console.warn('⚠️ [TIMER-GUARD] Timer bloqué détecté dans /status, redémarrage du round...');
           try {
