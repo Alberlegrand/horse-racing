@@ -177,8 +177,15 @@ GameScreen.prototype._addReceipt = function () {
             this._bets = [];
             
             // 🖨️ AUTO-PRINT TICKET AFTER CREATION
-            console.log(`[GAME] 📋 Receipt #${receipt.id} created, printing...`);
-            this._printReceipt(receipt.id);
+            // ✅ CORRECTION: Désactiver l'auto-print pour éviter la double impression
+            // L'impression sera gérée par le WebSocket receipt_added dans app.js si nécessaire
+            // Pour réactiver, mettre window.gameConfig.enableAutoPrint = true
+            if (window.gameConfig && window.gameConfig.enableReceiptPrinting && window.gameConfig.enableAutoPrint) {
+                console.log(`[GAME] 📋 Receipt #${receipt.id} created, printing...`);
+                this._printReceipt(receipt.id);
+            } else {
+                console.log(`[GAME] 📋 Receipt #${receipt.id} created (auto-print désactivé)`);
+            }
             
             this._context.getWebClient()._updatePanel();
         }, this)

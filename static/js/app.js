@@ -444,32 +444,53 @@ class App {
         ------------------------- */
         const refreshTickets = async () => {
             try {
-                // Charger les 10 derniers tickets via my-bets API
-                const res = await fetch('/api/v1/my-bets/?limit=10&page=1', { credentials: 'include' });
+                // ✅ CORRECTION: Utiliser /api/v1/my-bets/ pour récupérer les tickets de l'utilisateur connecté
+                // Cette route récupère depuis la DB, donc les tickets restent visibles même après la fin du round
+                // Limiter à 50 tickets récents pour le dashboard
+                const res = await fetch('/api/v1/my-bets/?limit=50&page=1', { credentials: 'include' });
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 const data = await res.json();
-                const tickets = data?.data?.tickets || [];
-                const stats = data?.data?.stats || {};
-
-                // Mettre à jour le round actuel depuis l'API rounds
-                const roundRes = await fetch('/api/v1/rounds/', { 
-                    method: 'POST',
-                    credentials: 'include',
-                    headers: { 
-                        'Content-Type': 'application/json',
-                        'Accept': 'application/json' 
-                    },
-                    body: JSON.stringify({ action: 'get' })
-                });
-                if (roundRes.ok) {
-                    const roundData = await roundRes.json();
-                    const round = roundData?.data || {};
-                    if (round.id) {
-                        const currentRoundEl = document.getElementById('currentRound');
-                        if (currentRoundEl) currentRoundEl.textContent = round.id;
+                const myBetsData = data?.data || {};
+                
+                // Récupérer les tickets de l'utilisateur (depuis DB, tous les rounds)
+                const tickets = myBetsData.tickets || [];
+                const stats = myBetsData.stats || {};
+                
+                // Récupérer aussi les infos du round actuel pour les stats
+                let round = null;
+                try {
+                    const roundRes = await fetch('/api/v1/rounds/', { 
+                        method: 'POST',
+                        credentials: 'include',
+                        headers: { 
+                            'Content-Type': 'application/json',
+                            'Accept': 'application/json' 
+                        },
+                        body: JSON.stringify({ action: 'get' })
+                    });
+                    if (roundRes.ok) {
+                        const roundData = await roundRes.json();
+                        round = roundData?.data || {};
                     }
-                    // Mettre à jour les stats avec les données du round
-                    updateStats(round, stats);
+                } catch (roundErr) {
+                    console.warn('Erreur récupération round:', roundErr);
+                }
+                
+                // Préparer le round avec les receipts pour updateStats
+                const roundWithReceipts = round ? {
+                    ...round,
+                    receipts: tickets.filter(t => t.roundId === round.id)
+                } : null;
+                
+                // Mettre à jour les stats avec les données du round et des tickets
+                if (roundWithReceipts) {
+                    updateStats(roundWithReceipts, stats);
+                } else {
+                    // Fallback: utiliser seulement les stats des tickets
+                    const el = (id) => document.getElementById(id);
+                    if (el('totalBetsAmount')) el('totalBetsAmount').textContent = `${(stats.totalBetAmount || 0).toFixed(2)} HTG`;
+                    if (el('activeTicketsCount')) el('activeTicketsCount').textContent = stats.activeTicketsCount || 0;
+                    if (round && round.id && el('currentRound')) el('currentRound').textContent = round.id;
                 }
 
                 updateTicketsTable(tickets);
@@ -1996,6 +2017,14 @@ class App {
 
             case 'race_end':
                 console.log('🏆 Course terminée - Round:', data.roundId, 'Gagnant:', data.winner);
+                
+                // ✅ CORRECTION: MET À JOUR LE GAMEMANAGER AVEC LES DONNÉES FINALES DU ROUND
+                // Cela garantit que le finish screen affichera les données correctes
+                if (data.currentRound) {
+                    client._context.getGameManager().updateGameFromWebSocket(data.currentRound);
+                    console.log('✅ GameManager mis à jour avec race_end data (winner inclus)');
+                }
+                
                 // Note: betFrameOverlay reste visible jusqu'à new_round (géré par main.js)
                 // Réinitialiser l'état de la course
                 this.isRaceRunning = false;

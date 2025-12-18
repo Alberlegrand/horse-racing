@@ -110,6 +110,7 @@ const dropTablesIfExist = async () => {
     await client.query("DROP TABLE IF EXISTS receipts CASCADE");
     await client.query("DROP TABLE IF EXISTS round_participants CASCADE");
     await client.query("DROP TABLE IF EXISTS rounds CASCADE");
+    await client.query("DROP SEQUENCE IF EXISTS rounds_round_number_seq CASCADE");
     await client.query("DROP TABLE IF EXISTS participants CASCADE");
     await client.query("DROP TABLE IF EXISTS user_profiles CASCADE");
     await client.query("DROP TABLE IF EXISTS users CASCADE");
@@ -191,10 +192,15 @@ const createTables = async () => {
     // === ROUNDS (COURSES) ===
     // ==========================================
 
+    // Create the sequence for round_number
+    await client.query(`
+      CREATE SEQUENCE IF NOT EXISTS rounds_round_number_seq START 1 INCREMENT 1
+    `);
+
     await client.query(`
       CREATE TABLE IF NOT EXISTS rounds (
         round_id BIGINT PRIMARY KEY,
-        round_number INT UNIQUE NOT NULL,
+        round_number INT UNIQUE NOT NULL DEFAULT nextval('rounds_round_number_seq'),
         status VARCHAR(20) CHECK (status IN ('waiting', 'running', 'finished')) DEFAULT 'waiting',
         winner_id INT,
         total_prize DECIMAL(15,2) DEFAULT 0,

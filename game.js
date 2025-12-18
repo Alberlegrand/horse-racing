@@ -43,11 +43,15 @@ export const gameState = {
         cleanup: null     // Timer pour nettoyer après la course
     },
     // ✅ LOCK GLOBAL POUR ÉVITER LES EXÉCUTIONS MULTIPLES
-    finishLock: false  // Lock pour executeRaceFinish
+    finishLock: false,  // Lock pour executeRaceFinish
+    roundCreationLock: false  // ✅ Lock pour éviter la double création de round
 };
 
+// ✅ COMPTEUR GLOBAL POUR IDS SEQUENTIELS
+let roundIdCounter = 10000000;
+
 function generateRoundId() {
-    return Math.floor(96908000 + chacha20Random() * 1000);
+    return roundIdCounter++;
 }
 
 // Simple helper pour envelopper les réponses
@@ -56,145 +60,171 @@ export function wrap(data) {
 }
 
 /**
+ * ✅ FONCTION UNIFIÉE: Crée un nouveau round avec toute la logique consolidée
+ * Remplace startNewRound() et createNewRoundAfterRace()
+ * 
+ * @param {Object} options Configuration de la création
+ *   - broadcast: function - Fonction pour notifier les clients WebSocket
+ *   - raceStartTime: number - Timestamp du début de la course (pour logs)
+ *   - archiveCurrentRound: boolean - Archiver le round actuel avant d'en créer un nouveau (default: false)
+ *   - checkLock: boolean - Vérifier et acquérir le lock (default: true)
+ */
+export async function createNewRound(options = {}) {
+    const {
+        broadcast = null,
+        raceStartTime = null,
+        archiveCurrentRound = false,
+        checkLock = true
+    } = options;
+
+    console.log(`[ROUND-CREATE] 🎬 Création d'un nouveau round (archive=${archiveCurrentRound}, lock=${checkLock})`);
+
+    // 1️⃣ GÉRER LE LOCK: Éviter la double création
+    if (checkLock) {
+        if (gameState.roundCreationLock) {
+            console.warn('[ROUND-CREATE] ⚠️ Création de round déjà en cours, ignorée');
+            return null;
+        }
+        gameState.roundCreationLock = true;
+    }
+
+    try {
+        // 2️⃣ ARCHIVER LE ROUND ACTUEL (si demandé)
+        if (archiveCurrentRound && gameState.currentRound.id) {
+            const finishedRound = {
+                id: gameState.currentRound.id,
+                receipts: JSON.parse(JSON.stringify(gameState.currentRound.receipts || [])),
+                participants: JSON.parse(JSON.stringify(gameState.currentRound.participants || [])),
+                totalPrize: gameState.currentRound.totalPrize || 0,
+                winner: (gameState.currentRound.participants || []).find(p => p.place === 1) || null,
+            };
+            
+            // Éviter la duplication
+            if (!gameState.gameHistory.some(r => r.id === finishedRound.id)) {
+                gameState.gameHistory.push(finishedRound);
+                console.log(`[ROUND-CREATE] ✅ Round #${finishedRound.id} archivé dans gameHistory`);
+            } else {
+                console.warn(`[ROUND-CREATE] ⚠️ Round #${finishedRound.id} déjà archivé`);
+            }
+
+            // Garder seulement les 10 derniers rounds
+            if (gameState.gameHistory.length > 10) {
+                gameState.gameHistory.shift();
+            }
+
+            // Sauvegarder l'ancien round pour synchronisation avec les clients
+            gameState.runningRoundData = JSON.parse(JSON.stringify(finishedRound));
+        }
+
+        // 3️⃣ CRÉER LE NOUVEAU ROUND
+        const newRoundId = generateRoundId();
+        const basePlaces = Array.from({ length: BASE_PARTICIPANTS.length }, (_, i) => i + 1);
+        const shuffledPlaces = chacha20Shuffle(basePlaces);
+
+        const newRound = {
+            id: newRoundId,
+            participants: BASE_PARTICIPANTS.map((p, i) => ({
+                ...p,
+                place: shuffledPlaces[i],
+            })),
+            receipts: [],
+            lastReceiptId: 3,
+            totalPrize: 0,
+            persisted: false
+        };
+
+        gameState.currentRound = newRound;
+        console.log(`[ROUND-CREATE] ✅ Nouveau round #${newRoundId} en mémoire`);
+
+        // 4️⃣ PERSISTER EN BASE DE DONNÉES
+        try {
+            const roundNum = await getNextRoundNumber();
+            const insertRes = await pool.query(
+                `INSERT INTO rounds (round_id, round_number, status, created_at) 
+                 VALUES ($1, $2, 'waiting', CURRENT_TIMESTAMP) 
+                 ON CONFLICT (round_id) DO UPDATE SET updated_at = CURRENT_TIMESTAMP
+                 RETURNING round_id`,
+                [newRoundId, roundNum]
+            );
+            gameState.currentRound.persisted = true;
+            console.log(`[ROUND-CREATE] ✅ Round #${roundNum} (ID: ${newRoundId}) persisté en DB`);
+        } catch (err) {
+            console.error('[ROUND-CREATE] ❌ Erreur persistence DB:', err.message);
+            gameState.currentRound.persisted = false;
+        }
+
+        // 5️⃣ INITIALISER CACHE REDIS
+        try {
+            await dbStrategy.initRoundCache(newRoundId, gameState.currentRound);
+            console.log(`[ROUND-CREATE] ✅ Cache Redis initialisé pour round #${newRoundId}`);
+        } catch (err) {
+            console.error('[ROUND-CREATE] ❌ Erreur initialisation cache:', err.message);
+        }
+
+        // 6️⃣ BROADCAST AUX CLIENTS
+        if (broadcast && typeof broadcast === 'function') {
+            const now = Date.now();
+            const elapsedFromRaceStart = raceStartTime ? (now - raceStartTime) : 0;
+            
+            console.log(`[ROUND-CREATE] 🎙️ Broadcasting new_round (elapsed: ${elapsedFromRaceStart}ms)`);
+            
+            broadcast({
+                event: "new_round",
+                roundId: newRoundId,
+                game: JSON.parse(JSON.stringify(newRound)),
+                currentRound: JSON.parse(JSON.stringify(newRound)),
+                participants: newRound.participants,
+                isRaceRunning: gameState.isRaceRunning,
+                raceStartTime: gameState.isRaceRunning ? gameState.raceStartTime : null,
+                raceEndTime: gameState.isRaceRunning ? gameState.raceEndTime : null,
+                gameHistory: gameState.gameHistory || [],
+                timer: {
+                    timeLeft: TIMER_DURATION_MS,
+                    totalDuration: TIMER_DURATION_MS,
+                    startTime: now,
+                    endTime: now + TIMER_DURATION_MS
+                }
+            });
+        } else {
+            console.warn('[ROUND-CREATE] ⚠️ Fonction broadcast non fournie');
+        }
+
+        // 7️⃣ ✅ SAUVEGARDER LE GAMESTATE EN REDIS (CRITICAL!)
+        // Cela sauvegarde le currentRound + gameHistory + tous les états
+        try {
+            await saveGameStateToRedis();
+            console.log(`[ROUND-CREATE] ✅ GameState sauvegardé en Redis`);
+        } catch (err) {
+            console.error('[ROUND-CREATE] ⚠️ Erreur sauvegarde gameState:', err.message);
+        }
+
+        console.log(`[ROUND-CREATE] 🎉 Round #${newRoundId} créé avec succès`);
+        return newRoundId;
+
+    } finally {
+        // 8️⃣ LIBÉRER LE LOCK
+        if (checkLock) {
+            gameState.roundCreationLock = false;
+            console.log('[ROUND-CREATE] 🔓 Lock libéré');
+        }
+    }
+}
+
+/**
+ * ✅ MAINTENUE POUR COMPATIBILITÉ BACKWARDS
+ * Utilise maintenant la fonction unifiée createNewRound()
+ * 
  * Archive le tour terminé et en démarre un nouveau.
  * @param {function} broadcast - La fonction pour notifier les clients WebSocket.
  */
 export async function startNewRound(broadcast) {
-    console.log(`🏁 Fin du tour #${gameState.currentRound.id}. Archivage des résultats.`);
-
-    // 1️⃣ Archive le tour complété
-    if (gameState.currentRound.id) {
-        const finishedRound = {
-            id: gameState.currentRound.id,
-            receipts: JSON.parse(JSON.stringify(gameState.currentRound.receipts || [])),
-            participants: JSON.parse(JSON.stringify(gameState.currentRound.participants || [])),
-            totalPrize: gameState.currentRound.totalPrize || 0,
-            winner: (gameState.currentRound.participants || []).find(p => p.place === 1) || null,
-        };
-        // Evite la duplication accidentelle si un autre module a déjà archivé ce round
-        if (!gameState.gameHistory.some(r => r.id === finishedRound.id)) {
-            gameState.gameHistory.push(finishedRound);
-        } else {
-            console.warn(`startNewRound: round ${finishedRound.id} déjà présent dans gameHistory`);
-        }
-
-        // Garde seulement les 10 derniers tours
-        if (gameState.gameHistory.length > 10) gameState.gameHistory.shift();
-    }
-
-    // 2️⃣ Prépare le nouveau tour
-    const newRoundId = generateRoundId();
-    const basePlaces = Array.from({ length: BASE_PARTICIPANTS.length }, (_, i) => i + 1);
-
-    // Mélange Fisher-Yates avec ChaCha20 (cryptographiquement sécurisé)
-    const shuffledPlaces = chacha20Shuffle(basePlaces);
-
-    // !! IMPORTANT : On mute la propriété de l'objet gameState
-    gameState.currentRound = {
-        id: newRoundId,
-        participants: BASE_PARTICIPANTS.map((p, i) => ({
-            ...p,
-            place: shuffledPlaces[i],
-        })),
-        receipts: [],
-        lastReceiptId: 3,
-        totalPrize: 0
-    };
-    // Mark as not yet persisted in DB. Will be toggled after insert completes.
-    gameState.currentRound.persisted = false;
-
-    console.log(`🚀 Nouveau tour #${gameState.currentRound.id} prêt à commencer !`);
-
-    // Persister le round en base de données IMMÉDIATEMENT (dans une fonction async/await)
-    const persistRound = async () => {
-        try {
-            const roundNum = getNextRoundNumber();
-            const insertRes = await pool.query(
-                `INSERT INTO rounds (round_id, round_number, status, created_at) 
-                 VALUES ($1, $2, 'waiting', CURRENT_TIMESTAMP) 
-                 ON CONFLICT (round_id) DO NOTHING
-                 RETURNING round_id`,
-                [newRoundId, roundNum]
-            );
-            console.log(`✅ Round #${roundNum} (ID: ${newRoundId}) créé en DB immédiatement`);
-            return true;
-        } catch (err) {
-            console.error('[DB] Erreur création round:', err);
-            return false;
-        }
-    };
-    // Await persistence so clients receive the new_round only after DB row exists.
-    const persisted = await persistRound();
-    gameState.currentRound.persisted = !!persisted;
-
-    // 🚀 OPTIMISATION: Initialiser le cache Redis pour ce nouveau round
-    // Cela permet de sauvegarder/supprimer les tickets sans requêtes DB
-    await dbStrategy.initRoundCache(newRoundId, gameState.currentRound);
-
-    // 3️⃣ Démarre le timer de 2 minutes pour le prochain lancement
-    // Le timer commence MAINTENANT, après que le client ait cliqué sur "new_game"
-    // 3️⃣ Démarre le timer
-    // ✅ Utiliser la constante CENTRALISÉE depuis config/app.config.js
-    const now = Date.now();
-    gameState.nextRoundStartTime = now + TIMER_DURATION_MS;
+    console.log(`🏁 startNewRound() appelée - redirection vers createNewRound()`);
     
-    console.log(`⏰ Timer démarré : nouveau tour dans ${TIMER_DURATION_MS / 1000} secondes (fin: ${new Date(gameState.nextRoundStartTime).toLocaleTimeString()})`);    // Schedule a pre-start broadcast 5 seconds before the next round starts.
-    const schedulePreStart = (broadcastFn) => {
-        try {
-            // Clear any previous pre-start timer
-            if (gameState.preStartTimer) {
-                clearTimeout(gameState.preStartTimer);
-                gameState.preStartTimer = null;
-            }
-            const nowMs = Date.now();
-            const preStartTimeMs = gameState.nextRoundStartTime - 5000; // 5s before
-            const delay = preStartTimeMs - nowMs;
-            const doBroadcast = () => {
-                if (broadcastFn) {
-                    broadcastFn({
-                        event: 'pre_start',
-                        roundId: newRoundId,
-                        preStartAt: preStartTimeMs,
-                        countdownMs: 5000
-                    });
-                }
-            };
-            if (delay <= 0) {
-                // If less than 5s remains, broadcast immediately
-                doBroadcast();
-            } else {
-                gameState.preStartTimer = setTimeout(doBroadcast, delay);
-            }
-        } catch (e) {
-            console.error('[SCHED] Erreur schedulePreStart:', e && e.message ? e.message : e);
-        }
-    };
-
-    // 4️⃣ Notifie les clients (via la fonction passée en paramètre)
-    if (broadcast) {
-        broadcast({ 
-            event: "new_round", 
-            roundId: newRoundId,
-            game: JSON.parse(JSON.stringify(gameState.currentRound)),
-            currentRound: JSON.parse(JSON.stringify(gameState.currentRound)),
-            timer: {
-                timeLeft: TIMER_DURATION_MS,
-                totalDuration: TIMER_DURATION_MS,
-                startTime: now,
-                endTime: gameState.nextRoundStartTime
-            },
-            nextRoundStartTime: gameState.nextRoundStartTime,
-            isRaceRunning: false,
-            raceStartTime: null,
-            raceEndTime: null
-        });
-            // schedule the pre-start overlay broadcast 5s before the next round
-            schedulePreStart(broadcast);
-            // ✅ PERSISTANCE : Sauvegarde le gameState en Redis
-            await saveGameStateToRedis();
-    } else {
-        console.warn("startNewRound: 'broadcast' function non fournie.");
-    }
+    return await createNewRound({
+        broadcast: broadcast,
+        archiveCurrentRound: true,  // Archive le round actuel
+        checkLock: false             // Pas de lock au démarrage
+    });
 }
 
 /**

@@ -419,6 +419,47 @@ export async function deleteTicketFromRoundCache(roundId, ticketId) {
 }
 
 /**
+ * Met à jour le statut et le prize d'un ticket dans le cache Redis
+ * Utilisé après la fin de la course pour mettre à jour les statuts
+ * 
+ * @param {number} roundId - ID du round
+ * @param {string|number} ticketId - ID du ticket à mettre à jour
+ * @param {string} status - Nouveau statut ('won', 'lost', 'paid', etc.)
+ * @param {number} prize - Montant du gain (en système)
+ */
+export async function updateTicketInRoundCache(roundId, ticketId, status, prize = null) {
+  try {
+    const roundKey = `round:${roundId}:data`;
+    const roundCache = await cacheGet(roundKey);
+    
+    if (!roundCache) {
+      console.warn(`[CACHE] Round ${roundId} pas en cache pour mise à jour ticket ${ticketId}`);
+      return false;
+    }
+
+    // Trouver le ticket
+    const ticketIndex = roundCache.receipts.findIndex(r => r.id === ticketId);
+    if (ticketIndex === -1) {
+      console.warn(`[CACHE] Ticket ${ticketId} non trouvé dans le cache`);
+      return false;
+    }
+
+    // Mettre à jour le ticket
+    roundCache.receipts[ticketIndex].status = status;
+    if (prize !== null) {
+      roundCache.receipts[ticketIndex].prize = prize;
+    }
+
+    await cacheSet(roundKey, roundCache, 3600);
+    console.log(`✅ [CACHE] Ticket ${ticketId} mis à jour: status=${status}, prize=${prize || 'N/A'}`);
+    return true;
+  } catch (err) {
+    console.error('[CACHE] Erreur updateTicketInRoundCache:', err.message);
+    return false;
+  }
+}
+
+/**
  * Récupère tous les tickets du cache Redis du round actif
  * 
  * @param {number} roundId - ID du round

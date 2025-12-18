@@ -36,6 +36,9 @@ import { cacheResponse } from "./middleware/cache.js";
 import { sessionMiddleware } from "./middleware/session.js";
 import auditMiddleware from "./middleware/audit.js";
 
+// ✅ Import du round number manager
+import { initRoundNumberManager } from "./utils/roundNumberManager.js";
+
 // Recréation de __dirname
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -69,6 +72,9 @@ await initRedis().catch(err => {
 
 // Initialiser la base de données au démarrage
 await initializeDatabase();
+
+// ✅ Initialiser le manager de numéro de round depuis la BD
+await initRoundNumberManager();
 
 // ✅ IMPORTANT: Restaurer l'état du jeu depuis Redis si serveur crash antérieur
 const restored = await restoreGameStateFromRedis();
@@ -250,8 +256,12 @@ app.use("/api/v1/init/", initRouter);
 // Keepalive route centralisée (no protection)
 app.use("/api/v1/keepalive/", keepaliveRouter);
 
-// Protected routes - require authentication
+// ✅ AUTO-FINISH ROUTE - PUBLIC (internal server call, no auth needed)
+// Doit être AVANT le middleware verifyToken
 const roundsRouter = createRoundsRouter(broadcast);
+app.post("/api/v1/rounds/auto-finish", roundsRouter);
+
+// Protected routes - require authentication
 app.use("/api/v1/rounds/", verifyToken, roundsRouter);
 
 // Receipts router with special handling for print (no auth required)
@@ -264,6 +274,13 @@ app.get("/api/v1/receipts/", (req, res, next) => {
   verifyToken(req, res, () => {
     requireRole('cashier', 'admin')(req, res, next);
   });
+});
+
+// ✅ CORRECTION: Protéger aussi POST /api/v1/receipts/ pour que req.user soit disponible
+app.post("/api/v1/receipts/", verifyToken, (req, res, next) => {
+  // Pour POST, on vérifie juste l'authentification (pas de rôle spécifique)
+  // Les rôles seront vérifiés dans le router si nécessaire
+  next();
 });
 
 app.use("/api/v1/receipts/", createReceiptsRouter(broadcast));
@@ -340,23 +357,14 @@ async function initializeGameWithRetry(maxAttempts = 3) {
   return false;
 }
 
-// ✅ Scheduler pour auto-lancer les courses et vérifier l'état du timer
-function scheduleAutoStartRound() {
-  console.log('✅ [SCHEDULER] Auto-start programmé (intervalle: 2s)');
-  
-  // Vérifier toutes les 2 secondes que le timer est actif
-  setInterval(() => {
-    const now = Date.now();
-    
-    // Si gameState.nextRoundStartTime est null ou dans le passé, redémarrer
-    if (!gameState.nextRoundStartTime || gameState.nextRoundStartTime <= now) {
-      console.warn('⚠️ [AUTO-RECOVERY] Timer bloqué détecté, relancement du round...');
-      startNewRound(broadcast).catch(err => {
-        console.error('❌ [AUTO-RECOVERY] Erreur lors du relancement:', err.message);
-      });
-    }
-  }, 2000); // Vérification toutes les 2 secondes
-}
+// ✅ AUTO-RECOVERY DÉSACTIVÉE
+// Le client gère maintenant le timer et clique automatiquement
+// Il n'y a plus besoin de l'AUTO-RECOVERY côté serveur
+// Si on le laisse actif, il crée plusieurs rounds simultanément
+// function scheduleAutoStartRound() {
+//   console.log('✅ [SCHEDULER] Auto-start programmé (intervalle: 2s)');
+//   ...
+// }
 
 httpServer.listen(PORT, async () => {
   console.log(`✅ Serveur de jeu lancé sur http://localhost:${PORT}`);
@@ -379,8 +387,9 @@ httpServer.listen(PORT, async () => {
     console.error('⚠️ [STARTUP] Initialisation échouée, le serveur continue mais le jeu n\'est pas prêt');
   }
   
-  // ✅ Démarrer le scheduler de vérification même si l'initialisation échoue
-  scheduleAutoStartRound();
+  // ✅ AUTO-RECOVERY DÉSACTIVÉE
+  // Le client gère le timer et clique automatiquement, plus besoin de l'AUTO-RECOVERY
+  // scheduleAutoStartRound();
   
   // ✅ BROADCAST TIMER: Synchronisation client toutes les 500ms
   // Cela permet aux clients de rester synchronisés même s'ils dérivent

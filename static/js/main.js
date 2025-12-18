@@ -119,9 +119,26 @@ function startLaunchCountdown(durationMs) {
 
     if (elapsed >= _launchCountdownDuration) {
       cancelLaunchCountdown();
-      // Unlock iframe and reload when countdown finishes
-      setBetFrameDisabled(false);
-      reloadBetFrame();
+      // ✅ AUTO-CLICK: Quand le timer finit, auto-cliquer sur action=finish
+      console.log('⏱️ [AUTO-CLICK] Timer écoulé, envoi automatique action=finish...');
+      fetch('/api/v1/rounds', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'finish' })
+      })
+        .then(r => r.json())
+        .then(data => {
+          console.log('✅ [AUTO-CLICK] Action finish envoyée:', data);
+          // Unlock iframe and reload when countdown finishes
+          setBetFrameDisabled(false);
+          reloadBetFrame();
+        })
+        .catch(err => {
+          console.error('❌ [AUTO-CLICK] Erreur:', err.message);
+          // Même en cas d'erreur, au moins réactiver les paris
+          setBetFrameDisabled(false);
+          reloadBetFrame();
+        });
     }
   }, 100);
 }

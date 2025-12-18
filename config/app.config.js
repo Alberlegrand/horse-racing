@@ -79,6 +79,20 @@ export const TOTAL_RACE_TIME_MS = MOVIE_SCREEN_DURATION_MS + FINISH_SCREEN_DURAT
  */
 
 /**
+ * Délai d'attente après un round AVANT de lancer le prochain (en secondes)
+ * Permet aux caissiers de voir les résultats et aux joueurs de placer les paris
+ * Peut être surchargée via ROUND_WAIT_DURATION_SECONDS
+ * Par défaut: 60 secondes (1 minute) si TIMER_DURATION_SECONDS n'est pas défini
+ */
+export const ROUND_WAIT_DURATION_SECONDS = parseInt(process.env.ROUND_WAIT_DURATION_SECONDS || '60', 10);
+
+/**
+ * Durée d'attente avant prochain round en MILLISECONDES
+ * ✅ EN MS POUR COHÉRENCE GLOBALE
+ */
+export const ROUND_WAIT_DURATION_MS = ROUND_WAIT_DURATION_SECONDS * 1000;
+
+/**
  * Délai avant de créer le nouveau round après race_start (en secondes)
  * Permet aux caissiers de voir la course en cours avant de placer des paris
  * Peut être surchargée via NEW_ROUND_PREPARE_DELAY_SECONDS
@@ -123,6 +137,9 @@ console.log(`
 ========================================
 🕐 TIMER D'ATTENTE AVANT COURSE:
    ${TIMER_DURATION_SECONDS}s = ${TIMER_DURATION_MS}ms
+
+⏳ TIMER D'ATTENTE APRÈS ROUND:
+   ${ROUND_WAIT_DURATION_SECONDS}s = ${ROUND_WAIT_DURATION_MS}ms
 
 🎬 TIMERS DE RACE:
    Movie screen: ${MOVIE_SCREEN_DURATION_SECONDS}s = ${MOVIE_SCREEN_DURATION_MS}ms

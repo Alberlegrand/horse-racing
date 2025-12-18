@@ -11,7 +11,7 @@ import crypto from 'crypto';
 import { createReceipt as dbCreateReceipt, createBet as dbCreateBet } from "../models/receiptModel.js";
 import { pool } from "../config/db.js";
 // Import cache strategy (Redis)
-import dbStrategy from "../config/db-strategy.js";
+import dbStrategy, { deleteTicketFromRoundCache } from "../config/db-strategy.js";
 // Import validation des montants
 import { MIN_BET_AMOUNT, MAX_BET_AMOUNT } from "../config/app.config.js";
 
@@ -544,6 +544,11 @@ export default function createReceiptsRouter(broadcast) {
     const action = req.query.action || "add";
 
     if (action === "add") {
+      // ✅ CORRECTION: Extraire user_id depuis req.user (JWT) si disponible
+      // Cela permet d'associer le ticket à l'utilisateur connecté
+      if (req.user?.userId && !req.body.user_id) {
+        req.body.user_id = req.user.userId;
+      }
       // ✅ Vérification: Un ticket ne peut être créé QUE si un round est actif et prêt
       if (!gameState.currentRound || !gameState.currentRound.id) {
         console.warn("[SYNC] ❌ Impossible créer ticket: aucun round actif");
@@ -572,6 +577,12 @@ export default function createReceiptsRouter(broadcast) {
       }
 
       const receipt = req.body;
+      
+      // ✅ CORRECTION: S'assurer que user_id est défini depuis req.user si disponible
+      if (!receipt.user_id && req.user?.userId) {
+        receipt.user_id = req.user.userId;
+      }
+      
       console.log("Ajout d'un nouveau ticket :", receipt);
 
       // ✅ VALIDATION STRICTE: Vérifier que les participants du ticket existent dans le round actuel
@@ -932,6 +943,9 @@ export default function createReceiptsRouter(broadcast) {
               await pool.query("DELETE FROM receipts WHERE receipt_id = $1", [id]);
               console.log(`[DB] Receipt ${id} supprimé en base (fallback) + bets associés`);
 
+              // ✅ CORRECTION: Mettre à jour le cache Redis
+              await deleteTicketFromRoundCache(gameState.currentRound.id, id);
+
               // Mettre à jour l'état en mémoire (au cas où une entrée correspondante existerait)
               // Décrémenter totalPrize si le ticket avait un prize
               const prizeValue = dbReceipt.prize ? Number(dbReceipt.prize) : 0;
@@ -999,6 +1013,9 @@ export default function createReceiptsRouter(broadcast) {
         // Puis supprimer le ticket lui-même
         await pool.query("DELETE FROM receipts WHERE receipt_id = $1", [id]);
         console.log(`[DB] Receipt ${id} supprimé en base (memo->db) + bets associés`);
+        
+        // ✅ CORRECTION: Mettre à jour le cache Redis
+        await deleteTicketFromRoundCache(gameState.currentRound.id, id);
       } catch (e) {
         console.warn('[DB] Échec suppression receipt en base (memo->db) pour id', id, e && e.message);
       }

@@ -542,6 +542,7 @@
             var countdownInterval = null; // ID de l'intervalle pour la mise à jour de la barre
             var targetEndTime = 0; // Timestamp exact de la fin du compte à rebours
             var ws = null; // WebSocket pour la synchronisation en temps réel
+            var lastRaceEndId = null; // ✅ Track last race_end to prevent duplicates
 
             // --- Configuration ---
             var delaiApresFinCourse = 5000; // Délai local avant de nettoyer l'UI (5s)
@@ -549,6 +550,35 @@
             var delaiPoll = 2000; // Délai de re-vérification si le bouton .start n'est pas prêt
             const RACE_DURATION_MS = 25000; // 23 secondes pour movie_screen
             const FINISH_DURATION_MS = 5000; // 5 secondes pour finish_screen
+            const TOTAL_RACE_TIME_MS = 35000; // Total: movie + finish
+
+            // ✅ AJOUTER UN GESTIONNAIRE POUR CLIQUER LE BOUTON .new_game
+            // Recharger la page pour obtenir les nouvelles données
+            $('.new_game').on('click', function() {
+                console.log('🎮 [NEW-GAME-BUTTON] Bouton new_game cliqué! Rechargement de la page...');
+                location.reload(); // Recharge complète pour récupérer les nouvelles données
+            });
+
+            // ✅ AJOUTER UN GESTIONNAIRE POUR CLIQUER LE BOUTON .start
+            // Cela appelez l'API pour lancer la course
+            $('.start').on('click', function() {
+                console.log('🎯 [START-BUTTON] Bouton cliqué! Appel de /api/v1/rounds avec action=finish');
+                
+                $.ajax({
+                    url: '/api/v1/rounds/',
+                    method: 'POST',
+                    contentType: 'application/json',
+                    data: JSON.stringify({ action: 'finish' }),
+                    success: function(response) {
+                        console.log('✅ [START-BUTTON] Réponse API:', response);
+                        // Le serveur va broadcaster race_start via WebSocket
+                    },
+                    error: function(xhr, status, error) {
+                        console.error('❌ [START-BUTTON] Erreur API:', error);
+                        console.error('   Response:', xhr.responseText);
+                    }
+                });
+            });
 
             /**
              * Met à jour la barre de progression et l'affichage du temps restant.
@@ -643,7 +673,86 @@
             }
 
             /**
-            * Affiche les 6 derniers gagnants dans la section dédiée
+             * Charge et affiche les participants dans game_screen
+             */
+            function chargerEtAfficherParticipants() {
+                console.log('🔄 Chargement des participants pour game_screen...');
+                
+                $.ajax({
+                    url: '/api/v1/rounds/',
+                    method: 'POST',
+                    contentType: 'application/json',
+                    data: JSON.stringify({ action: 'get' }),
+                    success: function(response) {
+                        const roundData = response.data || response;
+                        const participants = roundData.participants || [];
+                        
+                        if (participants.length === 0) {
+                            console.warn('⚠️ Aucun participant trouvé');
+                            return;
+                        }
+                        
+                        console.log(`✅ ${participants.length} participants chargés, affichage...`);
+                        afficherParticipants(participants);
+                    },
+                    error: function(xhr, status, error) {
+                        console.error('❌ Erreur lors du chargement des participants:', error);
+                    }
+                });
+            }
+
+            /**
+             * Affiche les participants dans game_screen en clonant le template
+             */
+            function afficherParticipants(participants) {
+                const $container = $('.participants');
+                const $template = $container.find('.js_template');
+                
+                // S'assurer que le template est invisible
+                $template.hide();
+                
+                // Supprimer les anciens participants (garder seulement le template)
+                $container.children().not('.js_template').remove();
+                
+                // Trier les participants par numéro
+                const sortedParticipants = participants.slice().sort((a, b) => {
+                    return (a.number || 0) - (b.number || 0);
+                });
+                
+                // Cloner le template pour chaque participant
+                sortedParticipants.forEach(function(participant) {
+                    const $clone = $template.clone();
+                    $clone.removeClass('js_template').addClass('participant number' + participant.number + ' family' + (participant.family || 0));
+                    $clone.attr('data-number', participant.number);
+                    $clone.show();
+                    
+                    // Mettre à jour les données du participant
+                    $clone.find('.name').text('№ ' + participant.number + ' ' + (participant.name || ''));
+                    $clone.find('.coeff').text(participant.coeff || '0');
+                    
+                    // Mettre à jour l'avatar avec la classe family
+                    const $avatarBg = $clone.find('.avatar_background');
+                    const $avatar = $clone.find('.avatar');
+                    $avatarBg.removeClass(function(index, className) {
+                        return (className.match(/(^|\s)family\S+/g) || []).join(' ');
+                    });
+                    $avatarBg.addClass('family' + (participant.family || 0));
+                    
+                    // Réinitialiser les formulaires de pari
+                    $clone.find('.bet .create .value').val('');
+                    $clone.find('.bet .create').removeClass('has_value');
+                    $clone.find('.bet .view .value').text('');
+                    $clone.find('.bet .view .prize').text('');
+                    $clone.removeClass('has_bet');
+                    
+                    $container.append($clone);
+                });
+                
+                console.log(`✅ ${sortedParticipants.length} participants affichés dans game_screen`);
+            }
+
+            /**
+             * Affiche les 6 derniers gagnants dans la section dédiée
              */
             function afficherDerniersGagnants(gameHistory) {
                 console.log('🏆 Mise à jour des 6 derniers gagnants...');
@@ -824,54 +933,66 @@
             }
 
             /**
+             * Surveille l'affichage de finish_screen et clique automatiquement sur new_game après 5 secondes
+             */
+            var finishScreenTimeout = null;
+            var lastActiveScreen = null;
+            
+            function surveillerFinishScreen() {
+                var $finishScreen = $('.finish_screen');
+                var $gameScreen = $('.game_screen');
+                
+                // Vérifie si finish_screen est maintenant actif
+                if ($finishScreen.hasClass('active') && lastActiveScreen !== 'finish_screen') {
+                    console.log('🏆 finish_screen affiché - clic automatique sur new_game dans 5 secondes...');
+                    lastActiveScreen = 'finish_screen';
+                    
+                    // Annule tout timeout précédent
+                    if (finishScreenTimeout) {
+                        clearTimeout(finishScreenTimeout);
+                    }
+                    
+                    // Clique automatiquement sur new_game après 5 secondes
+                    finishScreenTimeout = setTimeout(function() {
+                        var $newGameButton = $('.new_game');
+                        if ($newGameButton.length > 0) {
+                            console.log('✅ Clic automatique sur new_game après 5 secondes');
+                            $newGameButton.click();
+                            lastActiveScreen = null; // Reset pour la prochaine fois
+                            
+                            // ✅ Recharger les participants après le clic (le nouveau round devrait être créé)
+                            setTimeout(function() {
+                                chargerEtAfficherParticipants();
+                            }, 500); // Petit délai pour laisser le serveur créer le nouveau round
+                        } else {
+                            console.warn('⚠️ Bouton new_game non trouvé');
+                        }
+                    }, 5000); // 5 secondes
+                }
+                
+                // Reset si on passe à un autre écran
+                if (!$finishScreen.hasClass('active') && lastActiveScreen === 'finish_screen') {
+                    if (finishScreenTimeout) {
+                        clearTimeout(finishScreenTimeout);
+                        finishScreenTimeout = null;
+                    }
+                    lastActiveScreen = null;
+                }
+            }
+
+            /**
              * Fonction 3: Attend la fin de la course (WAIT_FOR_END) et relance la boucle.
              */
+            /**
+             * ✅ CORRIGÉE: Utilise les événements WebSocket au lieu de DOM polling
+             * Les événements WebSocket gèrent maintenant TOUT:
+             * - race_end → transition vers finish_screen
+             * - new_round → retour à game_screen avec timer
+             */
             function attendreFinDeCourse() {
-                console.log('👀 Surveillance de la fin de course...');
-
-                var checkInterval = setInterval(function () {
-                    var $newGameButton = $('.new_game');
-
-                    if ($newGameButton.length > 0 && $newGameButton.is(':visible')) {
-                        clearInterval(checkInterval);
-
-                        console.log('🏁 Course terminée détectée, attente de ' + (delaiApresFinCourse / 1000) + 's avant nettoyage...');
-
-                        setTimeout(function () {
-                            // 1. Appelle l'API pour créer un nouveau round côté serveur
-                            console.log('🔄 Création d\'un nouveau round côté serveur...');
-                            $.ajax({
-                                url: '/api/v1/rounds/',
-                                method: 'POST',
-                                contentType: 'application/json',
-                                data: JSON.stringify({ action: 'new_game' }),
-                                success: function (response) {
-                                    console.log('✅ Nouveau round créé:', response.data);
-                                    
-                                    // 2. Nettoyer toutes les données fetchées du DOM
-                                    console.log('🧹 Nettoyage du DOM...');
-                                    nettoyerDOM();
-                                    
-                                    // 3. Nettoyer l'interface (clic sur le bouton new_game)
-                                    console.log('🧹 Nettoyage - clic sur "New round"');
-                                    $newGameButton.click();
-
-                                    // 4. Recharger la page après un court délai
-                                    console.log('🔄 Rechargement de la page dans 1 seconde...');
-                                    setTimeout(function() {
-                                        window.location.reload();
-                                    }, 10);
-                                },
-                                error: function (xhr, status, error) {
-                                    console.error('❌ Erreur lors de la création du nouveau round:', error);
-                                    // Relancer quand même pour réessayer
-                                    setTimeout(gererCycleDeJeu, 2000);
-                                }
-                            });
-
-                        }, delaiApresFinCourse);
-                    }
-                }, 1000);
+                console.log('👀 Surveillance de la fin de course via WebSocket...');
+                // ✅ Ne rien faire ici - les événements WebSocket gèrent tout
+                // Voir connecterWebSocket() pour les handlers: race_end, new_round, etc.
             }
 
             /**
@@ -901,11 +1022,33 @@
                         if (data.gameHistory) {
                             afficherDerniersGagnants(data.gameHistory);
                         }
+                        
+                        // ✅ INITIALISER LE TIMER SI FOURNI PAR L'API
+                        if (data.timer && data.timer.timeLeft > 0) {
+                            console.log(`⏱️ Timer initial reçu: ${Math.round(data.timer.timeLeft / 1000)}s`);
+                            totalDelayMs = data.timer.totalDuration || TIMER_DURATION_MS || 60000;
+                            targetEndTime = Date.now() + data.timer.timeLeft;
+                            
+                            // Afficher le bouton Start et démarrer le timer
+                            $('#currentRound').show();
+                            $('#timeRemainingDisplay').show();
+                            $('.progress-container').show();
+                            $('.start').css('visibility', 'visible');
+                            
+                            // Démarrer l'intervalle de mise à jour
+                            mettreAJourProgressBar();
+                            if (countdownInterval) clearInterval(countdownInterval);
+                            countdownInterval = setInterval(mettreAJourProgressBar, 250);
+                            console.log('✅ Timer démarré, attente du clic automatique...');
+                        }
                     },
                     error: function() {
                         console.warn('⚠️ État initial non disponible, attente WebSocket...');
                     }
                 });
+                
+                // ✅ CRITIQUE: Charger les participants au chargement initial
+                chargerEtAfficherParticipants();
             }
             
             /**
@@ -928,8 +1071,32 @@
                         console.log('📨 Message WebSocket reçu:', data.event);
                         
                         switch(data.event) {
+                            case 'connected':
+                                // ✅ CORRECTION #4: Synchroniser l'état au moment de la connexion
+                                console.log('✅ Connexion WebSocket établie, synchronisation...');
+                                if (data.currentRound && data.currentRound.participants) {
+                                    afficherParticipants(data.currentRound.participants);
+                                } else {
+                                    chargerEtAfficherParticipants();
+                                }
+                                if (data.gameHistory) {
+                                    afficherDerniersGagnants(data.gameHistory);
+                                }
+                                if (data.roundId) {
+                                    $('#currentRound').text('🏁 Round ' + data.roundId);
+                                }
+                                // Synchroniser le timer si disponible
+                                if (data.timerTimeLeft > 0) {
+                                    totalDelayMs = data.timer?.totalDuration || 60000;  // ✅ FIXED: use totalDuration not timeLeft
+                                    targetEndTime = Date.now() + data.timerTimeLeft;
+                                    mettreAJourProgressBar();
+                                    if (countdownInterval) clearInterval(countdownInterval);
+                                    countdownInterval = setInterval(mettreAJourProgressBar, 250);
+                                }
+                                break;
                             case 'race_start':
-                                console.log('🏁 Course démarrée - synchronisation movie_screen');
+                                console.log('🏁 Course démarrée - affichage movie_screen (T=' + Date.now() + ')');
+                                window.raceStartTime = Date.now();  // ✅ Tracker pour logs
                                 // ✅ Arrêter le timer d'attente du round
                                 if (countdownInterval) {
                                     clearInterval(countdownInterval);
@@ -940,63 +1107,127 @@
                                 $('#timeRemainingDisplay').hide();
                                 $('.progress-container').hide();
                                 
-                                // Afficher l'écran de course
+                                // ✅ Afficher le écran de course
                                 $('.screen').removeClass('active');
                                 $('.movie_screen').addClass('active');
                                 
-                                // Surveille la fin de la course (pas de timer local ici!)
-                                attendreFinDeCourse();
+                                console.log('   → Attente des événements WebSocket (race_end)...');
+                                // ✅ NE PAS appeler attendreFinDeCourse() - les événements WebSocket gèrent tout
                                 break;
                                 
-                            /* case 'race_end':
-                                console.log('🏆 Course terminée - synchronisation finish_screen');
-                                // Vérifie que movie_screen est actif avant de passer à finish_screen
-                                // Si on est déjà sur finish_screen ou game_screen, on ne change rien
-                                if ($('.movie_screen').hasClass('active')) {
-                                    // Transition de movie_screen vers finish_screen
-                                    $('.movie_screen').removeClass('active');
-                                    //$('.finish_screen').addClass('active');
-                                    //$('.new_game').css('visibility', 'visible');
-                                } else {
-                                    console.log('⚠️ race_end reçu mais movie_screen n\'est pas actif, état actuel:', 
-                                        $('.screen.active').attr('class'));
+                            case 'race_end':
+                                // ✅ PROTECTION: Ignorer les doublons race_end
+                                if (data.roundId === lastRaceEndId) {
+                                    console.warn('⚠️ race_end doublon reçu pour round ' + data.roundId + ', ignoré');
+                                    break;
                                 }
-                                break; */
+                                lastRaceEndId = data.roundId;
+                                
+                                console.log('🏆 Course terminée - affichage finish_screen (T+' + (Date.now() - window.raceStartTime) + 'ms)');
+                                // ✅ Afficher le finish_screen (SANS résultats pour le moment)
+                                $('.screen').removeClass('active');
+                                $('.finish_screen').addClass('active');
+                                $('.new_game').css('visibility', 'visible');
+                                
+                                // ✅ Réafficher le header (mais pas le timer du prochain round)
+                                $('#currentRound').show();
+                                $('#timeRemainingDisplay').show();
+                                $('.progress-container').show();
+                                
+                                // ✅ Arrêter tous les timers pendant le finish_screen
+                                if (countdownInterval) {
+                                    clearInterval(countdownInterval);
+                                    countdownInterval = null;
+                                }
+                                
+                                console.log('   → finish_screen affiché, attente des résultats (race_results)');
+                                // ✅ Les résultats seront affichés quand race_results sera reçu
+                                break;
+                                
+                            case 'race_results':
+                                // ✅ NOUVEAU: Afficher les résultats (winner, prizes, etc.)
+                                console.log('🎊 Résultats de course reçus (T+' + (Date.now() - window.raceStartTime) + 'ms)');
+                                console.log('   Winner:', data.winner?.number, 'Prize:', data.totalPrize);
+                                
+                                // Mettre à jour les éléments du finish_screen avec les résultats
+                                if (data.winner) {
+                                    // Afficher le gagnant (chercher l'élément dans le DOM)
+                                    const winnerElement = $('.finish_screen .winner-info');
+                                    if (winnerElement.length > 0) {
+                                        winnerElement.text('🏆 Gagnant: ' + data.winner.name + ' (#' + data.winner.number + ')');
+                                    }
+                                }
+                                
+                                if (data.totalPrize !== undefined) {
+                                    // Afficher le montant total
+                                    const prizeElement = $('.finish_screen .total-prize');
+                                    if (prizeElement.length > 0) {
+                                        prizeElement.text('💰 Total: ' + data.totalPrize + ' HTG');
+                                    }
+                                }
+                                
+                                // Si des tickets sont inclus, mettre à jour le cashier
+                                if (data.receipts && Array.isArray(data.receipts)) {
+                                    // Mettre en cache pour utilisation par le cashier
+                                    window.currentRaceResults = {
+                                        winner: data.winner,
+                                        receipts: data.receipts,
+                                        totalPrize: data.totalPrize
+                                    };
+                                    console.log('✅ Résultats sauvegardés pour le cashier');
+                                }
+                                
+                                console.log('   → Résultats affichés, attente du timer (60s)');
+                                break;
                                 
                             case 'new_round':
-                                console.log('🆕 Nouveau round - synchronisation');
-                                // ✅ NOUVEAU: Réafficher la barre de timer du round
+                                const newRoundElapsed = Date.now() - window.raceStartTime || 0;
+                                console.log('🆕 Nouveau round reçu (T+' + newRoundElapsed + 'ms)');
+                                console.log('   Données:', { roundId: data.roundId, isRaceRunning: data.isRaceRunning });
+                                
+                                // ✅ CRITICAL FIX: Ignorer new_round si une course est EN COURS
+                                // Cela évite le retour prématuré à game_screen pendant movie_screen/finish_screen
+                                if (data.isRaceRunning === true) {
+                                    console.warn('❌ [TIMING-BUG-FIX] new_round REJETÉ - une course est encore en cours!');
+                                    console.warn(`⚠️ T+${newRoundElapsed}ms: new_round reçu trop tôt (expected T>=${TOTAL_RACE_TIME_MS || 35000}ms)`);
+                                    console.warn(`⚠️ Ignorer cet événement pour éviter de retourner à game_screen pendant la course`);
+                                    break;  // EXIT sans rien faire
+                                }
+                                
+                                // 1. ✅ Retourner à game_screen UNIQUEMENT si la course est terminée
+                                console.log(`✅ [OK] Retour à game_screen (course finie, T+${newRoundElapsed}ms)`);
+                                $('.screen').removeClass('active');
+                                $('.game_screen').addClass('active');
+                                
+                                // 2. Réafficher la barre de timer du round
                                 $('#currentRound, #timeRemainingDisplay, .progress-container').show();
                                 
-                                // Met à jour le currentRound si disponible
-                                if (data.game && data.game.id) {
-                                    $('#currentRound').text('🏁 Round ' + data.game.id);
+                                // 3. Mettre à jour le round ID
+                                const roundId = data.currentRound?.id || data.roundId || data.game?.id;
+                                if (roundId) {
+                                    $('#currentRound').text('🏁 Round ' + roundId);
                                 }
-                                // Met à jour les gagnants si l'historique est fourni
-                                if (data.gameHistory) {
-                                    afficherDerniersGagnants(data.gameHistory);
+                                
+                                // 4. Recharger les participants
+                                if (data.currentRound?.participants?.length > 0) {
+                                    console.log('✅ Participants reçus, affichage...');
+                                    afficherParticipants(data.currentRound.participants);
+                                } else if (data.game?.participants?.length > 0) {
+                                    afficherParticipants(data.game.participants);
                                 } else {
-                                    // Récupère l'historique depuis l'API
-                                    $.ajax({
-                                        url: '/api/v1/rounds/status',
-                                        method: 'GET',
-                                        success: function(statusData) {
-                                            if (statusData.gameHistory) {
-                                                afficherDerniersGagnants(statusData.gameHistory);
-                                            }
-                                        }
-                                    });
+                                    chargerEtAfficherParticipants();
                                 }
-                                // Retourne à game_screen si nécessaire
-                                if (!data.timer || data.timer.timeLeft <= 0) {
-                                    $('.screen').removeClass('active');
-                                    $('.game_screen').addClass('active');
+                                
+                                // 5. Mettre à jour l'historique
+                                if (data.gameHistory?.length > 0) {
+                                    afficherDerniersGagnants(data.gameHistory);
                                 }
-                                // Synchronise le timer si fourni
-                                if (data.timer && data.timer.timeLeft > 0) {
+                                
+                                // 6. ✅ REDÉMARRER le timer du round
+                                if (data.timer?.timeLeft > 0) {
                                     totalDelayMs = data.timer.totalDuration;
                                     targetEndTime = Date.now() + data.timer.timeLeft;
-                                    console.log(`⏱️ New round timer: ${Math.round(data.timer.timeLeft / 1000)}s restantes`);
+                                    console.log(`⏱️ Timer restarted: ${Math.round(data.timer.timeLeft / 1000)}s`);
                                     mettreAJourProgressBar();
                                     if (countdownInterval) clearInterval(countdownInterval);
                                     countdownInterval = setInterval(mettreAJourProgressBar, 250);
@@ -1064,6 +1295,9 @@
 
             // --- Lancement de la synchronisation au chargement ---
             synchroniserAuChargement();
+            
+            // --- Surveillance continue de finish_screen pour clic automatique ---
+            setInterval(surveillerFinishScreen, 500); // Vérifie toutes les 500ms
 
         });
     </script>

@@ -45,8 +45,12 @@ function formatTicket(receipt, roundId, defaultStatus = 'pending', isRoundFinish
   // Détermine le statut final
   let status = defaultStatus;
   
-  // IMPORTANT: Pour les tickets du round actuel, ne déterminer le statut que si le round est terminé
-  if (defaultStatus === 'pending' && isRoundFinished) {
+  // ✅ CORRECTION: Vérifier le statut depuis la DB en priorité (notamment "cancelled")
+  if (receipt.status === 'cancelled') {
+    status = 'cancelled';
+  } else if (receipt.isPaid === true) {
+    status = 'paid';
+  } else if (defaultStatus === 'pending' && isRoundFinished) {
     // Le round est terminé, on peut déterminer le statut basé sur le prize
     // Le prize est en système, convertir en publique pour la comparaison
     const prizePublic = systemToPublic(receipt.prize || 0);
@@ -57,13 +61,6 @@ function formatTicket(receipt, roundId, defaultStatus = 'pending', isRoundFinish
     status = (prizePublic > 0) ? 'won' : 'lost';
   }
   // Sinon, le statut reste 'pending' (round actuel non terminé)
-  
-  // Si le ticket est payé, mettre à jour le statut
-  if (receipt.isPaid === true) {
-    status = 'paid';
-  }
-  
-  // (Note: 'cancelled' n'est pas géré par la logique actuelle)
 
   return {
     id: receipt.id,
@@ -155,22 +152,25 @@ router.get("/:id", async (req, res) => {
 // GET /api/v1/my-bets/
 router.get("/", cacheResponse(30), async (req, res) => {
   try {
-    // 1. Récupérer les filtres de la requête
-    const {
-      page = 1,
-      limit = 10,
-      date,
-      status,
-      searchId
-    } = req.query;
+    // 1. Récupérer les filtres de la requête
+    const {
+      page = 1,
+      limit = 10,
+      date,
+      status,
+      searchId
+    } = req.query;
 
-    const pageNum = parseInt(page, 10);
-    const limitNum = parseInt(limit, 10);
+    const pageNum = parseInt(page, 10);
+    const limitNum = parseInt(limit, 10);
 
-    // If user_id is provided, read directly from DB instead of gameState
-    if (req.query.user_id) {
+    // ✅ CORRECTION: Extraire user_id depuis req.user (JWT) en priorité
+    // req.user est disponible car la route est protégée par verifyToken
+    const userId = req.user?.userId || (req.query.user_id ? parseInt(req.query.user_id, 10) : null);
+
+    // If user_id is available, read directly from DB instead of gameState
+    if (userId) {
       try {
-        const userId = parseInt(req.query.user_id, 10);
         const dbLimit = parseInt(limit, 10) || 50;
         const dbReceipts = await getReceiptsByUser(userId, dbLimit);
         const receiptIds = dbReceipts.map(r => r.receipt_id);
@@ -229,18 +229,31 @@ router.get("/", cacheResponse(30), async (req, res) => {
       }
     }
 
-    // 2. Agréger tous les tickets (DB + en mémoire pour les tickets en cours non encore persistés)
+    // 2. Si aucun user_id, retourner une erreur (sécurité: ne pas exposer tous les tickets)
+    // ✅ CORRECTION: Permettre aux admins/cashiers de voir tous les tickets si nécessaire
+    // Pour l'instant, on exige user_id pour la sécurité
+    if (!userId) {
+      return res.status(400).json({ 
+        error: "user_id requis pour récupérer les tickets",
+        code: "USER_ID_REQUIRED"
+      });
+    }
+
+    // 3. Agréger tous les tickets (DB + en mémoire pour les tickets en cours non encore persistés)
     let allTickets = [];
 
     // IMPORTANT: Charger d'abord les tickets depuis la DB pour avoir les statuts les plus à jour
+    // ✅ CORRECTION: Filtrer par user_id pour la sécurité
     try {
       const allDbReceipts = await pool.query(
         `SELECT r.*, 
                 COUNT(b.bet_id) as bet_count
          FROM receipts r 
          LEFT JOIN bets b ON r.receipt_id = b.receipt_id 
+         WHERE r.user_id = $1
          GROUP BY r.receipt_id 
-         ORDER BY r.created_at DESC`
+         ORDER BY r.created_at DESC`,
+        [userId]
       );
       
       for (const dbReceipt of allDbReceipts.rows) {
@@ -287,7 +300,7 @@ router.get("/", cacheResponse(30), async (req, res) => {
       // Fallback: utiliser gameState si DB échoue
     }
 
-    // Si la DB n'a rien retourné, fallback sur gameState
+    // Si la DB n'a rien retourné, fallback sur gameState (filtrer par user_id)
     if (allTickets.length === 0) {
       const hasWinner = Array.isArray(gameState.currentRound.participants) && 
                        gameState.currentRound.participants.some(p => p.place === 1);
@@ -295,24 +308,29 @@ router.get("/", cacheResponse(30), async (req, res) => {
       const isRoundFinished = gameState.raceEndTime !== null || 
                               (gameState.raceStartTime !== null && !gameState.isRaceRunning && hasWinner);
       
-      const pendingTickets = (gameState.currentRound.receipts || []).map(r => {
-        const ticket = formatTicket(r, gameState.currentRound.id, 'pending', isRoundFinished);
-        ticket.isRoundFinished = isRoundFinished;
-        return ticket;
-      });
+      // ✅ CORRECTION: Filtrer par user_id dans gameState aussi
+      const pendingTickets = (gameState.currentRound.receipts || [])
+        .filter(r => !r.user_id || r.user_id === userId)
+        .map(r => {
+          const ticket = formatTicket(r, gameState.currentRound.id, 'pending', isRoundFinished);
+          ticket.isRoundFinished = isRoundFinished;
+          return ticket;
+        });
       
       const historicalTickets = gameState.gameHistory.flatMap(round => 
-        (round.receipts || []).map(r => {
-          const ticket = formatTicket(r, round.id, 'historical');
-          ticket.isRoundFinished = true;
-          return ticket;
-        })
+        (round.receipts || [])
+          .filter(r => !r.user_id || r.user_id === userId)
+          .map(r => {
+            const ticket = formatTicket(r, round.id, 'historical');
+            ticket.isRoundFinished = true;
+            return ticket;
+          })
       );
       
       allTickets = [...pendingTickets, ...historicalTickets].sort((a, b) => 
         new Date(b.date) - new Date(a.date)
       );
-    }    // 3. Appliquer les filtres
+    }    // 4. Appliquer les filtres
     let filteredTickets = allTickets;
 
     if (searchId) {
