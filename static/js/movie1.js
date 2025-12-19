@@ -53,12 +53,7 @@ ViewportUpdater.prototype.update = function (entities, elapsed) {
             this._finishTime = elapsed;
         }
         if (elapsed - this._finishTime >= ViewportUpdater.FINISH_DELAY) {
-            // ✅ CORRECTION: Ne pas appeler onFinish si WebSocket gère les transitions
-            // Cela évite le double affichage de finish_screen
-            if (window.websocketManagedTransitions) {
-                console.log('⚠️ [ViewportUpdater] onFinish ignoré - WebSocket gère les transitions');
-                return; // Ne pas appeler onFinish, laisser WebSocket gérer
-            }
+            // ✅ Appeler onFinish() normalement - le système de screens gère la transition
             this._onFinish();
         }
     } else {

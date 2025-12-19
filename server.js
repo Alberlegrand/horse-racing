@@ -268,13 +268,10 @@ app.use("/api/v1/init/", initRouter);
 // Keepalive route centralisée (no protection)
 app.use("/api/v1/keepalive/", keepaliveRouter);
 
-// ✅ AUTO-FINISH ROUTE - PUBLIC (internal server call, no auth needed)
-// Doit être AVANT le middleware verifyToken
-const roundsRouter = createRoundsRouter(broadcast);
-app.post("/api/v1/rounds/auto-finish", roundsRouter);
-
-// Protected routes - require authentication
-app.use("/api/v1/rounds/", verifyToken, roundsRouter);
+// ✅ PROBLÈME #13: Les routes sont créées mais wss n'est pas encore initialisé
+// Les routes seront initialisées APRÈS que wss soit créé dans httpServer.listen()
+// Pour l'instant, on crée juste les routers (ils utiliseront broadcast qui sera lié à wss plus tard)
+let roundsRouter = null; // Sera initialisé après wss
 
 // Receipts router with special handling for print (no auth required)
 app.get("/api/v1/receipts/", (req, res, next) => {
@@ -391,6 +388,12 @@ httpServer.listen(PORT, async () => {
   
   // ✅ Configurer les handlers WebSocket
   setupWebSocket();
+  
+  // ✅ PROBLÈME #13 CORRIGÉ: Initialiser les routes APRÈS que wss soit créé
+  // Maintenant que wss existe, on peut créer les routes qui utilisent broadcast
+  roundsRouter = createRoundsRouter(broadcast);
+  app.post("/api/v1/rounds/auto-finish", roundsRouter);
+  app.use("/api/v1/rounds/", verifyToken, roundsRouter);
   
   // ✅ Initialiser le jeu avec retry logic
   const initialized = await initializeGameWithRetry(3);

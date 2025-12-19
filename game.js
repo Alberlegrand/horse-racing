@@ -29,7 +29,7 @@ export const gameState = {
     currentRound: {},
     gameHistory: [],
     nextRoundStartTime: null, // timestamp du prochain lancement de tour, null signifie qu'aucun minuteur n'est en cours (une course est active)
-    timerInterval: null, // Intervalle pour les mises à jour du timer côté serveur
+    // ✅ PROBLÈME #18: timerInterval supprimé (jamais utilisé, remplacé par timers.nextRound)
     autoLoopActive: false, // Flag pour éviter les boucles multiples
     raceStartTime: null, // Timestamp du début de la course actuelle (pour synchronisation)
     raceEndTime: null, // Timestamp de la fin de la course actuelle
@@ -44,7 +44,9 @@ export const gameState = {
     },
     // ✅ LOCK GLOBAL UNIFIÉ POUR ÉVITER LES EXÉCUTIONS MULTIPLES
     // Remplace finishLock et roundCreationLock par un seul lock unifié
-    operationLock: false  // ✅ Lock unifié pour toutes les opérations critiques (race finish, round creation)
+    operationLock: false,  // ✅ Lock unifié pour toutes les opérations critiques (race finish, round creation)
+    // ✅ PROBLÈME #19: preStartTimer déclaré explicitement (au lieu de propriété dynamique)
+    preStartTimer: null  // Timer pour le pré-démarrage du round
 };
 
 // ✅ COMPTEUR GLOBAL POUR IDS SEQUENTIELS
@@ -161,9 +163,14 @@ export async function createNewRound(options = {}) {
             console.error('[ROUND-CREATE] ❌ Erreur initialisation cache:', err.message);
         }
 
-        // 6️⃣ BROADCAST AUX CLIENTS
+        // 6️⃣ CONFIGURER LE TIMER POUR LE NOUVEAU ROUND
+        // ✅ CRITIQUE: Définir nextRoundStartTime pour que le timer fonctionne
+        const now = Date.now();
+        gameState.nextRoundStartTime = now + ROUND_WAIT_DURATION_MS;
+        console.log(`[ROUND-CREATE] ⏱️ Timer configuré: ${ROUND_WAIT_DURATION_MS}ms (fin à ${new Date(gameState.nextRoundStartTime).toISOString()})`);
+
+        // 7️⃣ BROADCAST AUX CLIENTS
         if (broadcast && typeof broadcast === 'function') {
-            const now = Date.now();
             const elapsedFromRaceStart = raceStartTime ? (now - raceStartTime) : 0;
             
             console.log(`[ROUND-CREATE] 🎙️ Broadcasting new_round (elapsed: ${elapsedFromRaceStart}ms)`);
@@ -182,14 +189,14 @@ export async function createNewRound(options = {}) {
                     timeLeft: ROUND_WAIT_DURATION_MS,
                     totalDuration: ROUND_WAIT_DURATION_MS,
                     startTime: now,
-                    endTime: now + ROUND_WAIT_DURATION_MS
+                    endTime: gameState.nextRoundStartTime
                 }
             });
         } else {
             console.warn('[ROUND-CREATE] ⚠️ Fonction broadcast non fournie');
         }
 
-        // 7️⃣ ✅ SAUVEGARDER LE GAMESTATE EN REDIS (CRITICAL!)
+        // 8️⃣ ✅ SAUVEGARDER LE GAMESTATE EN REDIS (CRITICAL!)
         // Cela sauvegarde le currentRound + gameHistory + tous les états
         try {
             await saveGameStateToRedis();
@@ -202,7 +209,7 @@ export async function createNewRound(options = {}) {
         return newRoundId;
 
     } finally {
-        // 8️⃣ LIBÉRER LE LOCK
+        // 9️⃣ LIBÉRER LE LOCK
         if (checkLock) {
             gameState.operationLock = false;
             console.log('[LOCK] 🔓 operationLock libéré par createNewRound()');

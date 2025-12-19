@@ -1926,6 +1926,14 @@ class App {
                 }
                 break;
 
+            case 'reload_page':
+                console.log('🔄 Rechargement de la page demandé par le serveur (reason: ' + (data.reason || 'unknown') + ')');
+                // Recharger la page après un court délai pour permettre au message d'être traité
+                setTimeout(() => {
+                    window.location.reload();
+                }, 500);
+                break;
+
             case 'new_round':
                 console.log('🆕 Nouveau tour:', data.roundId || data.game?.id);
                 // Réinitialiser l'état de la course

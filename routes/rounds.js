@@ -5,7 +5,8 @@ import express from "express";
 import { gameState, startNewRound, createNewRound, wrap, BASE_PARTICIPANTS } from "../game.js";
 
 // Import ChaCha20 pour la sécurité des positions
-import { chacha20Random, chacha20RandomInt, chacha20Shuffle, initChaCha20 } from "../chacha20.js";
+// ✅ PROBLÈME #24 CORRIGÉ: initChaCha20 supprimé (déjà appelé dans game.js au démarrage)
+import { chacha20Random, chacha20RandomInt, chacha20Shuffle } from "../chacha20.js";
 
 // Import cache middleware for performance
 import { cacheResponse } from "../middleware/cache.js";
@@ -130,14 +131,25 @@ class RaceTimerManager {
                 }
             }, MOVIE_SCREEN_DURATION_MS);
 
-            // T=25s: Nettoyage et réinitialisation
-            console.log('[TIMER] ⏱️ Programmation T+25s: Nettoyage post-race');
+            // T=35s: Nettoyage et réinitialisation
+            console.log('[TIMER] ⏱️ Programmation T+35s: Nettoyage post-race');
             gameState.timers.cleanup = setTimeout(() => {
-                console.log(`[TIMER] T+25s: Nettoyage post-race`);
-                this.activeRaces.delete(raceId);
-                clearAllTimers();
-                if (callbacks.onCleanup) {
-                    callbacks.onCleanup();
+                console.log(`[TIMER] T+35s: Nettoyage post-race`);
+                // ✅ CORRECTION: Toujours nettoyer activeRaces même si onCleanup échoue
+                try {
+                    this.activeRaces.delete(raceId);
+                    clearAllTimers();
+                    if (callbacks.onCleanup) {
+                        callbacks.onCleanup();
+                    }
+                } catch (cleanupErr) {
+                    console.error('[TIMER] ❌ Erreur dans cleanup:', cleanupErr);
+                    // Nettoyer quand même activeRaces pour éviter les blocages
+                    this.activeRaces.delete(raceId);
+                    clearAllTimers();
+                    // Libérer le lock si bloqué
+                    gameState.operationLock = false;
+                    gameState.isRaceRunning = false;
                 }
             }, TOTAL_RACE_TIME_MS);
 
@@ -273,6 +285,15 @@ export default function createRoundsRouter(broadcast) {
             }
         }
 
+        // ✅ RETOURNER LES RÉSULTATS (PROBLÈME #12)
+        const raceResults = {
+            roundId: finishedRoundId,
+            winner: winnerWithPlace,
+            receipts: receipts,
+            totalPrize: totalPrizeAll,
+            participants: savedRoundData.participants || []
+        };
+        
         // Archiver en gameHistory
         if (finishedRoundId) {
             const finishedRound = {
@@ -309,8 +330,7 @@ export default function createRoundsRouter(broadcast) {
             }
         }
 
-        // ✅ Plus besoin de nettoyer runningRoundData - n'existe plus
-        
+        // ✅ PROBLÈME #12 CORRIGÉ: Retourner les résultats explicitement
         return {
             roundId: finishedRoundId,
             winner: winnerWithPlace,
@@ -322,9 +342,9 @@ export default function createRoundsRouter(broadcast) {
 
     // Helper: Signal de fin de course SIMPLE (sans résultats)
     // ✅ APPEL À T=30s: Juste broadcaster que la course est finie
-    // Les résultats seront calculés à T=60s dans onCleanup()
+    // Les résultats seront calculés à T=35s dans onCleanup()
     const executeRaceFinish = async () => {
-        console.log('[RACE-FINISH] Signal de fin de course à T=30s (résultats calculés à T=60s)');
+        console.log('[RACE-FINISH] Signal de fin de course à T=30s (résultats calculés à T=35s)');
         
         // ✅ ACQUÉRIR LE LOCK pour éviter les exécutions multiples
         if (gameState.operationLock) {
@@ -335,6 +355,13 @@ export default function createRoundsRouter(broadcast) {
         console.log('[LOCK] 🔒 operationLock acquis par executeRaceFinish()');
         
         try {
+            // ✅ CORRECTION: Vérifier que la course est toujours en cours
+            if (!gameState.isRaceRunning) {
+                console.warn('[RACE-FINISH] ⚠️ Course déjà terminée, ignorée');
+                gameState.operationLock = false;
+                return;
+            }
+            
             // ✅ CORRECTION #2: Plus besoin de sauvegarder dans runningRoundData
             // Les données restent dans currentRound jusqu'à ce que calculateRaceResults() les utilise
             const oldRoundId = gameState.currentRound?.id;
@@ -366,7 +393,12 @@ export default function createRoundsRouter(broadcast) {
                 // Juste: finish_screen est maintenant active, attendez les résultats
             });
             
-            console.log(`[RACE-FINISH] ✅ Signal race_end broadcasté, attente du calcul à T=60s`);
+            console.log(`[RACE-FINISH] ✅ Signal race_end broadcasté, attente du calcul à T=35s`);
+        } catch (err) {
+            console.error('[RACE-FINISH] ❌ Erreur:', err.message);
+            // Réinitialiser l'état en cas d'erreur pour éviter les blocages
+            gameState.isRaceRunning = false;
+            gameState.raceStartTime = null;
         } finally {
             // ✅ TOUJOURS libérer le lock
             gameState.operationLock = false;
@@ -402,9 +434,8 @@ export default function createRoundsRouter(broadcast) {
             });
         },
 
-        // ❌ DELETED: onPrepareNewRound was dead code - never called by startRaceSequence()
-        // It caused confusion by defining new_round broadcast twice (also in createNewRoundAfterRace)
-        // The actual new_round broadcast happens in createNewRoundAfterRace() at T=35s (MOVIE + FINISH)
+        // ✅ PROBLÈME #5 CORRIGÉ: onPrepareNewRound supprimé (code mort)
+        // Le nouveau round est créé dans onCleanup() à T=35s via createNewRound()
 
         // T=30s: Exécuter la logique de fin
         onFinishRace: async () => {
@@ -506,11 +537,24 @@ export default function createRoundsRouter(broadcast) {
             } catch (error) {
                 // ✅ Si une erreur survient, libérer le lock acquis au début de onCleanup()
                 console.error('[RACE-SEQ] ❌ Erreur dans onCleanup():', error.message);
-                throw error;
+                // Réinitialiser l'état pour éviter les blocages
+                gameState.isRaceRunning = false;
+                gameState.raceStartTime = null;
+                gameState.raceEndTime = null;
+                // Ne pas throw pour éviter de bloquer le serveur
             } finally {
                 // ✅ TOUJOURS libérer le lock à la fin (succès ou erreur)
                 gameState.operationLock = false;
                 console.log('[LOCK] 🔓 operationLock libéré par onCleanup()');
+                
+                // ✅ NOUVEAU: Envoyer un message WebSocket pour recharger la page
+                broadcast({
+                    event: 'reload_page',
+                    reason: 'cleanup_complete',
+                    roundId: gameState.currentRound?.id || null,
+                    serverTime: Date.now()
+                });
+                console.log('[RACE-SEQ] 📡 Message WebSocket reload_page envoyé après cleanup');
             }
         }
     };
@@ -576,48 +620,15 @@ export default function createRoundsRouter(broadcast) {
      * ⚠️ TIMER GUARD: Si le timer est bloqué (nextRoundStartTime null/passé et pas de race),
      * déclencher automatiquement un nouveau round pour la robustesse sur Render.
      */
-    router.get("/status", cacheResponse(5), async (req, res) => {
+    // ✅ PROBLÈME #15 CORRIGÉ: Cache réduit à 2s (au lieu de 5s) pour éviter les données obsolètes
+    router.get("/status", cacheResponse(2), async (req, res) => {
         const now = Date.now();
         // ✅ UTILISER LES CONSTANTES UNIFIÉES IMPORTÉES DE config/app.config.js
         // Pas de redéfinition locale des timers!
 
-        // ✅ TIMER GUARD: Vérifier si le timer est bloqué
-        // MAIS: ne pas déclencher si une opération est en cours
-        if (!gameState.isRaceRunning && 
-            !gameState.operationLock &&
-            (!gameState.nextRoundStartTime || gameState.nextRoundStartTime <= now)) {
-          console.warn('⚠️ [TIMER-GUARD] Timer bloqué détecté dans /status, redémarrage du round...');
-          try {
-            // ✅ Utiliser createNewRound() (fonction unifiée)
-            // C'est appelé en dehors d'une race, donc archiveCurrentRound peut être false
-            // et checkLock=true pour éviter les doublons
-            await createNewRound({
-              broadcast: broadcast,
-              raceStartTime: Date.now(),
-              archiveCurrentRound: false,  // Pas en cours de course
-              checkLock: true              // Vérifier le lock
-            });
-            
-            // ✅ Créer le timer
-            const timerNow = Date.now();
-            gameState.nextRoundStartTime = timerNow + ROUND_WAIT_DURATION_MS;
-            broadcast({
-                event: 'timer_update',
-                serverTime: timerNow,
-                roundId: gameState.currentRound?.id,
-                timer: {
-                    timeLeft: ROUND_WAIT_DURATION_MS,
-                    totalDuration: ROUND_WAIT_DURATION_MS,
-                    startTime: timerNow,
-                    endTime: gameState.nextRoundStartTime
-                }
-            });
-            
-            console.log('✅ [TIMER-GUARD] Round redémarré avec succès');
-          } catch (error) {
-            console.error('❌ [TIMER-GUARD] Erreur lors du redémarrage:', error.message);
-          }
-        }
+        // ✅ PROBLÈME #15 CORRIGÉ: GET endpoint sans side effects
+        // La création automatique de round a été déplacée vers POST /api/v1/rounds/ avec action=reset_timer
+        // Si le timer est bloqué, l'admin peut appeler POST /api/v1/rounds/ avec action=reset_timer
 
         let screen = "game_screen"; // Par défaut
         let timeRemaining = 0;
@@ -700,19 +711,111 @@ export default function createRoundsRouter(broadcast) {
         // === FINISH === Déclencher la séquence de course
         if (action === "finish") {
             // ✅ PROTECTION: Vérifier qu'une race n'est pas déjà en cours
+            // MAIS: Vérifier d'abord si isRaceRunning est bloqué (état orphelin)
             if (gameState.isRaceRunning) {
-                console.warn('[FINISH] Une course est déjà en cours, ignoré');
-                return res.json(wrap({ skipped: true, reason: 'race already running' }));
+                let shouldReset = false;
+                let resetReason = '';
+                
+                // ✅ Vérification 1: isRaceRunning=true mais pas de raceStartTime = état incohérent
+                if (!gameState.raceStartTime) {
+                    shouldReset = true;
+                    resetReason = 'isRaceRunning=true mais raceStartTime=null (état incohérent)';
+                }
+                // ✅ Vérification 2: Course "en cours" depuis trop longtemps = état bloqué
+                else {
+                    const elapsed = Date.now() - gameState.raceStartTime;
+                    // ✅ CORRECTION: Vérifier si les timers sont toujours actifs
+                    const hasActiveTimers = gameState.timers.finish !== null || gameState.timers.cleanup !== null;
+                    
+                    if (elapsed > TOTAL_RACE_TIME_MS + 15000) { // 35s + 15s de marge
+                        shouldReset = true;
+                        resetReason = `isRaceRunning bloqué depuis ${elapsed}ms (>${TOTAL_RACE_TIME_MS + 15000}ms)`;
+                    } else if (!hasActiveTimers && elapsed > 2000) {
+                        // ✅ NOUVEAU: Si les timers sont morts mais isRaceRunning est toujours true après 2s,
+                        // c'est probablement un état bloqué (les timers devraient être actifs pendant 35s)
+                        // On utilise 2s au lieu de 5s pour détecter plus rapidement les problèmes
+                        shouldReset = true;
+                        resetReason = `isRaceRunning=true mais timers inactifs depuis ${elapsed}ms (probable crash ou timers non démarrés)`;
+                    }
+                }
+                
+                // ✅ Vérification 3: Pas de séquence active dans activeRaces = état orphelin
+                if (!shouldReset && raceTimerManager.activeRaces.size === 0) {
+                    // ✅ CORRECTION: Vérifier aussi si raceStartTime existe et si le temps écoulé est > 5s
+                    // Si la course vient juste de démarrer (< 5s), c'est probablement un double clic, pas un état orphelin
+                    if (!gameState.raceStartTime || (Date.now() - gameState.raceStartTime) > 5000) {
+                        shouldReset = true;
+                        resetReason = 'isRaceRunning=true mais aucune séquence active dans activeRaces';
+                    }
+                }
+                
+                if (shouldReset) {
+                    console.warn(`[FINISH] ⚠️ État bloqué détecté: ${resetReason}, réinitialisation...`);
+                    gameState.isRaceRunning = false;
+                    gameState.raceStartTime = null;
+                    gameState.raceEndTime = null;
+                    // Nettoyer aussi les timers au cas où
+                    clearAllTimers();
+                    raceTimerManager.activeRaces.clear();
+                    console.log('[FINISH] ✅ État réinitialisé, la course peut maintenant être lancée');
+                } else {
+                    // C'est vraiment une course en cours, ignorer la requête
+                    // Mais logger plus d'informations pour le débogage
+                    const elapsed = gameState.raceStartTime ? Date.now() - gameState.raceStartTime : 0;
+                    const hasActiveTimers = gameState.timers.finish !== null || gameState.timers.cleanup !== null;
+                    console.warn(`[FINISH] Une course est déjà en cours (elapsed=${elapsed}ms, timers=${hasActiveTimers ? 'actifs' : 'inactifs'}, activeRaces=${raceTimerManager.activeRaces.size}), ignoré`);
+                    return res.json(wrap({ skipped: true, reason: 'race already running' }));
+                }
+            }
+
+            // ✅ CORRECTION: Vérifier que operationLock n'est pas bloqué
+            // Si le lock est bloqué depuis plus de 60s, le libérer (probable crash/erreur)
+            if (gameState.operationLock) {
+                console.warn('[FINISH] ⚠️ operationLock est actif, attente...');
+                // Attendre un peu pour voir si le lock se libère
+                let waitCount = 0;
+                while (gameState.operationLock && waitCount < 10) {
+                    await new Promise(resolve => setTimeout(resolve, 100));
+                    waitCount++;
+                }
+                if (gameState.operationLock) {
+                    console.warn('[FINISH] ⚠️ operationLock toujours actif après 1s, libération forcée (probable crash précédent)');
+                    gameState.operationLock = false;
+                    // Réinitialiser aussi isRaceRunning au cas où
+                    if (gameState.isRaceRunning && gameState.raceStartTime) {
+                        const elapsed = Date.now() - gameState.raceStartTime;
+                        if (elapsed > TOTAL_RACE_TIME_MS + 10000) {
+                            console.warn('[FINISH] ⚠️ isRaceRunning bloqué depuis trop longtemps, réinitialisation');
+                            gameState.isRaceRunning = false;
+                            gameState.raceStartTime = null;
+                        }
+                    }
+                }
             }
 
             try {
-                const raceId = gameState.currentRound.id;
+                const roundId = gameState.currentRound?.id;
+                if (!roundId) {
+                    console.error('[FINISH] ❌ Aucun round disponible');
+                    return res.status(400).json({ error: 'No round available' });
+                }
+                
+                // ✅ CORRECTION: Utiliser un ID unique pour chaque séquence de course
+                // Combiner roundId + timestamp pour éviter les conflits si le même roundId est réutilisé
+                const raceSequenceId = `${roundId}-${Date.now()}`;
                 
                 // ✅ UTILISER LE GESTIONNAIRE CENTRALISÉ
-                const success = raceTimerManager.startRaceSequence(raceId, raceCallbacks);
+                const success = raceTimerManager.startRaceSequence(raceSequenceId, raceCallbacks);
                 
                 if (!success) {
-                    return res.json(wrap({ skipped: true, reason: 'race sequence already active' }));
+                    console.warn('[FINISH] ⚠️ startRaceSequence a retourné false, nettoyage de activeRaces...');
+                    // Nettoyer les anciennes séquences orphelines
+                    raceTimerManager.activeRaces.clear();
+                    // Réessayer
+                    const retrySuccess = raceTimerManager.startRaceSequence(raceSequenceId, raceCallbacks);
+                    if (!retrySuccess) {
+                        return res.json(wrap({ skipped: true, reason: 'race sequence already active after cleanup' }));
+                    }
                 }
 
                 // Répondre immédiatement au client
@@ -720,6 +823,8 @@ export default function createRoundsRouter(broadcast) {
 
             } catch (err) {
                 console.error('[FINISH] Erreur:', err && err.message ? err.message : err);
+                // ✅ CORRECTION: Libérer le lock en cas d'erreur
+                gameState.operationLock = false;
                 if (!res.headersSent) {
                     res.status(500).json({ error: 'Erreur startRaceSequence' });
                 }

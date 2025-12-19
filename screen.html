@@ -1126,15 +1126,6 @@
                                 console.log('🏁 Course démarrée - affichage movie_screen (T=' + Date.now() + ')');
                                 window.raceStartTime = Date.now();  // ✅ Tracker pour logs
                                 
-                                // ✅ CORRECTION: Désactiver le système de screens automatique
-                                // Le système de screens (webclient.js) active automatiquement finish_screen
-                                // mais nous voulons que WebSocket gère les transitions
-                                if (window.client && window.client._screen) {
-                                    console.log('⚠️ Désactivation du système de screens automatique pour laisser WebSocket gérer');
-                                    // Empêcher le système de screens d'activer finish_screen automatiquement
-                                    window.websocketManagedTransitions = true;
-                                }
-                                
                                 // ✅ CORRECTION CRITIQUE: Mettre à jour le GameManager avec les données du round
                                 // Le Movie a besoin de ces données pour s'initialiser
                                 if (window.client && window.client._context) {
@@ -1144,10 +1135,11 @@
                                     }
                                     
                                     // ✅ Initialiser le Movie via le système de screens
-                                    // Le système de screens gère l'initialisation du Movie correctement
+                                    // Le système de screens gère l'initialisation du Movie et la transition automatique vers finish_screen
                                     try {
                                         // Activer MovieScreen via le système de screens
                                         // Cela va initialiser le Movie avec les données du GameManager
+                                        // Le Movie appellera automatiquement onFinish() quand il se terminera
                                         console.log('✅ Activation de MovieScreen via système de screens');
                                         window.client._activateMovieScreen();
                                         
@@ -1188,114 +1180,47 @@
                                 $('#timeRemainingDisplay').hide();
                                 $('.progress-container').hide();
                                 
-                                // ✅ Afficher le écran de course
-                                $('.screen').removeClass('active');
-                                $('.movie_screen').addClass('active');
-                                
-                                console.log('   → Movie screen affiché, attente des événements WebSocket (race_end)...');
-                                // ✅ NE PAS appeler attendreFinDeCourse() - les événements WebSocket gèrent tout
+                                // ✅ Le système de screens gère l'affichage de movie_screen automatiquement
+                                // Pas besoin de le faire manuellement ici
+                                console.log('   → Movie screen initialisé, le Movie gère automatiquement la transition vers finish_screen');
                                 break;
                                 
                             case 'race_end':
-                                // ✅ PROTECTION: Ignorer les doublons race_end
-                                if (data.roundId === lastRaceEndId) {
-                                    console.warn('⚠️ race_end doublon reçu pour round ' + data.roundId + ', ignoré');
-                                    break;
-                                }
-                                lastRaceEndId = data.roundId;
-                                
-                                // ✅ PROTECTION: Ne pas afficher finish_screen si déjà affiché
-                                if ($('.finish_screen').hasClass('active')) {
-                                    console.warn('⚠️ finish_screen déjà actif, race_end ignoré pour éviter double affichage');
-                                    break;
-                                }
-                                
-                                // ✅ Nettoyer le Movie quand on quitte movie_screen
-                                if (window.client && window.client._screen) {
-                                    try {
-                                        console.log('✅ Nettoyage du Movie...');
-                                        window.client._screen.deinit();
-                                    } catch (error) {
-                                        console.warn('⚠️ Erreur lors du nettoyage du Movie:', error);
-                                    }
-                                }
-                                
-                                console.log('🏆 Course terminée - affichage finish_screen (T+' + (Date.now() - window.raceStartTime) + 'ms)');
-                                // ✅ Afficher le finish_screen (SANS résultats pour le moment)
-                                $('.screen').removeClass('active');
-                                $('.finish_screen').addClass('active');
-                                $('.new_game').css('visibility', 'visible');
-                                
-                                // ✅ Réafficher le header (mais pas le timer du prochain round)
-                                $('#currentRound').show();
-                                $('#timeRemainingDisplay').show();
-                                $('.progress-container').show();
-                                
-                                // ✅ Arrêter tous les timers pendant le finish_screen
-                                if (countdownInterval) {
-                                    clearInterval(countdownInterval);
-                                    countdownInterval = null;
-                                }
-                                
-                                // ✅ Marquer que finish_screen est actif pour éviter les doublons
-                                window.finishScreenActive = true;
-                                
-                                console.log('   → finish_screen affiché, attente des résultats (race_results)');
-                                // ✅ Les résultats seront affichés quand race_results sera reçu
+                                // ✅ CORRECTION: Ne pas afficher finish_screen via WebSocket
+                                // Le Movie gère automatiquement la transition vers finish_screen via onFinish()
+                                // On utilise race_end seulement pour mettre à jour les données si nécessaire
+                                console.log('🏆 Course terminée (T+' + (Date.now() - window.raceStartTime) + 'ms)');
+                                console.log('   → Le Movie gère automatiquement la transition vers finish_screen');
+                                // ✅ Ne rien faire ici - le système de screens gère tout
                                 break;
                                 
                             case 'race_results':
-                                // ✅ CORRECTION: Mettre à jour les résultats SANS changer l'écran
-                                // Le finish_screen est déjà affiché depuis race_end
+                                // ✅ CORRECTION: Mettre à jour le GameManager avec les résultats
+                                // Le système de screens (FinishScreen) affichera automatiquement les résultats
                                 console.log('🎊 Résultats de course reçus (T+' + (Date.now() - window.raceStartTime) + 'ms)');
                                 console.log('   Winner:', data.winner?.number, 'Prize:', data.totalPrize);
                                 
-                                // ✅ PROTECTION: Vérifier que finish_screen est actif avant de mettre à jour
-                                // Si finish_screen n'est pas actif, l'afficher d'abord (cas rare)
-                                if (!$('.finish_screen').hasClass('active')) {
-                                    console.warn('⚠️ race_results reçu mais finish_screen n\'est pas actif, affichage...');
-                                    $('.screen').removeClass('active');
-                                    $('.finish_screen').addClass('active');
-                                    window.finishScreenActive = true;
-                                }
-                                
-                                // ✅ PROTECTION: Éviter de mettre à jour si finish_screen n'est pas vraiment actif
-                                if (!window.finishScreenActive) {
-                                    console.warn('⚠️ race_results ignoré - finish_screen n\'est pas marqué comme actif');
-                                    break;
-                                }
-                                
-                                // ✅ Mettre à jour les éléments du finish_screen avec les résultats
-                                if (data.winner) {
-                                    // Afficher le gagnant avec avatar et nom
-                                    const winnerName = data.winner.name || 'Inconnu';
-                                    const winnerNumber = data.winner.number || '?';
+                                // ✅ Mettre à jour le GameManager avec les résultats pour que FinishScreen les affiche
+                                if (window.client && window.client._context && data.currentRound) {
+                                    // Mettre à jour avec les données complètes incluant le winner
+                                    const roundDataWithWinner = {
+                                        ...data.currentRound,
+                                        winner: data.winner
+                                    };
+                                    window.client._context.getGameManager().updateGameFromWebSocket(roundDataWithWinner);
                                     
-                                    // Mettre à jour le nom du gagnant
-                                    $('.finish_screen .winner .name').text('№ ' + winnerNumber + ' ' + winnerName);
-                                    
-                                    // Mettre à jour l'avatar si disponible
-                                    if (data.winner.family !== undefined) {
-                                        $('.finish_screen .winner').removeClass(function(index, className) {
-                                            return (className.match(/\bfamily\d+\b/g) || []).join(' ');
-                                        });
-                                        $('.finish_screen .winner').addClass('family' + data.winner.family);
-                                    }
-                                    
-                                    console.log('✅ Gagnant affiché:', winnerName, '(#' + winnerNumber + ')');
-                                }
-                                
-                                if (data.totalPrize !== undefined) {
-                                    // Afficher le montant total
-                                    const prizeElement = $('.finish_screen .total-prize');
-                                    if (prizeElement.length > 0) {
-                                        prizeElement.text('💰 Total: ' + (data.totalPrize / 100).toFixed(2) + ' HTG');
+                                    // Si finish_screen est actif, mettre à jour l'affichage
+                                    if (window.client._screen && window.client._screen._view && typeof window.client._screen._view.update === 'function') {
+                                        const game = window.client._context.getGameManager().getGame();
+                                        if (game) {
+                                            window.client._screen._view.update(game);
+                                            console.log('✅ FinishScreen mis à jour avec les résultats');
+                                        }
                                     }
                                 }
                                 
-                                // Si des tickets sont inclus, mettre à jour le cashier
+                                // Si des tickets sont inclus, mettre en cache pour le cashier
                                 if (data.receipts && Array.isArray(data.receipts)) {
-                                    // Mettre en cache pour utilisation par le cashier
                                     window.currentRaceResults = {
                                         winner: data.winner,
                                         receipts: data.receipts,
@@ -1304,7 +1229,15 @@
                                     console.log('✅ Résultats sauvegardés pour le cashier');
                                 }
                                 
-                                console.log('   → Résultats affichés dans finish_screen, attente de new_round');
+                                console.log('   → Résultats mis à jour, le système de screens affiche automatiquement');
+                                break;
+                                
+                            case 'reload_page':
+                                console.log('🔄 Rechargement de la page demandé par le serveur (reason: ' + (data.reason || 'unknown') + ')');
+                                // Recharger la page après un court délai pour permettre au message d'être traité
+                                setTimeout(() => {
+                                    window.location.reload();
+                                }, 500);
                                 break;
                                 
                             case 'new_round':
