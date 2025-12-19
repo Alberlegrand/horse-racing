@@ -13,7 +13,7 @@ import { pool } from "../config/db.js";
 // Import cache strategy (Redis)
 import dbStrategy, { deleteTicketFromRoundCache } from "../config/db-strategy.js";
 // Import validation des montants
-import { MIN_BET_AMOUNT, MAX_BET_AMOUNT } from "../config/app.config.js";
+import { MIN_BET_AMOUNT, MAX_BET_AMOUNT, BETTING_LOCK_DURATION_MS } from "../config/app.config.js";
 
 /**
  * Crée le routeur pour les "receipts" (tickets).
@@ -808,6 +808,30 @@ export default function createReceiptsRouter(broadcast) {
         return res.status(503).json({ error: 'Round not ready. Please retry in a moment.', code: 'ROUND_NOT_PERSISTED' });
       }
 
+      // ✅ SÉCURITÉ: Vérifier si les paris sont autorisés (quelques secondes avant le lancement)
+      if (gameState.isRaceRunning) {
+        console.warn("[SECURITY] ❌ Tentative de pari pendant une course en cours");
+        return res.status(403).json({
+          error: "Les paris sont fermés pendant la course",
+          code: "BETTING_LOCKED_RACE_RUNNING"
+        });
+      }
+      
+      // Vérifier si le timer est proche de 0 (délai de sécurité)
+      if (gameState.nextRoundStartTime) {
+        const now = Date.now();
+        const timeLeft = gameState.nextRoundStartTime - now;
+        if (timeLeft > 0 && timeLeft <= BETTING_LOCK_DURATION_MS) {
+          const secondsLeft = Math.ceil(timeLeft / 1000);
+          console.warn(`[SECURITY] ❌ Tentative de pari ${secondsLeft}s avant le lancement`);
+          return res.status(403).json({
+            error: `Les paris sont fermés. Démarrage dans ${secondsLeft} seconde${secondsLeft > 1 ? 's' : ''}`,
+            code: "BETTING_LOCKED_TIMER",
+            secondsLeft: secondsLeft
+          });
+        }
+      }
+
       const receipt = req.body;
       
       // ✅ CORRECTION: S'assurer que user_id est défini depuis req.user si disponible
@@ -1117,6 +1141,30 @@ export default function createReceiptsRouter(broadcast) {
     }
 
     if (action === "delete") {
+      // ✅ SÉCURITÉ: Vérifier si l'annulation est autorisée (quelques secondes avant le lancement)
+      if (gameState.isRaceRunning) {
+        console.warn("[SECURITY] ❌ Tentative d'annulation pendant une course en cours");
+        return res.status(403).json({
+          error: "L'annulation est fermée pendant la course",
+          code: "BETTING_LOCKED_RACE_RUNNING"
+        });
+      }
+      
+      // Vérifier si le timer est proche de 0 (délai de sécurité)
+      if (gameState.nextRoundStartTime) {
+        const now = Date.now();
+        const timeLeft = gameState.nextRoundStartTime - now;
+        if (timeLeft > 0 && timeLeft <= BETTING_LOCK_DURATION_MS) {
+          const secondsLeft = Math.ceil(timeLeft / 1000);
+          console.warn(`[SECURITY] ❌ Tentative d'annulation ${secondsLeft}s avant le lancement`);
+          return res.status(403).json({
+            error: `L'annulation est fermée. Démarrage dans ${secondsLeft} seconde${secondsLeft > 1 ? 's' : ''}`,
+            code: "BETTING_LOCKED_TIMER",
+            secondsLeft: secondsLeft
+          });
+        }
+      }
+      
       const id = parseInt(req.query.id, 10);
 
       console.log(`[DELETE ATTEMPT] id=${id} currentRound=${gameState.currentRound?.id} isRaceRunning=${gameState.isRaceRunning} raceStartTime=${String(gameState.raceStartTime)} raceEndTime=${String(gameState.raceEndTime)}`);

@@ -116,6 +116,26 @@ export const NEW_ROUND_PREPARE_DELAY_MS = NEW_ROUND_PREPARE_DELAY_SECONDS * 1000
 
 /**
  * ========================================
+ * SÉCURITÉ DES PARIS
+ * ========================================
+ */
+
+/**
+ * Délai de sécurité avant le lancement de la course (en secondes)
+ * Pendant ce délai, les paris et annulations sont désactivés
+ * Peut être surchargée via BETTING_LOCK_DURATION_SECONDS
+ * Par défaut: 5 secondes
+ */
+export const BETTING_LOCK_DURATION_SECONDS = parseInt(process.env.BETTING_LOCK_DURATION_SECONDS || '5', 10);
+
+/**
+ * Délai de sécurité avant le lancement en MILLISECONDES
+ * ✅ EN MS POUR COHÉRENCE GLOBALE
+ */
+export const BETTING_LOCK_DURATION_MS = BETTING_LOCK_DURATION_SECONDS * 1000;
+
+/**
+ * ========================================
  * LIMITES DE MONTANTS DE PARIS
  * ========================================
  */

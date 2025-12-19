@@ -14,6 +14,9 @@ class App {
     constructor() {
         this.currentPage = 'dashboard';
         this.isRaceRunning = false; // État de la course pour contrôler les boutons d'annulation
+        this.bettingLocked = false; // État de verrouillage des paris (quelques secondes avant le lancement)
+        this.timerTimeLeft = 0; // Temps restant avant le lancement (en ms)
+        this.bettingLockDurationMs = 5000; // Délai de sécurité : 5 secondes avant le lancement
         this.pages = {
             // Use absolute paths to avoid relative-fetch issues when the app is loaded
             // from a nested route (e.g. /dashboard). Leading slash ensures fetch() hits
@@ -229,6 +232,13 @@ class App {
            Fonction rebet
         ------------------------- */
         const rebetTicket = async (ticketId) => {
+            // ✅ SÉCURITÉ: Vérifier si le placement de paris est autorisé
+            const bettingCheck = isBettingAllowed();
+            if (!bettingCheck.allowed) {
+                this.alertModal(`❌ ${bettingCheck.reason}. Le placement de paris n'est pas autorisé.`, 'error');
+                return;
+            }
+            
             try {
                 // Récupérer le ticket original avec ses bets
                 const ticketRes = await fetch(`/api/v1/my-bets/${ticketId}`, { credentials: 'include' });
@@ -282,6 +292,12 @@ class App {
                     bets: newBets
                 };
                 
+                // ✅ SÉCURITÉ: Vérifier si le placement de paris est autorisé
+                const bettingCheck = isBettingAllowed();
+                if (!bettingCheck.allowed) {
+                    throw new Error(bettingCheck.reason);
+                }
+                
                 const addRes = await fetch('/api/v1/receipts/?action=add', {
                     method: 'POST',
                     credentials: 'include',
@@ -314,7 +330,7 @@ class App {
         ------------------------- */
         const payTicket = async (ticketId, buttonElement = null) => {
             this.confirmModal(
-                `Confirmer le paiement du ticket #${ticketId} ?<br><br>Le décaissement sera imprimé, puis le ticket sera marqué comme payé.`,
+                `Confirmer le paiement du ticket #${ticketId} ?<br><br>Le ticket sera marqué comme payé, puis le décaissement sera imprimé.`,
                 async () => {
                     try {
                         // Get button element if not provided
@@ -330,7 +346,7 @@ class App {
                         // Attendre un court délai pour que la fenêtre se charge
                         await new Promise(resolve => setTimeout(resolve, 500));
                         
-                        // Effectuer le paiement avec enhanced fetch client ou fallback
+                        // 1️⃣ Effectuer le paiement avec enhanced fetch client ou fallback
                         let data;
                         if (window.enhancedFetch && typeof window.enhancedFetch.post === 'function') {
                             data = await window.enhancedFetch.post(
@@ -348,13 +364,33 @@ class App {
                             if (!res.ok) throw new Error(data.error || data.message || 'Erreur lors du paiement');
                         }
                         
-                        // Attendre que la DB soit mise à jour, puis rafraîchir la liste des tickets
+                        // 2️⃣ ✅ IMPRESSION DU DÉCAISSEMENT APRÈS LE PAIEMENT
+                        try {
+                            const payoutRes = await fetch(`/api/v1/receipts/?action=payout&id=${ticketId}`);
+                            if (payoutRes.ok) {
+                                const payoutHtml = await payoutRes.text();
+                                // Vérifier que printJS est disponible
+                                if (typeof printJS === 'function') {
+                                    printJS({ printable: payoutHtml, type: 'raw-html' });
+                                    console.log(`✅ [PAY] Décaissement imprimé pour le ticket #${ticketId}`);
+                                } else {
+                                    console.warn('⚠️ [PAY] printJS non disponible, décaissement non imprimé');
+                                }
+                            } else {
+                                console.warn(`⚠️ [PAY] Impossible de récupérer le décaissement (HTTP ${payoutRes.status})`);
+                            }
+                        } catch (printErr) {
+                            console.error('❌ [PAY] Erreur lors de l\'impression du décaissement:', printErr);
+                            // Ne pas bloquer le processus si l'impression échoue
+                        }
+                        
+                        // 3️⃣ Attendre que la DB soit mise à jour, puis rafraîchir la liste des tickets
                         setTimeout(() => refreshTickets(), 300);
                         
-                        // Message de confirmation
+                        // 4️⃣ Message de confirmation
                         const prizeAmount = data.data?.prize ? Number(data.data.prize).toFixed(2) : 'N/A';
                         this.alertModal(
-                            `✅ Ticket #${ticketId} payé avec succès (${prizeAmount} HTG)`,
+                            `✅ Ticket #${ticketId} payé avec succès (${prizeAmount} HTG)<br><br>Le décaissement a été envoyé à l'imprimante.`,
                             'success'
                         );
                         
@@ -372,9 +408,37 @@ class App {
         }; // end payTicket
 
         /* -------------------------
+           Vérification de sécurité : Les paris sont-ils autorisés ?
+        ------------------------- */
+        const isBettingAllowed = () => {
+            // Vérifier si une course est en cours
+            if (this.isRaceRunning) {
+                return { allowed: false, reason: 'Une course est en cours' };
+            }
+            
+            // Vérifier si le timer est proche de 0 (délai de sécurité)
+            if (this.timerTimeLeft > 0 && this.timerTimeLeft <= this.bettingLockDurationMs) {
+                const secondsLeft = Math.ceil(this.timerTimeLeft / 1000);
+                return { 
+                    allowed: false, 
+                    reason: `Les paris sont fermés. Démarrage dans ${secondsLeft} seconde${secondsLeft > 1 ? 's' : ''}` 
+                };
+            }
+            
+            return { allowed: true };
+        };
+
+        /* -------------------------
            Fonction cancelTicket pour le dashboard
         ------------------------- */
         const cancelTicket = async (ticketId, buttonElement = null) => {
+            // ✅ SÉCURITÉ: Vérifier si l'annulation est autorisée
+            const bettingCheck = isBettingAllowed();
+            if (!bettingCheck.allowed) {
+                this.alertModal(`❌ ${bettingCheck.reason}. L'annulation n'est pas autorisée.`, 'error');
+                return;
+            }
+            
             this.confirmModal(
                 `Confirmer l'annulation du ticket #${ticketId} ?`,
                 async () => {
@@ -494,6 +558,11 @@ class App {
                 }
 
                 updateTicketsTable(tickets);
+                
+                // ✅ SÉCURITÉ: Mettre à jour l'état des boutons après le rafraîchissement
+                if (this.updateBettingButtonsState) {
+                    setTimeout(() => this.updateBettingButtonsState(), 100);
+                }
             } catch (err) {
                 console.error('Erreur refreshTickets:', err);
                 this.showToast('Erreur de connexion à l\'API.', 'error');
@@ -602,6 +671,13 @@ class App {
 
             if (!progressBar || !timeDisplay) return;
 
+            // ✅ SÉCURITÉ: Mettre à jour le temps restant pour la vérification
+            this.timerTimeLeft = timeLeft;
+            this.bettingLocked = timeLeft > 0 && timeLeft <= this.bettingLockDurationMs;
+            
+            // ✅ SÉCURITÉ: Mettre à jour l'état des boutons
+            this.updateBettingButtonsState();
+
             if (timeLeft <= 0) {
                 // Temps écoulé
                 if (this.timerCountdownInterval) {
@@ -612,6 +688,8 @@ class App {
                 progressBar.style.width = '100%';
                 progressBar.classList.remove('bg-green-500', 'bg-yellow-500', 'bg-red-500');
                 progressBar.classList.add('bg-green-500');
+                this.bettingLocked = false; // Les paris sont fermés après le lancement
+                this.updateBettingButtonsState();
                 return;
             }
 
@@ -687,6 +765,55 @@ class App {
             if (timeDisplay) timeDisplay.textContent = '00:00';
         };
 
+        /* -------------------------
+           Mise à jour de l'état des boutons selon le verrouillage
+        ------------------------- */
+        const updateBettingButtonsState = () => {
+            const isLocked = this.bettingLocked || this.isRaceRunning;
+            const secondsLeft = Math.ceil(this.timerTimeLeft / 1000);
+            
+            // Désactiver/activer les boutons d'annulation
+            document.querySelectorAll('[data-action="void"]').forEach(btn => {
+                if (isLocked) {
+                    btn.disabled = true;
+                    btn.classList.add('opacity-50', 'cursor-not-allowed');
+                    btn.title = `Annulation désactivée${this.bettingLocked ? ` (démarrage dans ${secondsLeft}s)` : ' (course en cours)'}`;
+                } else {
+                    btn.disabled = false;
+                    btn.classList.remove('opacity-50', 'cursor-not-allowed');
+                    btn.title = 'Annuler le ticket';
+                }
+            });
+            
+            // Désactiver/activer les boutons de rebet
+            document.querySelectorAll('[data-action="rebet"]').forEach(btn => {
+                if (isLocked) {
+                    btn.disabled = true;
+                    btn.classList.add('opacity-50', 'cursor-not-allowed');
+                    btn.title = `Rejouer désactivé${this.bettingLocked ? ` (démarrage dans ${secondsLeft}s)` : ' (course en cours)'}`;
+                } else {
+                    btn.disabled = false;
+                    btn.classList.remove('opacity-50', 'cursor-not-allowed');
+                    btn.title = 'Rejouer ce ticket';
+                }
+            });
+            
+            // Afficher un message d'avertissement si les paris sont verrouillés
+            let warningEl = document.getElementById('bettingLockWarning');
+            if (isLocked && this.bettingLocked) {
+                if (!warningEl) {
+                    warningEl = document.createElement('div');
+                    warningEl.id = 'bettingLockWarning';
+                    warningEl.className = 'fixed top-20 left-1/2 transform -translate-x-1/2 bg-red-600 text-white px-4 py-2 rounded-lg shadow-lg z-50 text-sm font-semibold';
+                    document.body.appendChild(warningEl);
+                }
+                warningEl.textContent = `⚠️ Les paris sont fermés. Démarrage dans ${secondsLeft} seconde${secondsLeft > 1 ? 's' : ''}`;
+                warningEl.style.display = 'block';
+            } else if (warningEl) {
+                warningEl.style.display = 'none';
+            }
+        };
+
         // Stocker les fonctions pour utilisation par WebSocket
         this.dashboardRefreshTickets = refreshTickets;
         this.dashboardUpdateStats = updateStats;
@@ -694,6 +821,8 @@ class App {
         this.dashboardArreterTimer = arreterTimer;
         this.dashboardMettreAJourProgressBar = mettreAJourProgressBar;
         this.dashboardSynchroniserTimer = synchroniserTimer;
+        this.isBettingAllowed = isBettingAllowed; // Exposer la fonction de vérification
+        this.updateBettingButtonsState = updateBettingButtonsState; // Exposer la fonction de mise à jour des boutons
 
         // Rafraîchir immédiatement
         refreshTickets();
@@ -890,10 +1019,14 @@ class App {
                 return;
             }
 
+            // ✅ SÉCURITÉ: Vérifier si les paris sont autorisés
+            const isLocked = (this.isRaceRunning || (this.timerTimeLeft > 0 && this.timerTimeLeft <= this.bettingLockDurationMs));
+            const secondsLeft = Math.ceil(this.timerTimeLeft / 1000);
+            
             tickets.forEach(t => {
                 const hasPrize = t.prize && t.prize > 0;
-                // Permettre l'annulation tant que le statut est "pending"
-                const canCancel = t.status === 'pending';
+                // Permettre l'annulation tant que le statut est "pending" ET que les paris ne sont pas verrouillés
+                const canCancel = t.status === 'pending' && !isLocked;
                 
                 ticketsTableBody.innerHTML += `
                 <tr class="hover:bg-slate-700/50">
@@ -924,13 +1057,18 @@ class App {
                                 💰
                             </button>` : ''}
                         
-                        <!-- Bouton annuler (seulement si round pas terminé) -->
+                        <!-- Bouton annuler (seulement si round pas terminé ET paris non verrouillés) -->
                         ${canCancel ? `
                             <button class="px-2 py-1 bg-red-600 hover:bg-red-700 text-xs rounded" 
                                 onclick="window.cancelTicket && window.cancelTicket(${t.id || ''})"
                                 title="Annuler le ticket">
                                 ❌
-                            </button>` : ''}
+                            </button>` : (t.status === 'pending' && isLocked ? `
+                            <button class="px-2 py-1 bg-red-600/50 text-red-300 text-xs rounded opacity-50 cursor-not-allowed" 
+                                disabled
+                                title="Annulation désactivée${this.timerTimeLeft > 0 && this.timerTimeLeft <= this.bettingLockDurationMs ? ` (démarrage dans ${secondsLeft}s)` : ' (course en cours)'}">
+                                ❌
+                            </button>` : '')}
                         
                         <!-- Bouton payer (visible pour tous les tickets gagnants, même si prize = 0) -->
                         ${t.status === 'won' ? `
@@ -959,15 +1097,10 @@ class App {
             }
             
             window.app.confirmModal(
-                `Confirmer le paiement du ticket #${id} ?<br><br>Le décaissement sera imprimé, puis le ticket sera marqué comme payé.`,
+                `Confirmer le paiement du ticket #${id} ?<br><br>Le ticket sera marqué comme payé, puis le décaissement sera imprimé.`,
                 async () => {
                     try {
-                        // 1. Récupérer et imprimer le décaissement avec printJS
-                        const payoutRes = await fetch(`/api/v1/receipts/?action=payout&id=${id}`);
-                        const payoutHtml = await payoutRes.text();
-                        printJS({ printable: payoutHtml, type: 'raw-html' });
-                        
-                        // 2. Effectuer le paiement
+                        // 1️⃣ Effectuer le paiement
                         const payRes = await fetch(`/api/v1/my-bets/pay/${id}`, { method: 'POST' });
                         const data = await payRes.json();
                         
@@ -975,10 +1108,30 @@ class App {
                             throw new Error(data.error || data.message || "Erreur lors du paiement");
                         }
                         
-                        // 3. Attendre que la DB soit mise à jour, puis rafraîchir la liste des tickets
+                        // 2️⃣ ✅ IMPRESSION DU DÉCAISSEMENT APRÈS LE PAIEMENT
+                        try {
+                            const payoutRes = await fetch(`/api/v1/receipts/?action=payout&id=${id}`);
+                            if (payoutRes.ok) {
+                                const payoutHtml = await payoutRes.text();
+                                // Vérifier que printJS est disponible
+                                if (typeof printJS === 'function') {
+                                    printJS({ printable: payoutHtml, type: 'raw-html' });
+                                    console.log(`✅ [PAY] Décaissement imprimé pour le ticket #${id}`);
+                                } else {
+                                    console.warn('⚠️ [PAY] printJS non disponible, décaissement non imprimé');
+                                }
+                            } else {
+                                console.warn(`⚠️ [PAY] Impossible de récupérer le décaissement (HTTP ${payoutRes.status})`);
+                            }
+                        } catch (printErr) {
+                            console.error('❌ [PAY] Erreur lors de l\'impression du décaissement:', printErr);
+                            // Ne pas bloquer le processus si l'impression échoue
+                        }
+                        
+                        // 3️⃣ Attendre que la DB soit mise à jour, puis rafraîchir la liste des tickets
                         setTimeout(() => fetchMyBets(currentPage), 300);
                         
-                        // 4. Message de confirmation
+                        // 4️⃣ Message de confirmation
                         const prizeAmount = data.data?.prize ? Number(data.data.prize).toFixed(2) : 'N/A';
                         window.app.alertModal(
                             `✅ Ticket #${id} payé avec succès (${prizeAmount} HTG).<br><br>Le décaissement a été envoyé à l'imprimante.`,
@@ -996,6 +1149,13 @@ class App {
         async function cancelTicket(id) {
             if (!window.app) {
                 console.error('App instance non disponible');
+                return;
+            }
+            
+            // ✅ SÉCURITÉ: Vérifier si l'annulation est autorisée
+            const bettingCheck = window.app.isBettingAllowed ? window.app.isBettingAllowed() : { allowed: true };
+            if (!bettingCheck.allowed) {
+                window.app.alertModal(`❌ ${bettingCheck.reason}. L'annulation n'est pas autorisée.`, 'error');
                 return;
             }
             
@@ -1773,6 +1933,13 @@ class App {
                             }
 
                             // Envoyer la requête de création de ticket
+                            // ✅ SÉCURITÉ: Vérifier si le placement de paris est autorisé
+                            const bettingCheck = this.isBettingAllowed ? this.isBettingAllowed() : { allowed: true };
+                            if (!bettingCheck.allowed) {
+                                this.alertModal(`❌ ${bettingCheck.reason}. Le placement de paris n'est pas autorisé.`, 'error');
+                                return;
+                            }
+                            
                             const addRes = await fetch('/api/v1/receipts/?action=add', {
                                 method: 'POST',
                                 headers: { 'Content-Type': 'application/json' },
@@ -1895,6 +2062,19 @@ class App {
                     if (currentRoundEl) currentRoundEl.textContent = data.roundId;
                     if (currentRoundTimerEl) currentRoundTimerEl.textContent = `Round ${data.roundId}`;
                 }
+                
+                // ✅ SÉCURITÉ: Synchroniser l'état de verrouillage depuis le serveur
+                if (data.timerTimeLeft !== undefined) {
+                    this.timerTimeLeft = data.timerTimeLeft;
+                    this.bettingLocked = this.timerTimeLeft > 0 && this.timerTimeLeft <= this.bettingLockDurationMs;
+                }
+                if (data.isRaceRunning !== undefined) {
+                    this.isRaceRunning = data.isRaceRunning;
+                    if (data.isRaceRunning) {
+                        this.bettingLocked = true;
+                    }
+                }
+                
                 // Synchroniser le timer si disponible
                 if (this.currentPage === 'dashboard' && data.timerTimeLeft && data.timerTimeLeft > 0) {
                     const totalDuration = data.timerTotalDuration || 60000;
@@ -1924,6 +2104,38 @@ class App {
                 if (this.currentPage === 'my-bets' && this.myBetsFetchMyBets) {
                     setTimeout(() => this.myBetsFetchMyBets(1), 100);
                 }
+                
+                // ✅ SÉCURITÉ: Mettre à jour l'état des boutons après la connexion
+                if (this.updateBettingButtonsState) {
+                    setTimeout(() => this.updateBettingButtonsState(), 200);
+                }
+                break;
+
+            case 'timer_update':
+                // ✅ SÉCURITÉ: Mettre à jour le temps restant pour la vérification de sécurité
+                if (data.timer && data.timer.timeLeft !== undefined) {
+                    this.timerTimeLeft = data.timer.timeLeft;
+                    // Mettre à jour l'état de verrouillage
+                    this.bettingLocked = this.timerTimeLeft > 0 && this.timerTimeLeft <= this.bettingLockDurationMs;
+                }
+                
+                // Mettre à jour le timer si on est sur le dashboard
+                if (this.currentPage === 'dashboard' && data.timer && data.timer.timeLeft >= 0) {
+                    // Resync le timer local avec le serveur
+                    if (this.dashboardDemarrerTimer) {
+                        this.dashboardDemarrerTimer(data.timer.timeLeft, data.timer.totalDuration || 60000);
+                    }
+                    
+                    // ✅ SÉCURITÉ: Mettre à jour l'affichage des boutons selon l'état de verrouillage
+                    if (this.updateBettingButtonsState) {
+                        this.updateBettingButtonsState();
+                    }
+                }
+                
+                // ✅ SÉCURITÉ: Mettre à jour les boutons aussi sur my-bets
+                if (this.currentPage === 'my-bets' && this.updateBettingButtonsState) {
+                    this.updateBettingButtonsState();
+                }
                 break;
 
             case 'reload_page':
@@ -1938,6 +2150,18 @@ class App {
                 console.log('🆕 Nouveau tour:', data.roundId || data.game?.id);
                 // Réinitialiser l'état de la course
                 this.isRaceRunning = false;
+                this.bettingLocked = false; // Les paris sont ouverts pour le nouveau round
+                
+                // ✅ SÉCURITÉ: Mettre à jour le temps restant si disponible
+                if (data.timer && data.timer.timeLeft !== undefined) {
+                    this.timerTimeLeft = data.timer.timeLeft;
+                    this.bettingLocked = this.timerTimeLeft > 0 && this.timerTimeLeft <= this.bettingLockDurationMs;
+                }
+                
+                // ✅ SÉCURITÉ: Mettre à jour l'état des boutons
+                if (this.updateBettingButtonsState) {
+                    setTimeout(() => this.updateBettingButtonsState(), 100);
+                }
                 const newRoundId = data.roundId || data.game?.id || data.currentRound?.id;
                 // Note: betFrameOverlay est caché par main.js quand nouveau round différent
                 // Mettre à jour le round actuel immédiatement
@@ -2000,6 +2224,13 @@ class App {
                 
                 // Mettre à jour l'état de la course
                 this.isRaceRunning = true;
+                this.bettingLocked = true; // Les paris sont fermés pendant la course
+                
+                // ✅ SÉCURITÉ: Mettre à jour l'état des boutons
+                if (this.updateBettingButtonsState) {
+                    this.updateBettingButtonsState();
+                }
+                
                 // Mettre à jour le round si nécessaire
                 if (data.roundId) {
                     const currentRoundEl = document.getElementById('currentRound');

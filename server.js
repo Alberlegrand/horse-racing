@@ -347,8 +347,72 @@ async function initializeGameWithRetry(maxAttempts = 3) {
       console.log('✅ [STARTUP] WebSocket système OK');
       
       console.log('🎮 [STARTUP] Lancement du premier round...');
-      await startNewRound(broadcast);
+      
+      // ✅ CORRECTION: Vérifier si un round existe déjà (restauré depuis Redis)
+      // Si oui, ne pas en créer un nouveau, juste s'assurer que tout est prêt
+      if (gameState.currentRound && gameState.currentRound.id) {
+        console.log(`✅ [STARTUP] Round existant trouvé (ID: ${gameState.currentRound.id}), vérification des données...`);
+        
+        // Vérifier que le timer est configuré
+        if (!gameState.nextRoundStartTime) {
+          const now = Date.now();
+          gameState.nextRoundStartTime = now + ROUND_WAIT_DURATION_MS;
+          console.log(`⏱️ [STARTUP] Timer configuré pour le round existant: ${ROUND_WAIT_DURATION_MS}ms`);
+        }
+        
+        // Vérifier que les participants sont présents
+        if (!gameState.currentRound.participants || gameState.currentRound.participants.length === 0) {
+          console.warn('⚠️ [STARTUP] Round existant sans participants, création d\'un nouveau round...');
+          await startNewRound(broadcast, false);
+        } else {
+          console.log(`✅ [STARTUP] Round #${gameState.currentRound.id} prêt avec ${gameState.currentRound.participants.length} participants`);
+          
+          // Broadcast le round existant pour synchroniser les clients
+          if (broadcast) {
+            const now = Date.now();
+            broadcast({
+              event: "new_round",
+              roundId: gameState.currentRound.id,
+              game: JSON.parse(JSON.stringify(gameState.currentRound)),
+              currentRound: JSON.parse(JSON.stringify(gameState.currentRound)),
+              participants: gameState.currentRound.participants,
+              isRaceRunning: gameState.isRaceRunning,
+              raceStartTime: gameState.isRaceRunning ? gameState.raceStartTime : null,
+              raceEndTime: gameState.isRaceRunning ? gameState.raceEndTime : null,
+              gameHistory: gameState.gameHistory || [],
+              timer: {
+                timeLeft: gameState.nextRoundStartTime && gameState.nextRoundStartTime > now 
+                  ? gameState.nextRoundStartTime - now 
+                  : ROUND_WAIT_DURATION_MS,
+                totalDuration: ROUND_WAIT_DURATION_MS,
+                startTime: gameState.nextRoundStartTime ? gameState.nextRoundStartTime - ROUND_WAIT_DURATION_MS : now,
+                endTime: gameState.nextRoundStartTime || (now + ROUND_WAIT_DURATION_MS)
+              }
+            });
+          }
+        }
+      } else {
+        // Aucun round existant, créer le premier round
+        await startNewRound(broadcast, false);
+      }
+      
+      // ✅ VÉRIFICATION FINALE: S'assurer que le round est bien créé et prêt
+      if (!gameState.currentRound || !gameState.currentRound.id) {
+        throw new Error('Round non créé après startNewRound()');
+      }
+      
+      if (!gameState.currentRound.participants || gameState.currentRound.participants.length === 0) {
+        throw new Error('Round créé sans participants');
+      }
+      
+      if (!gameState.nextRoundStartTime) {
+        throw new Error('Timer non configuré pour le round');
+      }
+      
       console.log(`✅ [STARTUP] Premier round lancé avec succès (durée totale: ${Date.now() - startTime}ms)`);
+      console.log(`   📊 Round ID: ${gameState.currentRound.id}`);
+      console.log(`   👥 Participants: ${gameState.currentRound.participants.length}`);
+      console.log(`   ⏱️ Timer: ${ROUND_WAIT_DURATION_MS}ms (fin à ${new Date(gameState.nextRoundStartTime).toISOString()})`);
       
       return true;
     } catch (error) {
@@ -429,13 +493,9 @@ httpServer.listen(PORT, async () => {
     }
   }, 500);
   
-  // Démarrer automatiquement la première course après un court délai
-  setTimeout(() => {
-    if (roundsRouter.autoStartRace) {
-      console.log('🚀 Démarrage automatique de la première course...');
-      roundsRouter.autoStartRace();
-    } else {
-      console.log('⚠️ autoStartRace non disponible, attendre action finish manuelle');
-    }
-    }, 1000);
+  // ✅ SUPPRIMÉ: Plus besoin de démarrer automatiquement la course
+  // Le round est maintenant créé au démarrage avec un timer actif
+  // Les clients peuvent lancer la course quand le timer expire
+  // Le système fonctionne maintenant avec le timer client qui déclenche le lancement
+  console.log('✅ [STARTUP] Round créé et prêt. Les clients peuvent lancer la course quand le timer expire.');
 });

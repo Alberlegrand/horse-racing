@@ -205,8 +205,14 @@ export async function createNewRound(options = {}) {
             console.error('[ROUND-CREATE] ⚠️ Erreur sauvegarde gameState:', err.message);
         }
 
-        console.log(`[ROUND-CREATE] 🎉 Round #${newRoundId} créé avec succès`);
-        return newRoundId;
+            console.log(`[ROUND-CREATE] 🎉 Round #${newRoundId} créé avec succès`);
+            console.log(`[ROUND-CREATE] 📊 Vérification finale:`);
+            console.log(`   - Round ID: ${gameState.currentRound.id}`);
+            console.log(`   - Participants: ${gameState.currentRound.participants?.length || 0}`);
+            console.log(`   - Timer configuré: ${gameState.nextRoundStartTime ? 'Oui' : 'Non'}`);
+            console.log(`   - Persisté en DB: ${gameState.currentRound.persisted ? 'Oui' : 'Non'}`);
+            
+            return newRoundId;
 
     } finally {
         // 9️⃣ LIBÉRER LE LOCK
@@ -223,13 +229,17 @@ export async function createNewRound(options = {}) {
  * 
  * Archive le tour terminé et en démarre un nouveau.
  * @param {function} broadcast - La fonction pour notifier les clients WebSocket.
+ * @param {boolean} archiveCurrentRound - Si true, archive le round actuel (default: false pour démarrage)
  */
-export async function startNewRound(broadcast) {
+export async function startNewRound(broadcast, archiveCurrentRound = false) {
     console.log(`🏁 startNewRound() appelée - redirection vers createNewRound()`);
+    
+    // ✅ CORRECTION: Au démarrage, ne pas archiver si aucun round n'existe
+    const shouldArchive = archiveCurrentRound && gameState.currentRound && gameState.currentRound.id;
     
     return await createNewRound({
         broadcast: broadcast,
-        archiveCurrentRound: true,  // Archive le round actuel
+        archiveCurrentRound: shouldArchive,  // Archive seulement si un round existe
         checkLock: false             // Pas de lock au démarrage
     });
 }
