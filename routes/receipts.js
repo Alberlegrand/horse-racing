@@ -8,7 +8,7 @@ import { escapeHtml, systemToPublic } from "../utils.js";
 import { chacha20Random, chacha20RandomInt, initChaCha20 } from "../chacha20.js";
 import crypto from 'crypto';
 // DB models pour persistance des tickets
-import { createReceipt as dbCreateReceipt, createBet as dbCreateBet } from "../models/receiptModel.js";
+import { createReceipt as dbCreateReceipt, createBet as dbCreateBet, getReceiptById, getBetsByReceipt } from "../models/receiptModel.js";
 import { pool } from "../config/db.js";
 // Import cache strategy (Redis)
 import dbStrategy, { deleteTicketFromRoundCache } from "../config/db-strategy.js";
@@ -24,10 +24,62 @@ export default function createReceiptsRouter(broadcast) {
   const router = express.Router();
 
   // GET /api/v1/receipts/?action=print&id=...
-  router.get("/", (req, res) => {
+  router.get("/", async (req, res) => {
     if (req.query.action === 'print') {
       const receiptId = parseInt(req.query.id, 10);
-      const receipt = gameState.currentRound.receipts.find(r => r.id === receiptId);
+      
+      // Chercher dans le round actuel
+      let receipt = gameState.currentRound.receipts.find(r => r.id === receiptId);
+      let round = gameState.currentRound;
+      
+      // Si pas trouvé, chercher dans l'historique
+      if (!receipt) {
+        for (const historicalRound of gameState.gameHistory) {
+          receipt = (historicalRound.receipts || []).find(r => r.id === receiptId);
+          if (receipt) {
+            round = historicalRound;
+            break;
+          }
+        }
+      }
+
+      // Si toujours pas trouvé, chercher en base de données
+      if (!receipt) {
+        try {
+          console.log(`[PRINT] Recherche du ticket #${receiptId} en base de données`);
+          receipt = await getReceiptById(receiptId);
+          if (receipt) {
+            console.log(`[PRINT] ✅ Ticket #${receiptId} trouvé en base de données`);
+            // Récupérer les paris du ticket
+            let bets = await getBetsByReceipt(receiptId);
+            // Transformer les bets en format compatible avec la mémoire
+            bets = bets.map(bet => ({
+              ...bet,
+              participant: {
+                number: bet.participant_number,
+                name: bet.participant_name,
+                coeff: bet.coefficient
+              },
+              number: bet.participant_number  // Compatibility fallback
+            }));
+            receipt.bets = bets || [];
+            // Essayer de trouver le round correspondant
+            for (const historicalRound of gameState.gameHistory) {
+              if (historicalRound.id === receipt.round_id) {
+                round = historicalRound;
+                break;
+              }
+            }
+            // Si le round n'est pas trouvé, utiliser le round actuel comme fallback
+            if (!round || round.id !== receipt.round_id) {
+              console.log(`[PRINT] ⚠️ Round #${receipt.round_id} non trouvé, utilisation du round actuel`);
+              round = gameState.currentRound;
+            }
+          }
+        } catch (dbErr) {
+          console.warn(`[PRINT] Erreur lors de la requête DB pour le ticket #${receiptId}:`, dbErr.message);
+        }
+      }
 
       console.log(`🧾 Impression du ticket #${receiptId}:`, receipt);
 
@@ -352,6 +404,44 @@ export default function createReceiptsRouter(broadcast) {
             round = historicalRound;
             break;
           }
+        }
+      }
+
+      // Si toujours pas trouvé, chercher en base de données
+      if (!receipt) {
+        try {
+          console.log(`[PAYOUT] Recherche du ticket #${receiptId} en base de données`);
+          receipt = await getReceiptById(receiptId);
+          if (receipt) {
+            console.log(`[PAYOUT] ✅ Ticket #${receiptId} trouvé en base de données`);
+            // Récupérer les paris du ticket
+            let bets = await getBetsByReceipt(receiptId);
+            // Transformer les bets en format compatible avec la mémoire
+            bets = bets.map(bet => ({
+              ...bet,
+              participant: {
+                number: bet.participant_number,
+                name: bet.participant_name,
+                coeff: bet.coefficient
+              },
+              number: bet.participant_number  // Compatibility fallback
+            }));
+            receipt.bets = bets || [];
+            // Essayer de trouver le round correspondant en historique
+            for (const historicalRound of gameState.gameHistory) {
+              if (historicalRound.id === receipt.round_id) {
+                round = historicalRound;
+                break;
+              }
+            }
+            // Si le round n'est pas trouvé, utiliser le round actuel comme fallback
+            if (!round || round.id !== receipt.round_id) {
+              console.log(`[PAYOUT] ⚠️ Round #${receipt.round_id} non trouvé, utilisation du round actuel`);
+              round = gameState.currentRound;
+            }
+          }
+        } catch (dbErr) {
+          console.warn(`[PAYOUT] Erreur lors de la requête DB pour le ticket #${receiptId}:`, dbErr.message);
         }
       }
 

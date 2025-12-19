@@ -536,6 +536,67 @@
 
     <script>
         $(document).ready(function () {
+            
+            // ✨ DÉTECTEUR DE DOUBLE-CLIC POUR FULLSCREEN
+            let lastClickTime = 0;
+            const DOUBLE_CLICK_DELAY = 300; // délai en ms entre deux clics
+            
+            document.addEventListener('click', async function(e) {
+                const now = Date.now();
+                
+                // Vérifier si c'est un double-clic
+                if (now - lastClickTime < DOUBLE_CLICK_DELAY) {
+                    // Double-clic détecté
+                    e.preventDefault();
+                    e.stopPropagation();
+                    
+                    const targetElement = document.body;
+                    
+                    try {
+                        const isFullscreen = !!(
+                            document.fullscreenElement ||
+                            document.webkitFullscreenElement ||
+                            document.mozFullScreenElement ||
+                            document.msFullscreenElement
+                        );
+                        
+                        if (isFullscreen) {
+                            // Quitter le fullscreen
+                            const exitFullscreen = (
+                                document.exitFullscreen ||
+                                document.webkitExitFullscreen ||
+                                document.mozCancelFullScreen ||
+                                document.msExitFullscreen
+                            );
+                            
+                            if (exitFullscreen) {
+                                await exitFullscreen.call(document);
+                                console.log('✅ Mode plein écran désactivé');
+                            }
+                        } else {
+                            // Activer le fullscreen
+                            const requestFullscreen = (
+                                targetElement.requestFullscreen ||
+                                targetElement.msRequestFullscreen ||
+                                targetElement.mozRequestFullScreen ||
+                                targetElement.webkitRequestFullscreen
+                            );
+                            
+                            if (requestFullscreen) {
+                                await requestFullscreen.call(targetElement);
+                                console.log('✅ Mode plein écran activé (double-clic)');
+                            }
+                        }
+                    } catch (error) {
+                        console.warn('⚠️ Erreur fullscreen:', error);
+                    }
+                    
+                    lastClickTime = 0; // Réinitialiser
+                } else {
+                    // Mémoriser le temps du clic
+                    lastClickTime = now;
+                }
+            }, true); // Utiliser la capture pour intercepter tous les clics
 
             // --- Variables pour le minuteur ---
             var totalDelayMs = 60000; // Délai total par défaut (2 minutes), mis à jour par l'API

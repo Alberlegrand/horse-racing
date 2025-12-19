@@ -369,12 +369,28 @@ class App {
                             const payoutRes = await fetch(`/api/v1/receipts/?action=payout&id=${ticketId}`);
                             if (payoutRes.ok) {
                                 const payoutHtml = await payoutRes.text();
-                                // Vérifier que printJS est disponible
-                                if (typeof printJS === 'function') {
-                                    printJS({ printable: payoutHtml, type: 'raw-html' });
-                                    console.log(`✅ [PAY] Décaissement imprimé pour le ticket #${ticketId}`);
+                                console.log(`✅ [PAY] HTML du décaissement reçu pour le ticket #${ticketId}`);
+                                
+                                // Essayer printJS d'abord
+                                if (typeof window.printJS === 'function') {
+                                    console.log(`✅ [PAY] printJS disponible, déclenchement de l'impression`);
+                                    window.printJS({ printable: payoutHtml, type: 'raw-html' });
                                 } else {
-                                    console.warn('⚠️ [PAY] printJS non disponible, décaissement non imprimé');
+                                    // Fallback: créer une iframe et imprimer
+                                    console.log(`⚠️ [PAY] printJS non disponible, utilisation fallback iframe`);
+                                    const printWindow = window.open('', '', 'height=600,width=800');
+                                    if (printWindow) {
+                                        printWindow.document.write(payoutHtml);
+                                        printWindow.document.close();
+                                        // Attendre le chargement du contenu
+                                        setTimeout(() => {
+                                            printWindow.print();
+                                            // Ne pas fermer la fenêtre immédiatement pour laisser le temps d'imprimer
+                                            setTimeout(() => printWindow.close(), 500);
+                                        }, 250);
+                                    } else {
+                                        console.warn('⚠️ [PAY] Impossible d\'ouvrir la fenêtre d\'impression');
+                                    }
                                 }
                             } else {
                                 console.warn(`⚠️ [PAY] Impossible de récupérer le décaissement (HTTP ${payoutRes.status})`);
@@ -1113,18 +1129,34 @@ class App {
                             const payoutRes = await fetch(`/api/v1/receipts/?action=payout&id=${id}`);
                             if (payoutRes.ok) {
                                 const payoutHtml = await payoutRes.text();
-                                // Vérifier que printJS est disponible
-                                if (typeof printJS === 'function') {
-                                    printJS({ printable: payoutHtml, type: 'raw-html' });
-                                    console.log(`✅ [PAY] Décaissement imprimé pour le ticket #${id}`);
+                                console.log(`✅ [PAY-DASH] HTML du décaissement reçu pour le ticket #${id}`);
+                                
+                                // Essayer printJS d'abord
+                                if (typeof window.printJS === 'function') {
+                                    console.log(`✅ [PAY-DASH] printJS disponible, déclenchement de l'impression`);
+                                    window.printJS({ printable: payoutHtml, type: 'raw-html' });
                                 } else {
-                                    console.warn('⚠️ [PAY] printJS non disponible, décaissement non imprimé');
+                                    // Fallback: créer une iframe et imprimer
+                                    console.log(`⚠️ [PAY-DASH] printJS non disponible, utilisation fallback iframe`);
+                                    const printWindow = window.open('', '', 'height=600,width=800');
+                                    if (printWindow) {
+                                        printWindow.document.write(payoutHtml);
+                                        printWindow.document.close();
+                                        // Attendre le chargement du contenu
+                                        setTimeout(() => {
+                                            printWindow.print();
+                                            // Ne pas fermer la fenêtre immédiatement pour laisser le temps d'imprimer
+                                            setTimeout(() => printWindow.close(), 500);
+                                        }, 250);
+                                    } else {
+                                        console.warn('⚠️ [PAY-DASH] Impossible d\'ouvrir la fenêtre d\'impression');
+                                    }
                                 }
                             } else {
-                                console.warn(`⚠️ [PAY] Impossible de récupérer le décaissement (HTTP ${payoutRes.status})`);
+                                console.warn(`⚠️ [PAY-DASH] Impossible de récupérer le décaissement (HTTP ${payoutRes.status})`);
                             }
                         } catch (printErr) {
-                            console.error('❌ [PAY] Erreur lors de l\'impression du décaissement:', printErr);
+                            console.error('❌ [PAY-DASH] Erreur lors de l\'impression du décaissement:', printErr);
                             // Ne pas bloquer le processus si l'impression échoue
                         }
                         
@@ -2338,14 +2370,37 @@ class App {
                 const res = await fetch(`/api/v1/receipts/?action=print&id=${id}`);
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 const html = await res.text();
-                // printJS doit être présent sur la page
-                if (typeof printJS !== 'function') {
-                    throw new Error('printJS non trouvé sur la page');
+                
+                console.log(`✅ [PRINT] HTML du ticket #${id} reçu`);
+                
+                // Essayer printJS d'abord
+                if (typeof window.printJS === 'function') {
+                    console.log(`✅ [PRINT] printJS disponible, déclenchement de l'impression`);
+                    window.printJS({ printable: html, type: 'raw-html' });
+                } else {
+                    // Fallback: créer une fenêtre et imprimer
+                    console.log(`⚠️ [PRINT] printJS non disponible, utilisation fallback iframe`);
+                    const printWindow = window.open('', '', 'height=600,width=800');
+                    if (printWindow) {
+                        printWindow.document.write(html);
+                        printWindow.document.close();
+                        // Attendre le chargement du contenu
+                        setTimeout(() => {
+                            printWindow.print();
+                            // Ne pas fermer la fenêtre immédiatement pour laisser le temps d'imprimer
+                            setTimeout(() => printWindow.close(), 500);
+                        }, 250);
+                    } else {
+                        throw new Error('Impossible d\'ouvrir la fenêtre d\'impression');
+                    }
                 }
-                printJS({ printable: html, type: 'raw-html' });
             } catch (err) {
-                console.error('Erreur printTicket:', err);
-                this.showToast(err.message || 'Erreur impression', 'error');
+                console.error('❌ [PRINT] Erreur printTicket:', err);
+                if (window.app && typeof window.app.showToast === 'function') {
+                    window.app.showToast(err.message || 'Erreur impression', 'error');
+                } else {
+                    alert('Erreur impression: ' + (err.message || 'Inconnu'));
+                }
             }
         };
 

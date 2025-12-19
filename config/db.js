@@ -71,7 +71,7 @@ export const initializeDatabase = async () => {
   try {
     // Drop and recreate tables to ensure schema is correct (dev/test only)
     // In production, use proper migrations instead
-    await dropTablesIfExist();
+    //await dropTablesIfExist();
     
     await createTables();
     console.log("✅ Initialisation de la base de données réussie");
