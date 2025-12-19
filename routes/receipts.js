@@ -43,10 +43,11 @@ export default function createReceiptsRouter(broadcast) {
       let totalMise = 0;
       let totalGainPotentiel = 0;
 
-      // Génération des lignes de paris
-      const betsHTML = receipt.bets.map((bet) => {
+      // Génération des lignes de paris avec meilleure organisation
+      const betsHTML = receipt.bets.map((bet, index) => {
         const participant = bet.participant || {};
         const name = escapeHtml(participant.name || `N°${participant.number || "?"}`);
+        const number = participant.number || bet.number || "?";
         const coeff = parseFloat(participant.coeff || 0);
         // Les valeurs bet.value sont en système, convertir en publique pour l'affichage
         const miseSystem = parseFloat(bet.value || 0);
@@ -57,13 +58,24 @@ export default function createReceiptsRouter(broadcast) {
         
         return `
           <div class="bet-item">
-            <div class="bet-line">
-              <span class="bet-name">${name}</span>
-              <span class="bet-coeff">x${coeff.toFixed(2)}</span>
+            <div class="bet-header">
+              <span class="bet-number">Pari ${index + 1}</span>
+              <span class="bet-separator">•</span>
+              <span class="bet-name">N°${number} ${name}</span>
             </div>
-            <div class="bet-line">
-              <span class="bet-mise">Mise: <strong>${mise.toFixed(2)} HTG</strong></span>
-              <span class="bet-gain">Gain: <strong>${gainPot.toFixed(2)} HTG</strong></span>
+            <div class="bet-details">
+              <div class="bet-detail-row">
+                <span class="bet-label">Mise:</span>
+                <span class="bet-value">${mise.toFixed(2)} HTG</span>
+              </div>
+              <div class="bet-detail-row">
+                <span class="bet-label">Cote:</span>
+                <span class="bet-value">x${coeff.toFixed(2)}</span>
+              </div>
+              <div class="bet-detail-row bet-gain-row">
+                <span class="bet-label">Gain potentiel:</span>
+                <span class="bet-value bet-gain-value">${gainPot.toFixed(2)} HTG</span>
+              </div>
             </div>
           </div>`;
       }).join('');
@@ -96,15 +108,18 @@ export default function createReceiptsRouter(broadcast) {
           }
 
           /* --- Styles de base et standardisation --- */
+          * {
+            font-family: 'Arial', sans-serif !important;
+            color: #000 !important;
+          }
+          
           body {
-            /* Utilisation d'une police POS standard */
-            font-family: 'Courier New', 'Monaco', monospace;
             background: #fff;
             margin: 0;
             padding: 0; /* Important pour les POS */
             font-size: 12px; /* Taille de base lisible */
             line-height: 1.4;
-            color: #000; /* Assurer que le texte non-gras est noir */
+            color: #000 !important;
           }
           
           .receipt-container {
@@ -146,53 +161,119 @@ export default function createReceiptsRouter(broadcast) {
             line-height: 1.2;
             margin-bottom: 10px;
           }
+          
+          .header-info {
+            margin-top: 8px;
+            text-align: left;
+            padding: 0 5px;
+          }
+          
+          .header-line {
+            display: flex;
+            justify-content: space-between;
+            font-size: 10px;
+            line-height: 1.5;
+            padding: 2px 0;
+          }
+          
+          .header-label {
+            color: #000 !important;
+            font-weight: normal;
+          }
+          
+          .header-value {
+            font-weight: bold;
+            color: #000 !important;
+          }
 
           /* --- Section Paris --- */
           .bets-title {
-            font-size: 12px;
+            font-size: 13px;
             font-weight: bold;
             text-align: center;
-            margin-bottom: 8px;
+            margin-bottom: 10px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+          }
+          
+          .bets-list {
+            margin-bottom: 10px;
           }
           
           .bet-item {
-            margin-bottom: 8px;
-            padding-bottom: 8px;
-            border-bottom: 1px dotted #888;
+            margin-bottom: 12px;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 3px;
+            background: #f9f9f9;
           }
           .bet-item:last-child {
-            border-bottom: none;
             margin-bottom: 0;
-            padding-bottom: 0;
           }
           
-          .bet-line {
+          .bet-header {
             display: flex;
-            justify-content: space-between;
-            font-size: 12px; 
-            line-height: 1.5;
-            /* Forcer les éléments à droite à flotter si flexbox échoue */
-            /* Ajoutez ceci si les éléments ne s'alignent pas :
-            overflow: hidden; 
-            */
-          }
-          .bet-name { font-weight: bold; }
-          .bet-coeff { color: #000; font-size: 11px; } /* Noir standard */
-          .bet-mise { font-size: 12px; }
-          .bet-gain { font-weight: bold; } /* Juste gras */
-
-          /* --- Section Totaux --- */
-          .totals { margin: 10px 0; }
-          .total-line {
-            display: flex;
-            justify-content: space-between;
-            font-size: 13px; 
+            align-items: center;
+            justify-content: flex-start;
+            font-size: 12px;
             font-weight: bold;
-            padding: 4px 0;
+            margin-bottom: 6px;
+            padding-bottom: 4px;
+            border-bottom: 1px solid #ccc;
           }
-          .total-line.potential {
-            color: #000; /* Revenir au noir pour la fiabilité */
+          
+          .bet-number {
+            color: #000 !important;
+            font-size: 10px;
+            margin-right: 4px;
           }
+          
+          .bet-separator {
+            margin: 0 6px;
+            color: #000 !important;
+          }
+          
+          .bet-name {
+            flex: 1;
+            font-weight: bold;
+            color: #000 !important;
+          }
+          
+          .bet-details {
+            margin-top: 6px;
+          }
+          
+          .bet-detail-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 11px;
+            line-height: 1.6;
+            padding: 2px 0;
+          }
+          
+          .bet-label {
+            color: #000 !important;
+            font-weight: normal;
+          }
+          
+          .bet-value {
+            font-weight: bold;
+            color: #000 !important;
+          }
+          
+          .bet-gain-row {
+            margin-top: 4px;
+            padding-top: 4px;
+            border-top: 1px dashed #aaa;
+          }
+          
+          .bet-gain-value {
+            font-size: 12px;
+            color: #000 !important;
+          }
+
+          /* --- Section Totaux --- SUPPRIMÉE --- */
 
           /* --- Pied de page --- */
           .footer {
@@ -211,31 +292,28 @@ export default function createReceiptsRouter(broadcast) {
           
           <div class="header text-center">
             <h2>PARYAJ CHEVAL</h2>
-            <p>
-              Ticket #${receipt.id} | Tour #${gameState.currentRound.id}<br>
-              ${escapeHtml(createdTime)}
-            </p>
+            <div class="header-info">
+              <div class="header-line">
+                <span class="header-label">Ticket:</span>
+                <span class="header-value">#${receipt.id}</span>
+              </div>
+              <div class="header-line">
+                <span class="header-label">Tour:</span>
+                <span class="header-value">#${gameState.currentRound.id}</span>
+              </div>
+              <div class="header-line">
+                <span class="header-label">Date:</span>
+                <span class="header-value">${escapeHtml(createdTime)}</span>
+              </div>
+            </div>
           </div>
 
           <hr class="divider">
 
-          <h3 class="bets-title">Détail des Paris</h3>
+          <h3 class="bets-title">📋 Détail des Paris</h3>
 
           <div class="bets-list">
             ${betsHTML}
-          </div>
-
-          <hr class="divider">
-
-          <div class="totals">
-            <div class="total-line">
-              <span>MISE TOTALE :</span>
-              <span>${totalMise.toFixed(2)} HTG</span>
-            </div>
-            <div class="total-line potential">
-              <span>GAIN POTENTIEL :</span>
-              <span>${totalGainPotentiel.toFixed(2)} HTG</span>
-            </div>
           </div>
 
           <hr class="divider">
@@ -296,10 +374,10 @@ export default function createReceiptsRouter(broadcast) {
       const winner = (round.participants || []).find(p => p.place === 1);
       const winnerName = winner ? `${winner.name} (N°${winner.number})` : 'Non disponible';
 
-      // Calculer les totaux et préparer le détail par pari
+      // Calculer les totaux et préparer le détail par pari avec meilleure organisation
       let totalMise = 0;
       let totalGainPari = 0;
-      const betsDetailHTML = receipt.bets.map(bet => {
+      const betsDetailHTML = receipt.bets.map((bet, index) => {
         const participant = bet.participant || {};
         const miseSystem = parseFloat(bet.value || 0);
         const mise = systemToPublic(miseSystem);
@@ -308,25 +386,36 @@ export default function createReceiptsRouter(broadcast) {
         const gain = isWin ? systemToPublic(miseSystem * coeff) : 0;
         totalMise += mise;
         totalGainPari += gain;
+        const number = participant.number || bet.number || '?';
+        const name = escapeHtml(String(participant.name || ''));
 
         return `
-          <div class="info-line">
-            <span class="info-label">#${escapeHtml(String(participant.number || bet.number || '?'))} ${escapeHtml(String(participant.name || ''))}</span>
-            <span>${mise.toFixed(2)} HTG</span>
-          </div>
-          <div class="info-line">
-            <span class="info-label">Cote</span>
-            <span>x${coeff.toFixed(2)}</span>
-          </div>
-          <div class="info-line">
-            <span class="info-label">Résultat</span>
-            <span>${isWin ? 'GAGNÉ' : 'PERDU'}</span>
-          </div>
-          <div class="info-line">
-            <span class="info-label">Gain pari</span>
-            <span>${gain.toFixed(2)} HTG</span>
-          </div>
-          <hr class="divider" />`;
+          <div class="bet-detail-card">
+            <div class="bet-detail-header">
+              <span class="bet-detail-number">Pari ${index + 1}</span>
+              <span class="bet-detail-separator">•</span>
+              <span class="bet-detail-name">N°${number} ${name}</span>
+            </div>
+            <div class="bet-detail-content">
+              <div class="bet-detail-info">
+                <span class="bet-detail-label">Mise:</span>
+                <span class="bet-detail-value">${mise.toFixed(2)} HTG</span>
+              </div>
+              <div class="bet-detail-info">
+                <span class="bet-detail-label">Cote:</span>
+                <span class="bet-detail-value">x${coeff.toFixed(2)}</span>
+              </div>
+              <div class="bet-detail-info bet-detail-result ${isWin ? 'bet-won' : 'bet-lost'}">
+                <span class="bet-detail-label">Résultat:</span>
+                <span class="bet-detail-value">${isWin ? '✓ GAGNÉ' : '✗ PERDU'}</span>
+              </div>
+              ${isWin ? `
+              <div class="bet-detail-info bet-detail-gain">
+                <span class="bet-detail-label">Gain:</span>
+                <span class="bet-detail-value bet-gain-highlight">${gain.toFixed(2)} HTG</span>
+              </div>` : ''}
+            </div>
+          </div>`;
       }).join('');
 
       // Le montant total du décaissement est la somme des gains par pari (chaque pari est traité individuellement)
@@ -349,7 +438,7 @@ export default function createReceiptsRouter(broadcast) {
       box-sizing: border-box;
       background: #fff !important;
       color: #000 !important;
-      font-family: 'Arial', sans-serif;
+      font-family: 'Arial', sans-serif !important;
       text-shadow: none !important;
       box-shadow: none !important;
     }
@@ -367,63 +456,183 @@ export default function createReceiptsRouter(broadcast) {
       margin: 0 auto;
     }
 
-    /* En-tête */
+    /* En-tête amélioré */
     .header {
       text-align: center;
-      margin-bottom: 3mm;
+      margin-bottom: 4mm;
     }
 
     .header h2 {
-      font-size: 14px;
-      margin: 0;
+      font-size: 15px;
+      margin: 0 0 3mm 0;
       font-weight: bold;
+      letter-spacing: 0.5px;
     }
-
-    .header p {
-      font-size: 9px;
-      margin: 2px 0;
+    
+    .header-info {
+      margin-top: 2mm;
+      text-align: left;
+      padding: 0 2mm;
     }
-
-    /* Boîte de statut */
-    .status-box {
+    
+    .info-total {
+      background: #f5f5f5;
+      padding: 2mm;
       border: 1px solid #000;
-      text-align: center;
-      padding: 3px 0;
-      margin: 3mm 0;
-      font-size: 11px;
+      border-radius: 2px;
+      margin: 2mm 0;
+    }
+    
+    .info-value {
       font-weight: bold;
+      font-size: 11px;
     }
 
-    /* Lignes d’informations */
+    /* Boîte de statut améliorée */
+    .status-box {
+      border: 2px solid #000;
+      text-align: center;
+      padding: 4mm 2mm;
+      margin: 4mm 0;
+      font-size: 12px;
+      font-weight: bold;
+      border-radius: 3px;
+      letter-spacing: 0.5px;
+    }
+    
+    .status-box.won {
+      background: #e8f5e9;
+    }
+    
+    .status-box.lost {
+      background: #ffebee;
+    }
+
+    /* Lignes d'informations */
     .info-line {
       display: flex;
       justify-content: space-between;
       border-bottom: 1px dotted #000;
-      padding: 1.2mm 0;
+      padding: 1.5mm 0;
       font-size: 10px;
+      align-items: center;
     }
 
     .info-label {
       font-weight: bold;
+      color: #000 !important;
+    }
+    
+    /* Détails des paris améliorés */
+    .bet-detail-card {
+      margin-bottom: 3mm;
+      padding: 2.5mm;
+      border: 1px solid #000;
+      border-radius: 2px;
+      background: #fafafa;
+    }
+    
+    .bet-detail-header {
+      display: flex;
+      align-items: center;
+      font-size: 10px;
+      font-weight: bold;
+      margin-bottom: 2mm;
+      padding-bottom: 1.5mm;
+      border-bottom: 1px solid #ccc;
+    }
+    
+    .bet-detail-number {
+      color: #000 !important;
+      font-size: 9px;
+      margin-right: 3px;
+    }
+    
+    .bet-detail-separator {
+      margin: 0 4px;
+      color: #000 !important;
+    }
+    
+    .bet-detail-name {
+      flex: 1;
+      color: #000 !important;
+    }
+    
+    .bet-detail-content {
+      margin-top: 1.5mm;
+    }
+    
+    .bet-detail-info {
+      display: flex;
+      justify-content: space-between;
+      font-size: 9.5px;
+      padding: 1mm 0;
+      border-bottom: 1px dotted #ccc;
+    }
+    
+    .bet-detail-info:last-child {
+      border-bottom: none;
+    }
+    
+    .bet-detail-label {
+      font-weight: normal;
+      color: #000 !important;
+    }
+    
+    .bet-detail-value {
+      font-weight: bold;
+      color: #000 !important;
+    }
+    
+    .bet-detail-result {
+      margin-top: 1mm;
+      padding-top: 1.5mm;
+      border-top: 1px dashed #999;
+    }
+    
+    .bet-won .bet-detail-value {
+      color: #000 !important;
+    }
+    
+    .bet-lost .bet-detail-value {
+      color: #000 !important;
+    }
+    
+    .bet-detail-gain {
+      margin-top: 1mm;
+      padding-top: 1.5mm;
+      border-top: 2px solid #000;
+    }
+    
+    .bet-gain-highlight {
+      font-size: 11px;
+      color: #000 !important;
     }
 
-    /* Section Montant */
+    /* Section Montant améliorée */
     .payout-amount {
       text-align: center;
-      margin: 3mm 0;
-      border: 1px solid #000;
-      border-radius: 3px;
-      padding: 2mm 0;
+      margin: 4mm 0;
+      border: 3px solid #000;
+      border-radius: 4px;
+      padding: 4mm 2mm;
+      background: #fff;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
     }
 
     .payout-amount-label {
-      font-size: 9px;
-      margin-bottom: 2px;
+      font-size: 10px;
+      margin-bottom: 3mm;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: #000 !important;
     }
 
     .payout-amount-value {
-      font-size: 16px;
+      font-size: 20px;
       font-weight: bold;
+      color: #000 !important;
+      line-height: 1.2;
     }
 
     /* Détails des paris */
@@ -436,13 +645,23 @@ export default function createReceiptsRouter(broadcast) {
       padding-bottom: 1mm;
     }
 
-    /* Informations gagnant */
+    /* Informations gagnant améliorées */
     .winner-info {
-      border: 1px solid #000;
-      padding: 2mm;
+      border: 2px solid #006600;
+      padding: 3mm;
+      font-size: 11px;
+      margin: 4mm 0;
+      border-radius: 3px;
+      background: #e8f5e9;
+      text-align: center;
+    }
+    
+    .winner-info strong {
+      display: block;
+      margin-bottom: 2mm;
       font-size: 10px;
-      margin: 3mm 0;
-      border-radius: 2px;
+      text-transform: uppercase;
+      color: #000 !important;
     }
 
     /* Ligne séparatrice */
@@ -477,19 +696,32 @@ export default function createReceiptsRouter(broadcast) {
 <body>
   <div class="payout-container">
     <div class="header">
-      <h2>DECAISSEMENT</h2>
-      <p>Ticket #${receipt.id} | Tour #${round.id}<br>${escapeHtml(createdTime)}</p>
+      <h2>💵 DECAISSEMENT</h2>
+      <div class="header-info">
+        <div class="info-line">
+          <span class="info-label">Ticket:</span>
+          <span>#${receipt.id}</span>
+        </div>
+        <div class="info-line">
+          <span class="info-label">Tour:</span>
+          <span>#${round.id}</span>
+        </div>
+        <div class="info-line">
+          <span class="info-label">Date:</span>
+          <span>${escapeHtml(createdTime)}</span>
+        </div>
+      </div>
     </div>
 
     <hr class="divider">
 
-    <div class="status-box">
-      ${hasWon ? '*** TICKET GAGNANT ***' : '*** TICKET PERDANT ***'}
+    <div class="status-box ${hasWon ? 'won' : 'lost'}">
+      ${hasWon ? '🎉 TICKET GAGNANT 🎉' : '❌ TICKET PERDANT'}
     </div>
 
-    <div class="info-line">
-      <span class="info-label">Mise totale :</span>
-      <span>${totalMise.toFixed(2)} HTG</span>
+    <div class="info-line info-total">
+      <span class="info-label">Mise totale:</span>
+      <span class="info-value">${totalMise.toFixed(2)} HTG</span>
     </div>
 
     <h3>Détail des paris</h3>
