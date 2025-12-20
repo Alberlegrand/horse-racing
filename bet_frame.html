@@ -308,6 +308,34 @@
 
             return false;
         });
+
+        // ✅ NOUVEAU: Masquer la grille des montants après la soumission du formulaire
+        $(document).on('submit', '.create', function (e) {
+            const $form = $(this);
+            const $grid = $form.find('.amount-grid');
+            
+            // Masquer la grille avec transition
+            $grid.fadeOut(300, function () {
+                console.log('Grille des montants masquée après validation');
+            });
+        });
+
+        // ✅ NOUVEAU: Masquer la grille quand on clique ailleurs (modal behavior)
+        $(document).on('click', function (e) {
+            // Vérifier si on a cliqué sur une grille ou ses boutons
+            const $clickedElement = $(e.target);
+            const isClickOnGrid = $clickedElement.closest('.amount-grid').length > 0;
+            const isClickOnAmountBtn = $clickedElement.hasClass('amount-btn');
+            const isClickOnInput = $clickedElement.hasClass('value');
+            
+            // Si on a cliqué ailleurs (pas sur la grille, pas sur les boutons, pas sur l'input)
+            if (!isClickOnGrid && !isClickOnAmountBtn && !isClickOnInput) {
+                // Masquer toutes les grilles affichées
+                $('.amount-grid:visible').fadeOut(300, function () {
+                    console.log('Grille fermée (clic ailleurs)');
+                });
+            }
+        });
     </script>
 
 </body>
