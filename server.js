@@ -7,12 +7,13 @@ import path from "path";
 import { fileURLToPath } from "url";
 
 // Imports de nos modules
-import { gameState, startNewRound, wrap, restoreGameStateFromRedis } from "./game.js";
+import { gameState, startNewRound, wrap, restoreGameStateFromRedis, loadWinnersHistoryFromDatabase } from "./game.js";
 import createRoundsRouter from "./routes/rounds.js";
 import createInitRouter from "./routes/init.js";
 import createAuthRouter, { verifyToken, requireRole } from "./routes/auth.js";
 import createReceiptsRouter from "./routes/receipts.js";
 import createMyBetsRouter from "./routes/my_bets.js";
+import createWinnersRouter from "./routes/winners.js";
 import keepaliveRouter from "./routes/keepalive.js";
 import moneyRouter from "./routes/money.js";
 import statsRouter from "./routes/stats.js";
@@ -31,10 +32,16 @@ import { initChaCha20 } from "./chacha20.js";
 import { initializeDatabase, pool } from "./config/db.js";
 
 // Import Redis pour cache et sessions
-import { initRedis, closeRedis } from "./config/redis.js";
+import { initRedis, closeRedis, redisClient } from "./config/redis.js";
 import { cacheResponse } from "./middleware/cache.js";
-import { sessionMiddleware } from "./middleware/session.js";
 import auditMiddleware from "./middleware/audit.js";
+
+// ✅ NOUVEAU: express-session avec Redis Store (production-ready)
+import session from "express-session";
+import RedisStore from "connect-redis";
+
+// ✅ Créer le store Redis pour les sessions
+let sessionStore = null;
 
 // ✅ Import du round number manager
 import { initRoundNumberManager, initRoundIdManager } from "./utils/roundNumberManager.js";
@@ -86,6 +93,12 @@ if (restored) {
   console.log(`✅ État du jeu restauré depuis Redis après crash`);
 }
 
+// ✅ NOUVEAU: Charger l'historique des gagnants depuis la BD au démarrage
+// Permet la persistance et l'affichage après redémarrage du serveur
+await loadWinnersHistoryFromDatabase().catch(err => {
+  console.warn('⚠️ Impossible de charger l\'historique des gagnants:', err.message);
+});
+
 // =================================================================
 // ===           CONFIGURATION DU MIDDLEWARE                     ===
 // =================================================================
@@ -99,8 +112,35 @@ app.use(cookieParser());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// ✅ MIDDLEWARE: Sessions Redis
-app.use(sessionMiddleware());
+// ✅ CONFIGURATION EXPRESS-SESSION AVEC REDIS (Production-Ready)
+// Initialiser le RedisStore après que Redis soit connecté
+if (redisClient && redisClient.isOpen) {
+  sessionStore = new RedisStore({
+    client: redisClient,
+    prefix: 'session:',
+    ttl: 86400 // 24 heures
+  });
+  console.log('✅ Express-Session configuré avec Redis Store (production-ready)');
+} else {
+  console.warn('⚠️ Redis non disponible, utilisation du store en mémoire (développement seulement)');
+  // Fallback: MemoryStore pour développement (avec avertissement)
+  sessionStore = new session.MemoryStore();
+}
+
+// Middleware express-session
+app.use(session({
+  store: sessionStore,
+  secret: process.env.SESSION_SECRET || 'your-secret-key-change-in-production',
+  resave: false,
+  saveUninitialized: false,
+  cookie: {
+    secure: NODE_ENV === 'production', // HTTPS seulement en production
+    httpOnly: true,
+    sameSite: 'strict',
+    maxAge: 86400000 // 24 heures en ms
+  },
+  name: 'sessionId' // Nom du cookie
+}));
 
 // Fichiers statiques
 app.use(express.static(path.join(__dirname, "static")));
@@ -365,6 +405,8 @@ app.post("/api/v1/receipts/", verifyToken, (req, res, next) => {
 app.use("/api/v1/receipts/", createReceiptsRouter(broadcast));
 
 app.use("/api/v1/my-bets/", verifyToken, createMyBetsRouter(broadcast));
+
+app.use("/api/v1/winners/", createWinnersRouter());
 
 app.use("/api/v1/money/", verifyToken, requireRole('cashier', 'admin'), moneyRouter);
 

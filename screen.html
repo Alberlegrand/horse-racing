@@ -419,7 +419,7 @@
                             <div class="bet">
                                 <form class="create">
                                     <input type="number" placeholder="Bet" tabindex="1" class="value" min="0"
-                                        step="0.01">
+                                        step="0.01" readonly>
                                     <input type="submit" value="ok" class="confirm">
                                 </form>
                                 <div class="view">
@@ -861,6 +861,46 @@
             }
 
             /**
+             * ✅ NOUVEAU: Charge les gagnants depuis la base de données
+             * Permet la persistance après redémarrage du serveur
+             */
+            function chargerGagnantsDepuisBaseDonnees() {
+                console.log('📊 Chargement des gagnants depuis la base de données...');
+                
+                $.ajax({
+                    url: '/api/v1/winners/recent?limit=6',
+                    method: 'GET',
+                    timeout: 3000,
+                    success: function(response) {
+                        if (response.success && response.data && response.data.length > 0) {
+                            console.log(`✅ ${response.data.length} gagnants chargés depuis la BD`);
+                            
+                            // Transformer les données de la BD au format affichage
+                            const winnersFromDB = response.data.map(w => ({
+                                id: w.id,
+                                winner: {
+                                    id: w.participant_id,
+                                    number: w.number,
+                                    name: w.name,
+                                    family: w.family
+                                },
+                                totalPrize: w.prize
+                            }));
+                            
+                            // Afficher les gagnants depuis la BD
+                            afficherDerniersGagnants(winnersFromDB);
+                        } else {
+                            console.log('ℹ️ Aucun gagnant trouvé dans la BD');
+                        }
+                    },
+                    error: function(xhr, status, error) {
+                        console.warn('⚠️ Impossible de charger les gagnants depuis la BD:', error);
+                        // Continuer sans les gagnants de la BD
+                    }
+                });
+            }
+
+            /**
              * Affiche les 6 derniers gagnants dans la section dédiée
              */
             function afficherDerniersGagnants(gameHistory) {
@@ -1117,6 +1157,10 @@
                 
                 // Connecte au WebSocket (source de vérité unique)
                 connecterWebSocket();
+                
+                // ✅ NOUVEAU: Charger les gagnants depuis la BD au démarrage
+                // Cela garantit la persistance après redémarrage du serveur
+                chargerGagnantsDepuisBaseDonnees();
                 
                 // Récupération optionnelle de l'état initial (fallback pour UI rapide)
                 $.ajax({

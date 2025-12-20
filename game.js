@@ -5,6 +5,7 @@ import { chacha20Random, chacha20RandomInt, chacha20Shuffle, initChaCha20 } from
 import { pool } from './config/db.js';
 import { getNextRoundNumber, getNextRoundId, initRoundIdManager } from './utils/roundNumberManager.js';
 import { cacheSet, cacheGet, cacheDelPattern } from './config/redis.js';
+import { saveWinner, getRecentWinners } from './models/winnerModel.js';
 import dbStrategy from './config/db-strategy.js';
 import { ROUND_WAIT_DURATION_MS } from './config/app.config.js';
 
@@ -105,6 +106,20 @@ export async function createNewRound(options = {}) {
             if (!gameState.gameHistory.some(r => r.id === finishedRound.id)) {
                 gameState.gameHistory.push(finishedRound);
                 console.log(`[ROUND-CREATE] ✅ Round #${finishedRound.id} archivé dans gameHistory`);
+                
+                // ✅ NOUVEAU: Sauvegarder le gagnant en base de données
+                if (finishedRound.winner && finishedRound.winner.id) {
+                    const savedWinner = await saveWinner(finishedRound.id, {
+                        id: finishedRound.winner.id,
+                        number: finishedRound.winner.number,
+                        name: finishedRound.winner.name,
+                        family: finishedRound.winner.family,
+                        prize: finishedRound.totalPrize
+                    });
+                    if (savedWinner) {
+                        console.log(`[ROUND-CREATE] ✅ Gagnant sauvegardé en BD: ${finishedRound.winner.name} (Round #${finishedRound.id})`);
+                    }
+                }
             } else {
                 console.warn(`[ROUND-CREATE] ⚠️ Round #${finishedRound.id} déjà archivé`);
             }
@@ -296,6 +311,41 @@ export async function invalidateGameStateCache() {
         return true;
     } catch (err) {
         console.error(`⚠️ [CACHE] Erreur invalidation gameState cache:`, err.message);
+        return false;
+    }
+}
+
+/**
+ * ✅ NOUVEAU: Charge l'historique des gagnants depuis la base de données au démarrage
+ * Permet la persistance et l'affichage après redémarrage du serveur
+ */
+export async function loadWinnersHistoryFromDatabase() {
+    try {
+        const recentWinners = await getRecentWinners(10);
+        
+        if (recentWinners && recentWinners.length > 0) {
+            // Transformer les données de la BD au format gameHistory
+            const winnersWithRoundData = recentWinners.map(winner => ({
+                id: winner.id,
+                winner: {
+                    id: winner.participant_id,
+                    number: winner.number,
+                    name: winner.name,
+                    family: winner.family
+                },
+                totalPrize: winner.prize
+            }));
+            
+            // Fusionner avec l'historique existant (préférer les données de la BD)
+            gameState.gameHistory = winnersWithRoundData;
+            console.log(`✅ [STARTUP] ${recentWinners.length} gagnants chargés depuis la BD`);
+            return true;
+        } else {
+            console.log(`ℹ️ [STARTUP] Aucun gagnant trouvé dans la BD`);
+            return false;
+        }
+    } catch (err) {
+        console.error(`⚠️ [STARTUP] Erreur lors du chargement des gagnants depuis la BD:`, err.message);
         return false;
     }
 }

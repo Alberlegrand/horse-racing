@@ -96,6 +96,9 @@ export function getRedisClient() {
   return redisClient;
 }
 
+// ✅ Export direct du client Redis pour express-session
+export { redisClient };
+
 /**
  * Stocke une clé-valeur en cache avec TTL optionnel
  */

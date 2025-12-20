@@ -387,32 +387,28 @@ const createTables = async () => {
       )
     `);
 
+    // ✅ NOUVEAU: Table pour stocker l'historique des gagnants
+    // Permet la persistance et l'affichage après redémarrage du serveur
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS winners (
+        winner_id SERIAL PRIMARY KEY,
+        round_id BIGINT NOT NULL,
+        participant_id INT NOT NULL,
+        participant_number INT,
+        participant_name VARCHAR(255),
+        family INT,
+        total_prize DECIMAL(15,2) DEFAULT 0,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (round_id) REFERENCES rounds(round_id) ON DELETE CASCADE,
+        FOREIGN KEY (participant_id) REFERENCES participants(participant_id) ON DELETE CASCADE,
+        UNIQUE(round_id)
+      )
+    `);
+
     // ==========================================
     // === CRÉER LES INDICES ===
     // ==========================================
 
-    // Indices pour les performances
-    await client.query(`
-      CREATE INDEX IF NOT EXISTS idx_receipts_round_id ON receipts(round_id);
-      CREATE INDEX IF NOT EXISTS idx_receipts_user_id ON receipts(user_id);
-      CREATE INDEX IF NOT EXISTS idx_receipts_status ON receipts(status);
-      CREATE INDEX IF NOT EXISTS idx_receipts_created_at ON receipts(created_at);
-      
-      CREATE INDEX IF NOT EXISTS idx_bets_receipt_id ON bets(receipt_id);
-      CREATE INDEX IF NOT EXISTS idx_bets_participant_id ON bets(participant_id);
-      
-      CREATE INDEX IF NOT EXISTS idx_payments_receipt_id ON payments(receipt_id);
-      CREATE INDEX IF NOT EXISTS idx_payments_user_id ON payments(user_id);
-      
-      CREATE INDEX IF NOT EXISTS idx_rounds_status ON rounds(status);
-      CREATE INDEX IF NOT EXISTS idx_rounds_created_at ON rounds(created_at);
-      
-      CREATE INDEX IF NOT EXISTS idx_transaction_logs_user_id ON transaction_logs(user_id);
-      CREATE INDEX IF NOT EXISTS idx_transaction_logs_entity ON transaction_logs(entity_type, entity_id);
-      
-      CREATE INDEX IF NOT EXISTS idx_notifications_user_id ON notifications(user_id);
-      CREATE INDEX IF NOT EXISTS idx_notifications_status ON notifications(status);
-    `);
     // ==========================================
     // === INDEXES POUR PERFORMANCE ===
     // ==========================================
@@ -435,6 +431,11 @@ const createTables = async () => {
     
     // Indexes sur users
     await client.query("CREATE INDEX IF NOT EXISTS idx_users_username ON users(username)");
+    
+    // ✅ NOUVEAU: Indexes sur winners pour recherches rapides
+    await client.query("CREATE INDEX IF NOT EXISTS idx_winners_round_id ON winners(round_id)");
+    await client.query("CREATE INDEX IF NOT EXISTS idx_winners_participant_id ON winners(participant_id)");
+    await client.query("CREATE INDEX IF NOT EXISTS idx_winners_created_at ON winners(created_at DESC)");
 
     // ==========================================
     // === INSERTION DES DONNÉES PAR DÉFAUT ===
