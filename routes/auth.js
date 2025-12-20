@@ -62,7 +62,7 @@ export default function createAuthRouter() {
       });
 
       // Also store token in localStorage-compatible response
-      const redirect = user.role === 'admin' ? '/dashboard' : '/cashier';
+      const redirect = user.role === 'admin' ? '/dashboard' : '/user-dashboard';
 
       return res.json({ 
         success: true, 

@@ -58,3 +58,65 @@ export function resetRoundNumber() {
 export function getCurrentRoundNumber() {
     return currentRoundNumber;
 }
+
+// =============================================
+// ✅ NOUVEAU: ROUND ID MANAGER (Séquence BIGINT)
+// =============================================
+
+let currentRoundId = 10000000;
+
+/**
+ * Get and increment the next round ID FROM DATABASE (atomic operation)
+ * ✅ THREAD-SAFE: Utilise la séquence PostgreSQL rounds_round_id_seq
+ * ✅ PERSISTENT: Survit aux redémarrages du serveur
+ * ✅ UNIQUE: Jamais de doublon grâce à la séquence PostgreSQL
+ * @returns {number} The next unique round ID (8-digit starting from 10000000)
+ */
+export async function getNextRoundId() {
+    try {
+        const result = await pool.query(
+            `SELECT nextval('rounds_round_id_seq'::regclass) as next_id`
+        );
+        const nextId = result.rows[0].next_id;
+        console.log(`[ROUND-ID] Next round ID from DB: ${nextId}`);
+        return nextId;
+    } catch (err) {
+        console.error('[ROUND-ID] Error fetching from DB sequence:', err.message);
+        // Fallback à la version mémoire en cas d'erreur
+        currentRoundId++;
+        console.warn(`[ROUND-ID] Fallback à mémoire: ${currentRoundId}`);
+        return currentRoundId;
+    }
+}
+
+/**
+ * Initialiser le round ID manager depuis la BD
+ * À appeler au démarrage du serveur pour récupérer le dernier round_id
+ */
+export async function initRoundIdManager() {
+    try {
+        const result = await pool.query(
+            `SELECT MAX(round_id) as max_id FROM rounds`
+        );
+        const maxId = result.rows[0].max_id || 10000000;
+        currentRoundId = maxId;
+        console.log(`[ROUND-ID] Initialized from DB: ${currentRoundId}`);
+    } catch (err) {
+        console.error('[ROUND-ID] Error initializing from DB:', err.message);
+        currentRoundId = 10000000;
+    }
+}
+
+/**
+ * Reset round ID (useful for testing)
+ */
+export function resetRoundId() {
+    currentRoundId = 10000000;
+}
+
+/**
+ * Get current round ID without incrementing
+ */
+export function getCurrentRoundId() {
+    return currentRoundId;
+}

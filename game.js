@@ -3,7 +3,7 @@
 // Importer ChaCha20 RNG - cryptographiquement sécurisé pour les jeux d'argent
 import { chacha20Random, chacha20RandomInt, chacha20Shuffle, initChaCha20 } from './chacha20.js';
 import { pool } from './config/db.js';
-import { getNextRoundNumber } from './utils/roundNumberManager.js';
+import { getNextRoundNumber, getNextRoundId, initRoundIdManager } from './utils/roundNumberManager.js';
 import { cacheSet, cacheGet, cacheDelPattern } from './config/redis.js';
 import dbStrategy from './config/db-strategy.js';
 import { ROUND_WAIT_DURATION_MS } from './config/app.config.js';
@@ -49,11 +49,10 @@ export const gameState = {
     preStartTimer: null  // Timer pour le pré-démarrage du round
 };
 
-// ✅ COMPTEUR GLOBAL POUR IDS SEQUENTIELS
-let roundIdCounter = 10000000;
-
-function generateRoundId() {
-    return roundIdCounter++;
+// ✅ ROUND ID GENERATION: Utilise la séquence PostgreSQL pour garantir unicité et persistance
+// ⚠️ IMPORTANT: Appeler initRoundIdManager() au démarrage du serveur
+export async function generateRoundId() {
+    return await getNextRoundId();
 }
 
 // Simple helper pour envelopper les réponses
@@ -119,7 +118,7 @@ export async function createNewRound(options = {}) {
         }
 
         // 3️⃣ CRÉER LE NOUVEAU ROUND
-        const newRoundId = generateRoundId();
+        const newRoundId = await generateRoundId();
         const basePlaces = Array.from({ length: BASE_PARTICIPANTS.length }, (_, i) => i + 1);
         const shuffledPlaces = chacha20Shuffle(basePlaces);
 

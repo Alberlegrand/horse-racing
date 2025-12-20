@@ -37,7 +37,7 @@ import { sessionMiddleware } from "./middleware/session.js";
 import auditMiddleware from "./middleware/audit.js";
 
 // ✅ Import du round number manager
-import { initRoundNumberManager } from "./utils/roundNumberManager.js";
+import { initRoundNumberManager, initRoundIdManager } from "./utils/roundNumberManager.js";
 
 // Recréation de __dirname
 const __filename = fileURLToPath(import.meta.url);
@@ -75,6 +75,10 @@ await initializeDatabase();
 
 // ✅ Initialiser le manager de numéro de round depuis la BD
 await initRoundNumberManager();
+
+// ✅ NOUVEAU: Initialiser le manager de round ID depuis la BD
+// Cela charge le dernier round_id utilisé et assure la continuité après redémarrage
+await initRoundIdManager();
 
 // ✅ IMPORTANT: Restaurer l'état du jeu depuis Redis si serveur crash antérieur
 const restored = await restoreGameStateFromRedis();
@@ -252,12 +256,78 @@ app.get("/cashier", requireRoleHTML('cashier'), (req, res) => res.sendFile(path.
 app.get("/screen", requireAuthHTML, (req, res) => res.sendFile(path.join(__dirname, "screen.html")));
 app.get("/course-chevaux", requireAuthHTML, (req, res) => res.sendFile(path.join(__dirname, "./pages/course-chevaux.html")));
 app.get("/dashboard", requireRoleHTML('admin'), (req, res) => res.sendFile(path.join(__dirname, "./dashboard.html")));
+app.get("/user-dashboard", requireAuthHTML, (req, res) => res.sendFile(path.join(__dirname, "./pages/dashboard.html")));
 app.get("/bet_frame", requireAuthHTML, (req, res) => res.sendFile(path.join(__dirname, "bet_frame.html")));
 app.get("/my-bets", requireAuthHTML, (req, res) => res.sendFile(path.join(__dirname, "./static/pages", "my-bets.html")));
 
 
 
 // === API v1 ===
+// ✅ NOUVEAU: Health check endpoint (public, no auth required)
+// Permet de vérifier que le serveur est en bon état
+app.get('/api/v1/health', async (req, res) => {
+  try {
+    const now = Date.now();
+    
+    // Vérifier la connexion à la base de données
+    let dbHealthy = false;
+    try {
+      await pool.query('SELECT NOW()');
+      dbHealthy = true;
+    } catch (err) {
+      console.warn('[HEALTH] ⚠️ Database unhealthy:', err.message);
+    }
+    
+    // Vérifier la connexion Redis (optionnel)
+    let redisHealthy = true;
+    try {
+      if (global.redisClient) {
+        // Si Redis est disponible, faire un ping
+        await global.redisClient.ping();
+      }
+    } catch (err) {
+      console.warn('[HEALTH] ⚠️ Redis unhealthy:', err.message);
+      redisHealthy = false;
+    }
+    
+    // Vérifier si WebSocket est initialisé
+    const wsHealthy = !!wss;
+    
+    // Déterminer le statut global
+    const overallHealthy = dbHealthy && wsHealthy; // Redis est optionnel
+    const status = overallHealthy ? 'healthy' : 'degraded';
+    
+    // Retourner les infos de santé
+    return res.json({
+      status: status,
+      timestamp: now,
+      uptime: process.uptime(),
+      services: {
+        database: dbHealthy ? 'healthy' : 'unhealthy',
+        websocket: wsHealthy ? 'healthy' : 'unhealthy',
+        redis: redisHealthy ? 'healthy' : 'unavailable'
+      },
+      game: {
+        isRaceRunning: gameState.isRaceRunning,
+        currentRoundId: gameState.currentRound?.id || null,
+        totalReceipts: (gameState.currentRound?.receipts || []).length,
+        nextRoundStartTime: gameState.nextRoundStartTime,
+        timeUntilNextRound: gameState.nextRoundStartTime 
+          ? Math.max(0, gameState.nextRoundStartTime - now) 
+          : null
+      },
+      version: '1.0.0'
+    });
+  } catch (err) {
+    console.error('[HEALTH] ❌ Health check failed:', err);
+    return res.status(503).json({
+      status: 'unhealthy',
+      error: err.message,
+      timestamp: Date.now()
+    });
+  }
+});
+
 // Auth routes (no protection needed - public login endpoint)
 app.use('/api/v1/auth/', createAuthRouter());
 

@@ -71,7 +71,7 @@ export const initializeDatabase = async () => {
   try {
     // Drop and recreate tables to ensure schema is correct (dev/test only)
     // In production, use proper migrations instead
-    //await dropTablesIfExist();
+    await dropTablesIfExist();
     
     await createTables();
     console.log("✅ Initialisation de la base de données réussie");
@@ -197,9 +197,14 @@ const createTables = async () => {
       CREATE SEQUENCE IF NOT EXISTS rounds_round_number_seq START 1 INCREMENT 1
     `);
 
+    // ✅ NOUVEAU: Create the sequence for round_id (8-digit sequential IDs)
+    await client.query(`
+      CREATE SEQUENCE IF NOT EXISTS rounds_round_id_seq START 10000000 INCREMENT 1
+    `);
+
     await client.query(`
       CREATE TABLE IF NOT EXISTS rounds (
-        round_id BIGINT PRIMARY KEY,
+        round_id BIGINT PRIMARY KEY DEFAULT nextval('rounds_round_id_seq'),
         round_number INT UNIQUE NOT NULL DEFAULT nextval('rounds_round_number_seq'),
         status VARCHAR(20) CHECK (status IN ('waiting', 'running', 'finished')) DEFAULT 'waiting',
         winner_id INT,

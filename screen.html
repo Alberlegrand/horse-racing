@@ -537,6 +537,26 @@
     <script>
         $(document).ready(function () {
             
+            // ✅ INITIALISER LE WEBCLIENT AU DÉMARRAGE
+            try {
+                window.client = new WebClient();
+                window.client.init({
+                    assetPath: "/js/",
+                    receiptUrl: "/api/v1/receipts",
+                    limits: new LimitModel(0, 0),
+                    keepAliveUrl: "/api/v1/keepalive",
+                    keepAliveTick: 30000,
+                    keepAliveTimeout: 5000
+                }, {
+                    // Messages localisés (français)
+                    AJAX_TIMEOUT: "Délai d'expiration de la requête"
+                });
+                console.log('✅ WebClient initialisé avec succès');
+            } catch (err) {
+                console.error('❌ Erreur lors de l\'initialisation du WebClient:', err);
+                // Le système continuera de fonctionner même sans le WebClient
+            }
+            
             // ✨ DÉTECTEUR DE DOUBLE-CLIC POUR FULLSCREEN
             let lastClickTime = 0;
             const DOUBLE_CLICK_DELAY = 300; // délai en ms entre deux clics
@@ -1187,63 +1207,43 @@
                                 console.log('🏁 Course démarrée - affichage movie_screen (T=' + Date.now() + ')');
                                 window.raceStartTime = Date.now();  // ✅ Tracker pour logs
                                 
-                                // ✅ CORRECTION CRITIQUE: Mettre à jour le GameManager avec les données du round
-                                // Le Movie a besoin de ces données pour s'initialiser
-                                if (window.client && window.client._context) {
-                                    if (data.currentRound) {
-                                        console.log('✅ Mise à jour du GameManager avec les données de race_start');
-                                        window.client._context.getGameManager().updateGameFromWebSocket(data.currentRound);
-                                    }
-                                    
-                                    // ✅ Initialiser le Movie via le système de screens
-                                    // Le système de screens gère l'initialisation du Movie et la transition automatique vers finish_screen
-                                    try {
-                                        // Activer MovieScreen via le système de screens
-                                        // Cela va initialiser le Movie avec les données du GameManager
-                                        // Le Movie appellera automatiquement onFinish() quand il se terminera
-                                        console.log('✅ Activation de MovieScreen via système de screens');
-                                        window.client._activateMovieScreen();
-                                        
-                                        // Si le GameManager n'a pas encore les données, les récupérer
-                                        const game = window.client._context.getGameManager().getGame();
-                                        if (!game || !game.participants || game.participants.length === 0) {
-                                            console.log('⚠️ Game non disponible, récupération des données...');
-                                            window.client._context.getGameManager().getRoundRequest(function(responseGame) {
-                                                console.log('✅ Données récupérées, mise à jour du Movie...');
-                                                // Mettre à jour le Movie avec les nouvelles données
-                                                if (window.client._screen && window.client._screen._view && typeof window.client._screen._view.update === 'function') {
-                                                    window.client._screen._view.update(responseGame);
-                                                }
-                                            });
-                                        }
-                                    } catch (error) {
-                                        console.error('❌ Erreur lors de l\'initialisation du Movie:', error);
-                                        // Fallback: essayer de récupérer les données
-                                        if (window.client && window.client._context) {
-                                            window.client._context.getGameManager().getRoundRequest(function(responseGame) {
-                                                if (window.client._screen && window.client._screen._view && typeof window.client._screen._view.update === 'function') {
-                                                    window.client._screen._view.update(responseGame);
-                                                }
-                                            });
-                                        }
-                                    }
-                                } else {
-                                    console.warn('⚠️ Client non disponible, Movie ne peut pas être initialisé');
-                                }
-                                
                                 // ✅ Arrêter le timer d'attente du round
                                 if (countdownInterval) {
                                     clearInterval(countdownInterval);
                                     countdownInterval = null;
                                 }
-                                // ✅ MASQUER complètement le progress bar pendant la course
+                                
+                                // ✅ Masquer le panel timer pendant la course
                                 $('#currentRound').hide();
                                 $('#timeRemainingDisplay').hide();
                                 $('.progress-container').hide();
                                 
-                                // ✅ Le système de screens gère l'affichage de movie_screen automatiquement
-                                // Pas besoin de le faire manuellement ici
-                                console.log('   → Movie screen initialisé, le Movie gère automatiquement la transition vers finish_screen');
+                                // ✅ Initialiser le Movie via le WebClient
+                                if (window.client) {
+                                    try {
+                                        // Mettre à jour le GameManager avec les données du round
+                                        if (data.currentRound && window.client._context) {
+                                            console.log('✅ Mise à jour du GameManager avec les données de race_start');
+                                            window.client._context.getGameManager().updateGameFromWebSocket(data.currentRound);
+                                        }
+                                        
+                                        // Activer le MovieScreen
+                                        console.log('✅ Activation du MovieScreen');
+                                        window.client._activateMovieScreen();
+                                        
+                                    } catch (error) {
+                                        console.error('❌ Erreur lors de l\'initialisation du MovieScreen:', error);
+                                        // Fallback: afficher le movie_screen simplement
+                                        $('.screen').hide();
+                                        $('.screen.movie_screen').show();
+                                    }
+                                } else {
+                                    console.warn('⚠️ Client non disponible, affichage fallback du movie_screen');
+                                    $('.screen').hide();
+                                    $('.screen.movie_screen').show();
+                                }
+                                
+                                console.log('   → Movie screen initialisé');
                                 break;
                                 
                             case 'race_end':
