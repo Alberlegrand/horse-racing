@@ -1,184 +1,163 @@
 // config/keepalive.config.js
-// Configuration optimale du keepalive pour chaque environnement
+// Configuration complète du système keepalive pour la production
 
 const NODE_ENV = process.env.NODE_ENV || 'development';
 
 /**
- * Configuration Keepalive par Environnement
- * 
- * keepAliveTick: Intervalle entre les requêtes keepalive (ms)
- * keepAliveTimeout: Timeout pour une requête keepalive (ms)
- * maxRetries: Nombre de tentatives avant d'abandonner
- * healthCheckInterval: Intervalle des checks de santé serveur (ms)
- * maxConsecutiveFailures: Nombre max de failures avant alerte
+ * Configuration globale du keepalive
+ * Gère la santé du serveur et les reconnexions
  */
-
 export const KEEPALIVE_CONFIG = {
+  // ============================================
+  // PARAMÈTRES PAR ENVIRONNEMENT
+  // ============================================
+  
   development: {
-    // ⚡ En développement: plus rapide pour tester
-    keepAliveTick: 20000,           // 20 secondes
-    keepAliveTimeout: 5000,         // 5 secondes
-    maxRetries: 2,                  // 2 tentatives
-    healthCheckInterval: 30000,     // Check santé chaque 30s
-    maxConsecutiveFailures: 3,      // Alerte après 3 failures
-    enableDetailedLogs: true,
-    enableServerHealthMonitoring: true
+    // Intervalle de keepalive (ms) - Plus fréquent pour développement
+    tick: 20000,        // 20 secondes
+    
+    // Timeout pour les requêtes keepalive
+    timeout: 5000,      // 5 secondes
+    
+    // Nombre maximum de tentatives avant de marquer comme offline
+    maxRetries: 2,
+    
+    // Vérifier la santé tous les X ticks
+    healthCheckFrequency: 1,
+    
+    // Permettre les logs verbeux
+    verbose: true
   },
 
   staging: {
-    // 🔶 En staging: équilibre entre dev et production
-    keepAliveTick: 25000,           // 25 secondes
-    keepAliveTimeout: 6000,         // 6 secondes
-    maxRetries: 3,                  // 3 tentatives
-    healthCheckInterval: 45000,     // Check santé chaque 45s
-    maxConsecutiveFailures: 4,      // Alerte après 4 failures
-    enableDetailedLogs: true,
-    enableServerHealthMonitoring: true
+    tick: 25000,        // 25 secondes
+    timeout: 5000,      // 5 secondes
+    maxRetries: 3,
+    healthCheckFrequency: 2,
+    verbose: false
   },
 
   production: {
-    // 🚀 En production: robustesse maximale
-    keepAliveTick: 30000,           // 30 secondes (recommandé)
-    keepAliveTimeout: 8000,         // 8 secondes (tolérant aux pics)
-    maxRetries: 3,                  // 3 tentatives
-    healthCheckInterval: 60000,     // Check santé chaque 60s
-    maxConsecutiveFailures: 5,      // Alerte après 5 failures
-    enableDetailedLogs: false,      // Logs minimales en production
-    enableServerHealthMonitoring: true,
-    // En production, ne pas recharger page sur failures (laisser utilisateur continuer)
-    autoReloadOnFailure: false
+    // ⚠️ EN PRODUCTION: Équilibrer fréquence vs charge serveur
+    tick: 30000,        // 30 secondes - Optimal pour réduire la charge
+    timeout: 8000,      // 8 secondes - Plus tolérant pour réseau instable
+    maxRetries: 3,      // 3 tentatives avant de déclarer offline
+    healthCheckFrequency: 2,  // Vérifier santé tous les 2 ticks (60s)
+    verbose: false      // Pas de logs verbeux en production
   }
 };
 
 /**
- * Retourner la configuration pour l'environnement actuel
+ * Configuration spécifique Redis pour la production
  */
-export function getKeepaliveConfig() {
-  const config = KEEPALIVE_CONFIG[NODE_ENV] || KEEPALIVE_CONFIG.production;
-  
-  return {
-    ...config,
-    environment: NODE_ENV,
-    configVersion: 1,
-    timestamp: new Date().toISOString()
-  };
+export const REDIS_PRODUCTION_CONFIG = {
+  // URL de connexion (depuis env)
+  url: process.env.REDIS_URL || 'redis://localhost:6379',
+
+  // Options de socket
+  socket: {
+    // Délai d'attente pour la connexion
+    connectTimeout: 5000,
+
+    // Garder la connexion alive même au repos
+    keepAlive: 30000,    // 30 secondes
+
+    // Stratégie de reconnexion avec backoff exponentiel
+    reconnectStrategy: (retries) => {
+      // Délai: 100ms * 2^retries, max 10 secondes
+      const delay = Math.min(100 * Math.pow(2, retries), 10000);
+      console.log(`[REDIS] Reconnexion tentative ${retries} (délai: ${delay}ms)`);
+      return delay;
+    }
+  },
+
+  // Timeouts
+  commandsQueueBehavior: 'auto' // Requêtes mises en queue en cas de déconnexion
+
+  // Commandes automatiques au démarrage
+  // lazyConnect: false (défaut - connecter immédiatement)
+};
+
+/**
+ * Configuration du healthcheck du serveur
+ */
+export const HEALTHCHECK_CONFIG = {
+  // Seuils d'alerte mémoire
+  memory: {
+    // Avertissement si usage > 80%
+    warningThreshold: 80,
+    
+    // Critique si usage > 90%
+    criticalThreshold: 90,
+    
+    // Vérifier en MB (pour logs)
+    warningMB: 500
+  },
+
+  // Détails de santé à retourner
+  includeDetails: {
+    uptime: true,
+    memory: true,
+    redis: true,
+    timestamp: true
+  }
+};
+
+/**
+ * Obtenir la configuration pour l'environnement actuel
+ */
+export function getConfig() {
+  return KEEPALIVE_CONFIG[NODE_ENV] || KEEPALIVE_CONFIG.production;
 }
 
 /**
- * Optimisations par cas d'usage
+ * Obtenir la configuration du healthcheck
  */
-export const KEEPALIVE_PRESETS = {
-  // Cas normal: utilisateur à l'écran, jeu actif
-  active: {
-    keepAliveTick: 30000,
-    keepAliveTimeout: 8000,
-    maxRetries: 3
-  },
-
-  // Cas idle: utilisateur loin de l'écran mais connecté
-  idle: {
-    keepAliveTick: 60000,      // Plus lent pour économiser bande passante
-    keepAliveTimeout: 10000,
-    maxRetries: 2
-  },
-
-  // Cas mobile: réseau potentiellement instable
-  mobile: {
-    keepAliveTick: 20000,      // Plus rapide pour détecter déconnexions
-    keepAliveTimeout: 10000,   // Plus tolérant au lag
-    maxRetries: 4              // Plus de tentatives
-  },
-
-  // Cas haute latence: serveur loin ou réseau lent
-  highLatency: {
-    keepAliveTick: 45000,
-    keepAliveTimeout: 15000,
-    maxRetries: 4
-  },
-
-  // Cas réseau instable: wifi faible ou réseau mobile mauvais
-  unstableNetwork: {
-    keepAliveTick: 15000,      // Très rapide pour détecter vite
-    keepAliveTimeout: 12000,   // Très tolérant
-    maxRetries: 5              // Beaucoup de tentatives
-  }
-};
+export function getHealthCheckConfig() {
+  return HEALTHCHECK_CONFIG;
+}
 
 /**
- * Mesures de santé serveur
+ * Logs de configuration au démarrage
  */
-export const SERVER_HEALTH_THRESHOLDS = {
-  memory: {
-    warning: 400 * 1024 * 1024,    // 400 MB
-    critical: 600 * 1024 * 1024    // 600 MB
-  },
+export function logKeepaliveConfig() {
+  const config = getConfig();
   
-  uptime: {
-    restart_check: 60000           // Check redémarrage chaque 60s
-  },
-
-  redis: {
-    warning_latency: 500,          // ms
-    critical_latency: 2000         // ms
-  },
-
-  database: {
-    warning_latency: 1000,         // ms
-    critical_latency: 5000         // ms
-  }
-};
+  console.log(`
+════════════════════════════════════════════════════════
+📡 KEEPALIVE CONFIGURATION [${NODE_ENV.toUpperCase()}]
+════════════════════════════════════════════════════════
+✅ Intervalle: ${config.tick}ms (${(config.tick / 1000).toFixed(1)}s)
+✅ Timeout: ${config.timeout}ms
+✅ Max retries: ${config.maxRetries}
+✅ Health check chaque: ${config.healthCheckFrequency} ticks (${(config.tick * config.healthCheckFrequency / 1000).toFixed(1)}s)
+✅ Logs verbeux: ${config.verbose ? 'OUI' : 'NON'}
+════════════════════════════════════════════════════════
+  `);
+}
 
 /**
- * Messages d'état pour client
+ * Validation de la configuration
  */
-export const KEEPALIVE_MESSAGES = {
-  connecting: '🔗 Connexion au serveur...',
-  connected: '✅ Connecté',
-  retrying: '🔄 Tentative de reconnexion (%attempt%/%max%)',
-  offline: '❌ Serveur indisponible',
-  degraded: '⚠️  Serveur en santé réduite',
-  slow: '🐢 Connexion lente'
-};
-
-/**
- * Configuration pour chaque page
- */
-export const PAGE_KEEPALIVE_CONFIG = {
-  'main.js': {
-    // Page de jeu principale
-    config: 'active',
-    enableRealTimeHealthStatus: true,
-    displayHealthStatus: false
-  },
-
-  'cashier.html': {
-    // Page caissier
-    config: 'active',
-    enableRealTimeHealthStatus: true,
-    displayHealthStatus: true
-  },
-
-  'screen.html': {
-    // Écran public (moniteur)
-    config: 'active',
-    enableRealTimeHealthStatus: true,
-    displayHealthStatus: false,
-    criticalFailureAction: 'reload'  // Recharger si perte connexion
-  },
-
-  'horse.html': {
-    // Page chevaux
-    config: 'idle',
-    enableRealTimeHealthStatus: false,
-    displayHealthStatus: false
-  },
-
-  'landing.html': {
-    // Page d'accueil
-    config: 'idle',
-    enableRealTimeHealthStatus: false,
-    displayHealthStatus: false
+export function validateConfig() {
+  const config = getConfig();
+  
+  // Vérifier que tick > timeout
+  if (config.tick <= config.timeout) {
+    console.warn('⚠️ ATTENTION: keepalive.tick doit être > keepalive.timeout');
   }
-};
+  
+  // Avertir si tick est trop court en production
+  if (NODE_ENV === 'production' && config.tick < 25000) {
+    console.warn('⚠️ ATTENTION: keepalive.tick < 25s peut surcharger le serveur');
+  }
+  
+  // Avertir si tick est trop long en production
+  if (NODE_ENV === 'production' && config.tick > 60000) {
+    console.warn('⚠️ ATTENTION: keepalive.tick > 60s peut laisser expirer les sessions');
+  }
+  
+  return true;
+}
 
-export default getKeepaliveConfig();
+export default getConfig();

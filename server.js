@@ -19,6 +19,7 @@ import moneyRouter from "./routes/money.js";
 import statsRouter from "./routes/stats.js";
 import accountsRouter from "./routes/accounts.js";
 import { SERVER_WEBSOCKET_CONFIG, logWebSocketConfig } from "./config/websocket.js";
+import { logKeepaliveConfig, validateConfig } from "./config/keepalive.config.js";
 import { 
   ROUND_WAIT_DURATION_MS,
   MOVIE_SCREEN_DURATION_MS,
@@ -72,6 +73,10 @@ Timestamp: ${new Date().toISOString()}
 
 // Initialiser ChaCha20 RNG au démarrage
 initChaCha20();
+
+// ✅ Afficher la configuration du keepalive
+logKeepaliveConfig();
+validateConfig();
 
 // Initialiser Redis (avec fallback gracieux si non disponible)
 await initRedis().catch(err => {

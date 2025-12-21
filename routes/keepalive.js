@@ -3,7 +3,7 @@
 
 import express from "express";
 import { wrap } from "../game.js";
-import { redisClient } from "../config/redis.js";
+import { checkRedisHealth, getRedisHealth } from "../config/redis.js";
 
 const router = express.Router();
 const PORT = process.env.PORT || 8080;
@@ -12,7 +12,7 @@ const NODE_ENV = process.env.NODE_ENV || "development";
 // Configuration du keepalive par environnement
 const KEEPALIVE_CONFIG = {
   development: {
-    tick: 20000,      // 20 secondes (plus frequent en dev pour tester)
+    tick: 20000,      // 20 secondes
     timeout: 5000,    // 5 secondes
     maxRetries: 2
   },
@@ -22,8 +22,8 @@ const KEEPALIVE_CONFIG = {
     maxRetries: 3
   },
   production: {
-    tick: 30000,      // 30 secondes (optimal pour production)
-    timeout: 8000,    // 8 secondes (plus tolerant en production)
+    tick: 30000,      // 30 secondes
+    timeout: 8000,    // 8 secondes
     maxRetries: 3
   }
 };
@@ -36,31 +36,45 @@ async function checkServerHealth() {
     status: 'healthy',
     timestamp: new Date().toISOString(),
     uptime: process.uptime(),
-    memory: process.memoryUsage(),
+    memory: {
+      used: Math.round(process.memoryUsage().heapUsed / 1024 / 1024), // MB
+      total: Math.round(process.memoryUsage().heapTotal / 1024 / 1024) // MB
+    },
     checks: {}
   };
 
   // ✅ Vérifier Redis
-  try {
-    if (redisClient && redisClient.isOpen) {
-      const pong = await redisClient.ping();
-      health.checks.redis = pong === 'PONG' ? 'ok' : 'slow';
-    } else {
-      health.checks.redis = 'offline';
-      health.status = 'degraded';
-    }
-  } catch (err) {
-    health.checks.redis = 'error';
-    health.status = 'degraded';
-    console.error('[keepalive] Redis health check failed:', err.message);
-  }
+  const redisHealth = getRedisHealth(); // Sans attendre
+  health.checks.redis = redisHealth;
+  
+  // Vérifier la santé proactive du Redis en arrière-plan
+  checkRedisHealth().catch(() => {}); // Tenter une reconnexion si nécessaire
 
-  // ✅ Vérifier mémoire (warn si > 500MB)
-  if (health.memory.heapUsed > 500 * 1024 * 1024) {
+  // ✅ Vérifier mémoire
+  const memoryPercent = (health.memory.used / health.memory.total) * 100;
+  if (memoryPercent > 80) {
     health.checks.memory = 'warning';
     health.status = 'degraded';
+    console.warn(`[keepalive] ⚠️ Mémoire élevée: ${memoryPercent.toFixed(1)}%`);
+  } else if (memoryPercent > 90) {
+    health.checks.memory = 'critical';
+    health.status = 'critical';
+    console.error(`[keepalive] 🚨 Mémoire critique: ${memoryPercent.toFixed(1)}%`);
   } else {
     health.checks.memory = 'ok';
+  }
+
+  // Déterminer le statut global
+  if (health.checks.redis === 'offline') {
+    // Si Redis est offline, c'est "degraded" mais pas "unhealthy"
+    if (health.status !== 'critical') {
+      health.status = 'degraded';
+    }
+    console.log(`[keepalive] 🟡 Server health: degraded (redis offline, memory ok)`);
+  } else if (health.status === 'critical') {
+    console.error(`[keepalive] 🔴 Server health: CRITICAL`);
+  } else {
+    console.log(`[keepalive] ✅ Server health: healthy`);
   }
 
   return health;
@@ -78,40 +92,28 @@ router.all("/", async (req, res) => {
     // Vérifier la santé du serveur
     const health = await checkServerHealth();
 
-    // Préparer la réponse
-    const payload = {
+    // Répondre avec les infos de keepalive et health
+    res.status(200).json({
+      success: true,
       keepAliveTick: config.tick,
       keepAliveTimeout: config.timeout,
-      keepAliveUrl,
-      environment: NODE_ENV,
-      serverHealth: health.status,
-      serverTime: new Date().toISOString(),
-      configVersion: 1
-    };
-
-    // Log pour monitoring (seulement erreurs/dégradation)
-    if (health.status !== 'healthy') {
-      console.warn(`[keepalive] Server health: ${health.status}`, health.checks);
-    }
-
-    return res.json(wrap(payload));
-  } catch (error) {
-    console.error('[keepalive] Error in keepalive handler:', error);
-    
-    // Répondre avec configuration de secours
-    const host = req.get('host') || `localhost:${PORT}`;
-    const proto = req.headers['x-forwarded-proto'] || req.protocol || 'http';
-    const keepAliveUrl = `${proto}://${host}/api/v1/keepalive/`;
-
-    return res.json(wrap({
+      keepAliveUrl: keepAliveUrl,
+      serverHealth: health,
+      // Pour compatibilité avec ancien client
+      health: health.status,
+      redis: health.checks.redis
+    });
+  } catch (err) {
+    console.error('[keepalive] Erreur:', err);
+    res.status(200).json({
+      success: true,
       keepAliveTick: config.tick,
       keepAliveTimeout: config.timeout,
-      keepAliveUrl,
-      environment: NODE_ENV,
-      serverHealth: 'degraded',
-      serverTime: new Date().toISOString(),
-      error: 'Partial health check failure'
-    }));
+      serverHealth: {
+        status: 'unknown',
+        error: err.message
+      }
+    });
   }
 });
 

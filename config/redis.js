@@ -1,16 +1,19 @@
 import redis from 'redis';
 
 const REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379';
+const NODE_ENV = process.env.NODE_ENV || 'development';
 
 let redisClient = null;
 let isConnecting = false;
-let hasLoggedRedisError = false; // Prevent log spam
+let hasLoggedRedisError = false;
+let redisHealthy = false; // Track Redis health status
+let lastRedisAttempt = 0;
 
 /**
- * Initialise et retourne le client Redis
+ * Initialise et retourne le client Redis avec reconnection automatique
  */
 export async function initRedis() {
-  if (redisClient) {
+  if (redisClient && redisHealthy) {
     return redisClient;
   }
 
@@ -18,46 +21,60 @@ export async function initRedis() {
     // Attend que la connexion soit établie
     return new Promise((resolve, reject) => {
       const checkInterval = setInterval(() => {
-        if (redisClient) {
+        if (redisHealthy) {
           clearInterval(checkInterval);
           resolve(redisClient);
         }
       }, 100);
       setTimeout(() => {
         clearInterval(checkInterval);
-        reject(new Error('Redis connexion timeout'));
+        resolve(null); // Resolve with null instead of rejecting
       }, 5000);
     });
   }
 
   isConnecting = true;
+  lastRedisAttempt = Date.now();
 
   try {
     redisClient = redis.createClient({ 
       url: REDIS_URL,
       socket: {
         reconnectStrategy: (retries) => {
-          if (retries > 3) {
-            return new Error('Max Redis connection retries reached');
+          const delay = Math.min(1000 * Math.pow(2, retries), 10000); // Max 10s
+          if (NODE_ENV === 'production') {
+            console.log(`[REDIS] Tentative de reconnexion ${retries}... (délai: ${delay}ms)`);
           }
-          return retries * 100; // Exponential backoff
-        }
+          return delay;
+        },
+        connectTimeout: 5000,
+        keepAlive: 30000 // 30s keepalive
       }
     });
 
     redisClient.on('error', (err) => {
-      // Only log once during initialization
+      redisHealthy = false;
       if (isConnecting && !hasLoggedRedisError) {
-        console.warn('⚠️ Redis non disponible (mode dégradé activé)');
+        console.warn(`⚠️ [REDIS] Erreur de connexion: ${err.message}`);
+        console.warn(`⚠️ [REDIS] Mode dégradé activé - serveur fonctionne sans cache`);
         hasLoggedRedisError = true;
       }
-      redisClient = null;
-      isConnecting = false;
     });
 
     redisClient.on('connect', () => {
-      console.log('✅ Connecté à Redis');
-      hasLoggedRedisError = false; // Reset flag on successful connection
+      redisHealthy = true;
+      console.log('✅ [REDIS] Connecté avec succès');
+      hasLoggedRedisError = false;
+    });
+
+    redisClient.on('ready', () => {
+      redisHealthy = true;
+      console.log('✅ [REDIS] Prêt et fonctionnel');
+    });
+
+    redisClient.on('reconnecting', () => {
+      redisHealthy = false;
+      console.log('🔄 [REDIS] Reconnexion en cours...');
     });
 
     // Set a timeout for connection attempt
@@ -68,25 +85,63 @@ export async function initRedis() {
 
     try {
       await Promise.race([connectionPromise, timeoutPromise]);
+      redisHealthy = true;
       isConnecting = false;
       return redisClient;
     } catch (timeoutErr) {
       // Connection timed out or failed - continue without Redis
-      if (!hasLoggedRedisError) {
-        hasLoggedRedisError = true;
-      }
-      redisClient = null;
+      console.warn(`⚠️ [REDIS] Timeout de connexion (${timeoutErr.message})`);
+      redisHealthy = false;
       isConnecting = false;
       return null;
     }
   } catch (err) {
-    if (!hasLoggedRedisError) {
-      hasLoggedRedisError = true;
-    }
-    redisClient = null;
+    console.warn(`⚠️ [REDIS] Erreur d'initialisation: ${err.message}`);
+    redisHealthy = false;
     isConnecting = false;
     return null;
   }
+}
+
+/**
+ * Vérifie la santé du Redis et tente une reconnexion si nécessaire
+ */
+export async function checkRedisHealth() {
+  if (!redisClient) {
+    // Tenter une reconnexion tous les 30 secondes
+    if (Date.now() - lastRedisAttempt > 30000) {
+      await initRedis().catch(() => {});
+    }
+    return false;
+  }
+
+  try {
+    if (redisHealthy && redisClient.isOpen) {
+      const pong = await Promise.race([
+        redisClient.ping(),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('Ping timeout')), 2000))
+      ]);
+      redisHealthy = pong === 'PONG';
+      return redisHealthy;
+    }
+    redisHealthy = false;
+    return false;
+  } catch (err) {
+    redisHealthy = false;
+    // Tenter une reconnexion si c'était la première vérification
+    if (!hasLoggedRedisError) {
+      console.log('[REDIS] Tentative de reconnexion après erreur health check');
+      await initRedis().catch(() => {});
+    }
+    return false;
+  }
+}
+
+/**
+ * Retourne la santé actuelle du Redis (sans attendre)
+ */
+export function getRedisHealth() {
+  return redisHealthy && redisClient?.isOpen ? 'ok' : 'offline';
 }
 
 /**
