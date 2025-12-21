@@ -361,37 +361,16 @@ export default function createRoundsRouter(broadcast) {
                 // Cela doit être fait ICI, après avoir déterminé le gagnant et trouvé participant_id
                 if (winnerParticipantId && winnerWithPlace && finishedRoundId) {
                     try {
-                        const { saveWinner } = await import('../models/winnerModel.js');
-                        
-                        // ✅ CORRECTION CRITIQUE: Vérifier que toutes les données nécessaires sont présentes
+                        // ✅ Winners are now persisted via localStorage on frontend
+                        // No database storage needed for winners display
                         if (winnerWithPlace.number && winnerWithPlace.name) {
-                            console.log(`[RACE-RESULTS] 💾 Sauvegarde du gagnant dans winners table:`);
+                            console.log(`[RACE-RESULTS] 🏆 Gagnant de la course:`);
                             console.log(`   - Round ID: ${finishedRoundId}`);
-                            console.log(`   - Participant ID: ${winnerParticipantId}`);
                             console.log(`   - Number: ${winnerWithPlace.number}`);
                             console.log(`   - Name: ${winnerWithPlace.name}`);
                             console.log(`   - Family: ${winnerWithPlace.family ?? 0}`);
                             console.log(`   - Prize: ${totalPrizeAll}`);
-                            
-                            const savedWinner = await saveWinner(finishedRoundId, {
-                                id: winnerParticipantId,
-                                number: winnerWithPlace.number,
-                                name: winnerWithPlace.name,
-                                family: winnerWithPlace.family ?? 0,
-                                prize: totalPrizeAll
-                            });
-                            
-                            if (savedWinner) {
-                                console.log(`[RACE-RESULTS] ✅ Gagnant sauvegardé dans winners table: ${winnerWithPlace.name} (Round #${finishedRoundId}, Prize: ${totalPrizeAll})`);
-                                console.log(`[RACE-RESULTS] 📊 Vérification sauvegarde:`, {
-                                    round_id: savedWinner.round_id,
-                                    participant_id: savedWinner.participant_id,
-                                    participant_number: savedWinner.participant_number,
-                                    participant_name: savedWinner.participant_name
-                                });
-                            } else {
-                                console.error(`[RACE-RESULTS] ❌ Échec sauvegarde gagnant pour Round #${finishedRoundId}`);
-                            }
+                            console.log(`[RACE-RESULTS] 💾 Winner will be persisted via localStorage on frontend (not DB)`);
                         } else {
                             console.error(`[RACE-RESULTS] ❌ Données gagnant incomplètes:`, {
                                 number: winnerWithPlace.number,
@@ -641,14 +620,10 @@ export default function createRoundsRouter(broadcast) {
                 gameState.operationLock = false;
                 console.log('[LOCK] 🔓 operationLock libéré par onCleanup()');
                 
-                // ✅ NOUVEAU: Envoyer un message WebSocket pour recharger la page
-                broadcast({
-                    event: 'reload_page',
-                    reason: 'cleanup_complete',
-                    roundId: gameState.currentRound?.id || null,
-                    serverTime: Date.now()
-                });
-                console.log('[RACE-SEQ] 📡 Message WebSocket reload_page envoyé après cleanup');
+                // ✅ CORRECTION: Ne pas recharger la page
+                // Les événements WebSocket (race_results, new_round) gèrent la mise à jour de l'UI
+                // Recharger causait une race condition avec localStorage et round_winner
+                console.log('[RACE-SEQ] ✅ Cleanup complete - UI sera mise à jour via WebSocket (race_results, new_round)');
             }
         }
     };

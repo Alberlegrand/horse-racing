@@ -7,13 +7,12 @@ import path from "path";
 import { fileURLToPath } from "url";
 
 // Imports de nos modules
-import { gameState, startNewRound, wrap, restoreGameStateFromRedis, loadWinnersHistoryFromDatabase } from "./game.js";
+import { gameState, startNewRound, wrap, restoreGameStateFromRedis } from "./game.js";
 import createRoundsRouter from "./routes/rounds.js";
 import createInitRouter from "./routes/init.js";
 import createAuthRouter, { verifyToken, requireRole } from "./routes/auth.js";
 import createReceiptsRouter from "./routes/receipts.js";
 import createMyBetsRouter from "./routes/my_bets.js";
-import createWinnersRouter from "./routes/winners.js";
 import keepaliveRouter from "./routes/keepalive.js";
 import moneyRouter from "./routes/money.js";
 import statsRouter from "./routes/stats.js";
@@ -107,11 +106,8 @@ if (restored) {
   console.log(`✅ État du jeu restauré depuis Redis après crash`);
 }
 
-// ✅ NOUVEAU: Charger l'historique des gagnants depuis la BD au démarrage
-// Permet la persistance et l'affichage après redémarrage du serveur
-await loadWinnersHistoryFromDatabase().catch(err => {
-  console.warn('⚠️ Impossible de charger l\'historique des gagnants:', err.message);
-});
+// ✅ Winners are now handled via localStorage on frontend
+// No need to load from database at startup
 
 // =================================================================
 // ===           CONFIGURATION DU MIDDLEWARE                     ===
@@ -462,8 +458,6 @@ app.post("/api/v1/receipts/", verifyToken, (req, res, next) => {
 app.use("/api/v1/receipts/", createReceiptsRouter(broadcast));
 
 app.use("/api/v1/my-bets/", verifyToken, createMyBetsRouter(broadcast));
-
-app.use("/api/v1/winners/", createWinnersRouter());
 
 app.use("/api/v1/money/", verifyToken, requireRole('cashier', 'admin'), moneyRouter);
 
