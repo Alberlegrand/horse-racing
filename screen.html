@@ -867,56 +867,51 @@
 
             /**
              * ✅ NOUVEAU: Charge les gagnants depuis la base de données
-             * Permet la persistance après redémarrage du serveur
+             * Supprimé: Cette fonction chargeait les gagnants depuis la BD
+             * CORRECTION: La liste des gagnants est maintenant remplie UNIQUEMENT
+             * par l'événement round_winner du finish_screen (source unique: game.getWinner())
              */
-            function chargerGagnantsDepuisBaseDonnees() {
-                console.log('📊 Chargement des gagnants depuis la base de données...');
-                
-                $.ajax({
-                    url: '/api/v1/winners/recent?limit=6',
-                    method: 'GET',
-                    timeout: 3000,
-                    success: function(response) {
-                        if (response.success && response.data && response.data.length > 0) {
-                            console.log(`✅ ${response.data.length} gagnants chargés depuis la BD`);
-                            
-                            // Transformer les données de la BD au format affichage
-                            const winnersFromDB = response.data.map(w => ({
-                                id: w.id,
-                                winner: {
-                                    id: w.participant_id,
-                                    number: w.number,
-                                    name: w.name,
-                                    family: w.family
-                                },
-                                totalPrize: w.prize
-                            }));
-                            
-                            // Afficher les gagnants depuis la BD
-                            afficherDerniersGagnants(winnersFromDB);
-                        } else {
-                            console.log('ℹ️ Aucun gagnant trouvé dans la BD');
-                        }
-                    },
-                    error: function(xhr, status, error) {
-                        console.warn('⚠️ Impossible de charger les gagnants depuis la BD:', error);
-                        // Continuer sans les gagnants de la BD
-                    }
-                });
-            }
 
             /**
              * Affiche les 6 derniers gagnants dans la section dédiée
              */
             function afficherDerniersGagnants(gameHistory) {
                 console.log('🏆 Mise à jour des 6 derniers gagnants...');
+                console.log('📊 Données reçues:', gameHistory);
+                
+                // ✅ CORRECTION: Filtrer et valider les données avant traitement
+                const validRounds = (gameHistory || []).filter(r => {
+                    // Vérifier que le round a un ID et un gagnant valide
+                    if (!r || !r.id) {
+                        console.warn('⚠️ Round sans ID ignoré:', r);
+                        return false;
+                    }
+                    if (!r.winner) {
+                        console.warn(`⚠️ Round #${r.id} sans gagnant ignoré`);
+                        return false;
+                    }
+                    // Vérifier que le gagnant a au moins un number et un name
+                    if (!r.winner.number && !r.winner.name) {
+                        console.warn(`⚠️ Round #${r.id} avec gagnant incomplet ignoré:`, r.winner);
+                        return false;
+                    }
+                    return true;
+                });
+                
+                if (validRounds.length === 0) {
+                    console.warn('⚠️ Aucun round valide avec gagnant trouvé');
+                    const $winnersList = $('#winnersList');
+                    $winnersList.empty();
+                    $winnersList.html('<div class="winner-item empty"><div class="winner-card"><div class="winner-inner"><div class="winner-avatar"><div class="avatar_background"><div class="avatar"></div></div></div><div><div class="winner-name-inline">-</div><div class="winner-meta">Round -</div></div></div></div></div>');
+                    return;
+                }
                 
                 // Prendre les 6 derniers rounds avec des gagnants
                 // Evite d'afficher des doublons : construire une liste unique (par round id)
                 const uniqueById = [];
                 const seen = new Set();
                 // Parcourt du plus ancien au plus récent, puis on slice(-6) pour les 6 derniers
-                const ordered = (gameHistory || []).filter(r => r && r.winner).slice(-20); // limiter
+                const ordered = validRounds.slice(-20); // limiter
                 for (let i = 0; i < ordered.length; i++) {
                     const r = ordered[i];
                     if (!seen.has(r.id)) {
@@ -925,6 +920,8 @@
                     }
                 }
                 const winnersWithRounds = uniqueById.slice(-6).reverse();
+                
+                console.log(`✅ ${winnersWithRounds.length} gagnants à afficher`);
                 
                 const $winnersList = $('#winnersList');
                 $winnersList.empty();
@@ -935,9 +932,16 @@
                     return;
                 }
                 
-                // Afficher les gagnants (même logique que finish_screen)
+                // ✅ CORRECTION: Afficher les gagnants avec validation des données
                 winnersWithRounds.forEach((round, index) => {
                     const winner = round.winner;
+                    
+                    // ✅ Validation: Vérifier que le gagnant a les données nécessaires
+                    if (!winner || (!winner.number && !winner.name)) {
+                        console.warn(`⚠️ Gagnant invalide pour round #${round.id}, ignoré`);
+                        return;
+                    }
+                    
                     const winnerItem = $('<div class="winner-item"></div>');
                     const card = $('<div class="winner-card"></div>');
                     const inner = $('<div class="winner-inner"></div>');
@@ -949,31 +953,46 @@
                     avatarBg.append(avatar);
                     avatarContainer.append(avatarBg);
 
-                    // Nom formaté comme dans finish_screen : "№ {number} {name}"
-                    const nameEl = $('<div class="winner-name-inline"></div>').text(`№ ${winner.number || '-'} ${winner.name || ''}`);
-                    // Meta: round
-                    const meta = $('<div class="winner-meta"></div>').text('Round ' + (round.id != null ? round.id : '-'));
+                    // ✅ CORRECTION: Nom formaté avec valeurs par défaut sécurisées
+                    const winnerNumber = winner.number || winner.participant_number || '-';
+                    const winnerName = winner.name || winner.participant_name || 'Unknown';
+                    const nameEl = $('<div class="winner-name-inline"></div>').text(`№ ${winnerNumber} ${winnerName}`);
+                    
+                    // Meta: round ID (utiliser round_id si id n'est pas disponible)
+                    const roundId = round.id || round.round_id || '-';
+                    const meta = $('<div class="winner-meta"></div>').text('Round ' + roundId);
 
                     // Assembler
                     inner.append(avatarContainer).append($('<div></div>').append(nameEl).append(meta));
                     card.append(inner);
-                    // Appliquer la classe family comme dans finish_screen (sur le conteneur qui contient avatar_background)
-                    if (winner.family != null) {
-                        card.addClass('family' + winner.family);
-                    }
+                    
+                    // ✅ CORRECTION: Appliquer la classe family avec valeur par défaut
+                    const familyValue = winner.family !== null && winner.family !== undefined ? winner.family : 0;
+                    card.addClass('family' + familyValue);
+                    
                     winnerItem.append(card);
-                    winnerItem.data('roundId', round.id);
+                    winnerItem.data('roundId', roundId);
                     $winnersList.append(winnerItem);
+                    
+                    console.log(`✅ Gagnant affiché: Round #${roundId}, Winner: №${winnerNumber} ${winnerName}, Family: ${familyValue}`);
                 });
             }
 
             // Ajoute/Préprend un gagnant à la barre (basée sur les infos de finish_screen)
             // Utilise exactement la même logique que finish_screen._updateWinner()
+            // ✅ CORRECTION CRITIQUE: Cette fonction est appelée DIRECTEMENT par l'événement round_winner
+            // pour garantir que la liste des gagnants affiche le MÊME gagnant que le finish_screen
             function ajouterGagnantHistoriqueDepuisFinish(payload) {
                 try {
-                    if (!payload || !payload.winner) return;
+                    if (!payload || !payload.winner) {
+                        console.warn('⚠️ [WINNERS-SYNC] payload.winner manquant:', payload);
+                        return;
+                    }
                     var roundId = payload.id;
                     var winner = payload.winner;
+
+                    console.log(`🎯 [WINNERS-SYNC] Ajout du gagnant du finish_screen au historique:`);
+                    console.log(`   Round: ${roundId}, Winner: №${winner.number} ${winner.name} (Family: ${winner.family})`);
 
                     var $winnersList = $('#winnersList');
 
@@ -989,6 +1008,7 @@
                     avatarContainer.append(avatarBg);
 
                     // Nom formaté comme dans finish_screen : "№ {number} {name}"
+                    // ✅ Utiliser les mêmes données que game.getWinner()
                     var nameEl = $('<div class="winner-name-inline"></div>').text('№ ' + (winner.number || '-') + ' ' + (winner.name || ''));
                     // Meta: round
                     var meta = $('<div class="winner-meta"></div>').text('Round ' + (roundId != null ? roundId : '-'));
@@ -999,27 +1019,38 @@
                     // Appliquer la classe family comme dans finish_screen (même logique que container.addClass('family' + winner.family))
                     if (winner.family != null) {
                         card.addClass('family' + winner.family);
+                        console.log(`✅ [WINNERS-SYNC] Classe family${winner.family} appliquée`);
                     }
                     winnerItem.append(card);
 
-                    // Préprend le nouveau gagnant (éviter les doublons pour le même round)
+                    // ✅ CORRECTION CRITIQUE: Vérifier si ce round est déjà affiché pour éviter les doublons
                     const alreadyPresent = $winnersList.children('.winner-item').filter(function() {
                         return $(this).data('roundId') === roundId;
                     }).length > 0;
-                    if (alreadyPresent) return; // dédoublonnage
+                    
+                    if (alreadyPresent) {
+                        console.warn(`⚠️ [WINNERS-SYNC] Round #${roundId} déjà présent, doublon évité`);
+                        return; // dédoublonnage
+                    }
 
-                    // stocker l'id du round sur l'élément pour de futures vérifications
+                    // Stocker l'id du round sur l'élément pour futures vérifications
                     winnerItem.data('roundId', roundId);
+                    
+                    // Ajouter le nouveau gagnant au début (les plus récents en premier)
                     $winnersList.prepend(winnerItem);
-                    winnerItem.data('roundId', roundId);
+                    console.log(`✅ [WINNERS-SYNC] Gagnant préajouté à #winnersList`);
 
-                    // Garde seulement 6
+                    // Garder seulement 6 gagnants (limite de la liste visuelle)
                     var items = $winnersList.children('.winner-item');
                     if (items.length > 6) {
-                        items.slice(6).remove();
+                        const removed = items.slice(6);
+                        removed.remove();
+                        console.log(`✅ [WINNERS-SYNC] ${removed.length} gagnants anciens supprimés (limite de 6)`);
                     }
+                    
+                    console.log(`✅ [WINNERS-SYNC] Historique des gagnants maintenant à jour avec le finish_screen`);
                 } catch (e) {
-                    console.warn('Impossible d\'ajouter le gagnant depuis finish_screen:', e);
+                    console.warn('❌ [WINNERS-SYNC] Impossible d\'ajouter le gagnant depuis finish_screen:', e);
                 }
             }
 
@@ -1163,9 +1194,9 @@
                 // Connecte au WebSocket (source de vérité unique)
                 connecterWebSocket();
                 
-                // ✅ NOUVEAU: Charger les gagnants depuis la BD au démarrage
-                // Cela garantit la persistance après redémarrage du serveur
-                chargerGagnantsDepuisBaseDonnees();
+                // ✅ CORRECTION: Ne PAS charger depuis la BD
+                // La liste des gagnants est remplie par l'événement round_winner du finish_screen
+                // (Source unique de vérité: game.getWinner())
                 
                 // Récupération optionnelle de l'état initial (fallback pour UI rapide)
                 $.ajax({
@@ -1177,8 +1208,14 @@
                         if (data.currentRound && data.currentRound.id) {
                             $('#currentRound').text('🏁 Round ' + data.currentRound.id);
                         }
-                        if (data.gameHistory) {
+                        // ✅ CORRECTION: Mettre à jour les gagnants depuis status API
+                        if (data.gameHistory && Array.isArray(data.gameHistory) && data.gameHistory.length > 0) {
+                            console.log('📊 Mise à jour des gagnants depuis status API...');
                             afficherDerniersGagnants(data.gameHistory);
+                        } else {
+                            // ✅ CORRECTION: Ne pas charger depuis la BD
+                            // La liste sera remplie par l'événement round_winner du finish_screen
+                            console.log('ℹ️ Gagnants seront mis à jour via événement round_winner');
                         }
                         
                         // ✅ INITIALISER LE TIMER SI FOURNI PAR L'API
@@ -1237,8 +1274,14 @@
                                 } else {
                                     chargerEtAfficherParticipants();
                                 }
-                                if (data.gameHistory) {
+                                // ✅ CORRECTION: Mettre à jour les gagnants depuis connected
+                                if (data.gameHistory && Array.isArray(data.gameHistory) && data.gameHistory.length > 0) {
+                                    console.log('📊 Mise à jour des gagnants depuis connected...');
                                     afficherDerniersGagnants(data.gameHistory);
+                                } else {
+                                    // ✅ CORRECTION: Ne pas charger depuis la BD
+                                    // La liste sera remplie par l'événement round_winner du finish_screen
+                                    console.log('ℹ️ Gagnants seront mis à jour via événement round_winner');
                                 }
                                 if (data.roundId) {
                                     $('#currentRound').text('🏁 Round ' + data.roundId);
@@ -1308,7 +1351,7 @@
                                 // ✅ CORRECTION: Mettre à jour le GameManager avec les résultats
                                 // Le système de screens (FinishScreen) affichera automatiquement les résultats
                                 console.log('🎊 Résultats de course reçus (T+' + (Date.now() - window.raceStartTime) + 'ms)');
-                                console.log('   Winner:', data.winner?.number, 'Prize:', data.totalPrize);
+                                console.log('   Winner:', data.winner?.number, data.winner?.name, 'Prize:', data.totalPrize);
                                 
                                 // ✅ Mettre à jour le GameManager avec les résultats pour que FinishScreen les affiche
                                 if (window.client && window.client._context && data.currentRound) {
@@ -1327,6 +1370,24 @@
                                             console.log('✅ FinishScreen mis à jour avec les résultats');
                                         }
                                     }
+                                }
+                                
+                                // ✅ CORRECTION CRITIQUE: Mettre à jour gameHistory et afficher les gagnants
+                                if (data.gameHistory && Array.isArray(data.gameHistory)) {
+                                    gameHistory = data.gameHistory;
+                                    console.log(`✅ gameHistory mis à jour: ${gameHistory.length} rounds`);
+                                    
+                                    // Mettre à jour l'affichage des gagnants
+                                    if (gameHistory.length > 0) {
+                                        console.log('📊 Mise à jour des gagnants depuis race_results...');
+                                        afficherDerniersGagnants(gameHistory);
+                                    } else {
+                                        console.warn('⚠️ race_results reçu sans gameHistory valide, attendant événement round_winner...');
+                                        // Les gagnants seront ajoutés via l'événement round_winner
+                                    }
+                                } else {
+                                    console.warn('⚠️ race_results reçu sans gameHistory, attendant événement round_winner...');
+                                    // Les gagnants seront ajoutés via l'événement round_winner
                                 }
                                 
                                 // Si des tickets sont inclus, mettre en cache pour le cashier
@@ -1390,8 +1451,14 @@
                                         } else {
                                             chargerEtAfficherParticipants();
                                         }
-                                        if (data.gameHistory?.length > 0) {
+                                        // ✅ CORRECTION: Mettre à jour les gagnants depuis new_round
+                                        if (data.gameHistory && Array.isArray(data.gameHistory) && data.gameHistory.length > 0) {
+                                            console.log('📊 Mise à jour des gagnants depuis new_round...');
                                             afficherDerniersGagnants(data.gameHistory);
+                                        } else {
+                                            // ✅ CORRECTION: Ne pas charger depuis la BD
+                                            // La liste sera remplie par l'événement round_winner du finish_screen
+                                            console.log('ℹ️ Gagnants seront mis à jour via événement round_winner');
                                         }
                                         if (data.timer?.timeLeft > 0) {
                                             totalDelayMs = data.timer.totalDuration;
@@ -1435,8 +1502,14 @@
                                 }
                                 
                                 // 5. Mettre à jour l'historique
-                                if (data.gameHistory?.length > 0) {
+                                // ✅ CORRECTION: Mettre à jour les gagnants depuis new_round
+                                if (data.gameHistory && Array.isArray(data.gameHistory) && data.gameHistory.length > 0) {
+                                    console.log('📊 Mise à jour des gagnants depuis new_round...');
                                     afficherDerniersGagnants(data.gameHistory);
+                                } else {
+                                    // ✅ CORRECTION: Ne pas charger depuis la BD
+                                    // La liste sera remplie par l'événement round_winner du finish_screen
+                                    console.log('ℹ️ Gagnants seront mis à jour via événement round_winner');
                                 }
                                 
                                 // 6. ✅ REDÉMARRER le timer du round
@@ -1511,6 +1584,35 @@
 
             // --- Lancement de la synchronisation au chargement ---
             synchroniserAuChargement();
+            
+            // ✅ CORRECTION: Initialiser la liste des gagnants vide au démarrage
+            // Elle sera remplie UNIQUEMENT par l'événement round_winner (source unique: game.getWinner())
+            // Cela élimine la dépendance à la BD et garantit la cohérence
+            const $winnersListInit = $('#winnersList');
+            if ($winnersListInit.length > 0) {
+                $winnersListInit.empty();
+                $winnersListInit.html('<div class="winner-item empty"><div class="winner-card"><div class="winner-inner"><div class="winner-avatar"><div class="avatar_background"><div class="avatar"></div></div></div><div><div class="winner-name-inline">-</div><div class="winner-meta">Round -</div></div></div></div></div>');
+                console.log('✅ Liste des gagnants initialisée vide - sera remplie par événement round_winner');
+            }
+            
+            // ✅ CORRECTION CRITIQUE: Écouter l'événement round_winner émis par finish_screen
+            // Cela garantit que la liste des gagnants utilise le MÊME game.getWinner() que le finish_screen
+            // Élimine les incohérences entre le gagnant affiché et le gagnant sauvegardé
+            $(document).on('round_winner', function(event, data) {
+                if (data && data.winner && data.id) {
+                    console.log('🎯 [WINNERS-SYNC] Événement round_winner reçu du finish_screen:');
+                    console.log('   Round ID:', data.id);
+                    console.log('   Winner:', `№${data.winner.number} ${data.winner.name}`, `(Family: ${data.winner.family})`);
+                    
+                    // ✅ Utiliser ajouterGagnantHistoriqueDepuisFinish qui reçoit les données 
+                    // du même game.getWinner() que le finish_screen
+                    ajouterGagnantHistoriqueDepuisFinish(data);
+                    
+                    console.log('✅ Liste des gagnants mise à jour avec le winner du finish_screen');
+                } else {
+                    console.warn('⚠️ Événement round_winner invalide reçu:', data);
+                }
+            });
             
             // --- Surveillance continue de finish_screen pour clic automatique ---
             setInterval(surveillerFinishScreen, 500); // Vérifie toutes les 500ms

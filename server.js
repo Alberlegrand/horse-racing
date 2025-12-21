@@ -523,51 +523,87 @@ async function initializeGameWithRetry(maxAttempts = 3) {
       
       console.log('🎮 [STARTUP] Lancement du premier round...');
       
-      // ✅ CORRECTION: Vérifier si un round existe déjà (restauré depuis Redis)
-      // Si oui, ne pas en créer un nouveau, juste s'assurer que tout est prêt
+      // ✅ CORRECTION CRITIQUE: Vérifier si un round existe déjà (restauré depuis Redis)
+      // Si oui, vérifier que tout est valide (timer, participants, état de course)
+      const now = Date.now();
+      
+      // ✅ CORRECTION #1: Vérifier si isRaceRunning est bloqué (état orphelin)
+      if (gameState.isRaceRunning) {
+        if (!gameState.raceStartTime) {
+          // isRaceRunning=true mais pas de raceStartTime = état incohérent
+          console.warn('⚠️ [STARTUP] isRaceRunning bloqué sans raceStartTime, réinitialisation...');
+          gameState.isRaceRunning = false;
+          gameState.raceStartTime = null;
+          gameState.raceEndTime = null;
+        } else {
+          const elapsed = now - gameState.raceStartTime;
+          if (elapsed > TOTAL_RACE_TIME_MS + 15000) {
+            // Course "en cours" depuis trop longtemps = état bloqué
+            console.warn(`⚠️ [STARTUP] isRaceRunning bloqué depuis ${elapsed}ms (>${TOTAL_RACE_TIME_MS + 15000}ms), réinitialisation...`);
+            gameState.isRaceRunning = false;
+            gameState.raceStartTime = null;
+            gameState.raceEndTime = null;
+          }
+        }
+      }
+      
       if (gameState.currentRound && gameState.currentRound.id) {
         console.log(`✅ [STARTUP] Round existant trouvé (ID: ${gameState.currentRound.id}), vérification des données...`);
         
-        // Vérifier que le timer est configuré
-        if (!gameState.nextRoundStartTime) {
-          const now = Date.now();
+        // ✅ CORRECTION #2: Vérifier que le timer est configuré ET valide (pas expiré)
+        let timerValid = false;
+        if (gameState.nextRoundStartTime && gameState.nextRoundStartTime > now) {
+          timerValid = true;
+          const timeLeft = gameState.nextRoundStartTime - now;
+          console.log(`⏱️ [STARTUP] Timer valide: ${Math.round(timeLeft / 1000)}s restantes`);
+        } else {
+          // Timer manquant ou expiré
+          if (gameState.nextRoundStartTime) {
+            console.warn(`⚠️ [STARTUP] Timer expiré (était à ${new Date(gameState.nextRoundStartTime).toISOString()}), réinitialisation...`);
+          } else {
+            console.warn(`⚠️ [STARTUP] Timer manquant, configuration...`);
+          }
           gameState.nextRoundStartTime = now + ROUND_WAIT_DURATION_MS;
-          console.log(`⏱️ [STARTUP] Timer configuré pour le round existant: ${ROUND_WAIT_DURATION_MS}ms`);
+          console.log(`⏱️ [STARTUP] Timer réinitialisé: ${ROUND_WAIT_DURATION_MS}ms (fin à ${new Date(gameState.nextRoundStartTime).toISOString()})`);
         }
         
-        // Vérifier que les participants sont présents
+        // ✅ CORRECTION #3: Vérifier que les participants sont présents
         if (!gameState.currentRound.participants || gameState.currentRound.participants.length === 0) {
           console.warn('⚠️ [STARTUP] Round existant sans participants, création d\'un nouveau round...');
           await startNewRound(broadcast, false);
         } else {
           console.log(`✅ [STARTUP] Round #${gameState.currentRound.id} prêt avec ${gameState.currentRound.participants.length} participants`);
           
-          // Broadcast le round existant pour synchroniser les clients
-          if (broadcast) {
-            const now = Date.now();
-            broadcast({
-              event: "new_round",
-              roundId: gameState.currentRound.id,
-              game: JSON.parse(JSON.stringify(gameState.currentRound)),
-              currentRound: JSON.parse(JSON.stringify(gameState.currentRound)),
-              participants: gameState.currentRound.participants,
-              isRaceRunning: gameState.isRaceRunning,
-              raceStartTime: gameState.isRaceRunning ? gameState.raceStartTime : null,
-              raceEndTime: gameState.isRaceRunning ? gameState.raceEndTime : null,
-              gameHistory: gameState.gameHistory || [],
-              timer: {
-                timeLeft: gameState.nextRoundStartTime && gameState.nextRoundStartTime > now 
-                  ? gameState.nextRoundStartTime - now 
-                  : ROUND_WAIT_DURATION_MS,
-                totalDuration: ROUND_WAIT_DURATION_MS,
-                startTime: gameState.nextRoundStartTime ? gameState.nextRoundStartTime - ROUND_WAIT_DURATION_MS : now,
-                endTime: gameState.nextRoundStartTime || (now + ROUND_WAIT_DURATION_MS)
-              }
-            });
+          // ✅ CORRECTION #4: Si le timer était expiré, créer un nouveau round pour éviter les problèmes
+          if (!timerValid) {
+            console.warn('⚠️ [STARTUP] Timer expiré pour le round existant, création d\'un nouveau round pour éviter les problèmes...');
+            await startNewRound(broadcast, false);
+          } else {
+            // Broadcast le round existant pour synchroniser les clients
+            if (broadcast) {
+              broadcast({
+                event: "new_round",
+                roundId: gameState.currentRound.id,
+                game: JSON.parse(JSON.stringify(gameState.currentRound)),
+                currentRound: JSON.parse(JSON.stringify(gameState.currentRound)),
+                participants: gameState.currentRound.participants,
+                isRaceRunning: gameState.isRaceRunning,
+                raceStartTime: gameState.isRaceRunning ? gameState.raceStartTime : null,
+                raceEndTime: gameState.isRaceRunning ? gameState.raceEndTime : null,
+                gameHistory: gameState.gameHistory || [],
+                timer: {
+                  timeLeft: gameState.nextRoundStartTime - now,
+                  totalDuration: ROUND_WAIT_DURATION_MS,
+                  startTime: gameState.nextRoundStartTime - ROUND_WAIT_DURATION_MS,
+                  endTime: gameState.nextRoundStartTime
+                }
+              });
+            }
           }
         }
       } else {
         // Aucun round existant, créer le premier round
+        console.log('📊 [STARTUP] Aucun round existant, création du premier round...');
         await startNewRound(broadcast, false);
       }
       
@@ -578,6 +614,13 @@ async function initializeGameWithRetry(maxAttempts = 3) {
       
       if (!gameState.currentRound.participants || gameState.currentRound.participants.length === 0) {
         throw new Error('Round créé sans participants');
+      }
+      
+      // ✅ CORRECTION: Vérifier que le timer est configuré ET valide (pas expiré)
+      const finalNow = Date.now();
+      if (!gameState.nextRoundStartTime || gameState.nextRoundStartTime <= finalNow) {
+        console.warn('⚠️ [STARTUP] Timer invalide ou expiré après création, réinitialisation...');
+        gameState.nextRoundStartTime = finalNow + ROUND_WAIT_DURATION_MS;
       }
       
       if (!gameState.nextRoundStartTime) {

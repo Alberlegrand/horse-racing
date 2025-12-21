@@ -107,19 +107,12 @@ export async function createNewRound(options = {}) {
                 gameState.gameHistory.push(finishedRound);
                 console.log(`[ROUND-CREATE] ✅ Round #${finishedRound.id} archivé dans gameHistory`);
                 
-                // ✅ NOUVEAU: Sauvegarder le gagnant en base de données
-                if (finishedRound.winner && finishedRound.winner.id) {
-                    const savedWinner = await saveWinner(finishedRound.id, {
-                        id: finishedRound.winner.id,
-                        number: finishedRound.winner.number,
-                        name: finishedRound.winner.name,
-                        family: finishedRound.winner.family,
-                        prize: finishedRound.totalPrize
-                    });
-                    if (savedWinner) {
-                        console.log(`[ROUND-CREATE] ✅ Gagnant sauvegardé en BD: ${finishedRound.winner.name} (Round #${finishedRound.id})`);
-                    }
-                }
+                // ✅ CORRECTION CRITIQUE: NE PAS sauvegarder le gagnant ici
+                // Le gagnant est déjà sauvegardé dans calculateRaceResults() (routes/rounds.js)
+                // après avoir été déterminé correctement.
+                // Sauvegarder ici causerait des incohérences car le gagnant peut être null
+                // ou incorrect à ce moment-là.
+                console.log(`[ROUND-CREATE] ℹ️ Gagnant du round #${finishedRound.id} déjà sauvegardé dans calculateRaceResults()`);
             } else {
                 console.warn(`[ROUND-CREATE] ⚠️ Round #${finishedRound.id} déjà archivé`);
             }
@@ -136,10 +129,15 @@ export async function createNewRound(options = {}) {
         const newRoundId = await generateRoundId();
         const basePlaces = Array.from({ length: BASE_PARTICIPANTS.length }, (_, i) => i + 1);
         const shuffledPlaces = chacha20Shuffle(basePlaces);
+        
+        // ✅ CORRECTION CRITIQUE: Mélanger l'ordre des participants pour éviter les patterns
+        // Cela garantit que l'index du gagnant sélectionné aléatoirement pointe vers différents participants
+        const shuffledParticipants = chacha20Shuffle([...BASE_PARTICIPANTS]);
+        console.log(`[ROUND-CREATE] 🎲 Participants mélangés:`, shuffledParticipants.map(p => `№${p.number} ${p.name}`).join(', '));
 
         const newRound = {
             id: newRoundId,
-            participants: BASE_PARTICIPANTS.map((p, i) => ({
+            participants: shuffledParticipants.map((p, i) => ({
                 ...p,
                 place: shuffledPlaces[i],
             })),

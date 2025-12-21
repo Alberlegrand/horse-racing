@@ -233,14 +233,26 @@ export default function createRoundsRouter(broadcast) {
             return null;
         }
 
-        // Calculer le gagnant (ALÉATOIRE)
-        const winner = participants[chacha20RandomInt(participants.length)];
+        // ✅ CORRECTION CRITIQUE: Calculer le gagnant (ALÉATOIRE) avec logs détaillés
+        console.log(`[RACE-RESULTS] 🎲 Sélection du gagnant parmi ${participants.length} participants:`);
+        participants.forEach((p, i) => {
+            console.log(`   [${i}] №${p.number} ${p.name} (place: ${p.place})`);
+        });
+        
+        const winnerIndex = chacha20RandomInt(participants.length);
+        const winner = participants[winnerIndex];
+        console.log(`[RACE-RESULTS] ✅ Gagnant sélectionné aléatoirement: Index ${winnerIndex} → №${winner.number} ${winner.name}`);
+        
         const winnerWithPlace = { ...winner, place: 1, family: winner.family ?? 0 };
 
-        // Mettre à jour les participants
-        savedRoundData.participants = participants.map(p =>
+        // ✅ CORRECTION CRITIQUE: Mettre à jour les participants AVANT de copier savedRoundData
+        // Cela garantit que savedRoundData contient les bons participants avec le gagnant marqué place=1
+        const updatedParticipants = participants.map(p =>
             (p.number === winner.number ? winnerWithPlace : p)
         );
+        
+        // Copier et mettre à jour les participants dans savedRoundData
+        savedRoundData.participants = updatedParticipants;
 
         // Calculer les gains pour chaque ticket
         let totalPrizeAll = 0;
@@ -311,20 +323,88 @@ export default function createRoundsRouter(broadcast) {
             
             // Archiver en DB
             try {
+                // ✅ CORRECTION CRITIQUE: Améliorer la recherche de participant_id avec logs détaillés
                 let winnerParticipantId = null;
                 try {
                     const participantsDb = await getParticipants();
-                    const winnerRow = participantsDb.find(p => Number(p.number) === Number(winner.number));
-                    if (winnerRow) {
-                        winnerParticipantId = winnerRow.participant_id;
-                        console.log(`[RACE-RESULTS] ✓ Winner: number=${winner.number} -> participant_id=${winnerParticipantId}`);
+                    console.log(`[RACE-RESULTS] 🔍 Recherche participant_id pour winner: №${winner.number} ${winner.name}`);
+                    
+                    if (!participantsDb || participantsDb.length === 0) {
+                        console.error('[RACE-RESULTS] ❌ Aucun participant trouvé en BD');
+                    } else {
+                        console.log(`[RACE-RESULTS] Participants disponibles en BD:`, participantsDb.map(p => ({ number: p.number, name: p.participant_name, id: p.participant_id })));
+                        
+                        const winnerRow = participantsDb.find(p => Number(p.number) === Number(winner.number));
+                        if (winnerRow && winnerRow.participant_id) {
+                            winnerParticipantId = winnerRow.participant_id;
+                            console.log(`[RACE-RESULTS] ✅ Winner trouvé: number=${winner.number}, name=${winner.name} -> participant_id=${winnerParticipantId}`);
+                            
+                            // ✅ VÉRIFICATION: S'assurer que le participant_id correspond bien au bon participant
+                            if (Number(winnerRow.number) !== Number(winner.number)) {
+                                console.error(`[RACE-RESULTS] ❌ INCOHÉRENCE: participant_id=${winnerParticipantId} ne correspond pas à number=${winner.number}`);
+                                console.error(`[RACE-RESULTS] Winner attendu: №${winner.number} ${winner.name}`);
+                                console.error(`[RACE-RESULTS] Participant trouvé: №${winnerRow.number} ${winnerRow.participant_name}`);
+                            }
+                        } else {
+                            console.error(`[RACE-RESULTS] ❌ Participant gagnant non trouvé en BD: number=${winner.number}, name=${winner.name}`);
+                            console.error(`[RACE-RESULTS] Participants disponibles:`, participantsDb.map(p => ({ number: p.number, name: p.participant_name })));
+                        }
                     }
                 } catch (lookupErr) {
-                    console.error('[RACE-RESULTS] Erreur lookup participant:', lookupErr);
+                    console.error('[RACE-RESULTS] ❌ Erreur lookup participant:', lookupErr.message);
                 }
 
                 await finishRound(finishedRoundId, winnerParticipantId, totalPrizeAll, new Date());
                 console.log(`[RACE-RESULTS] Round ${finishedRoundId} archivé en DB`);
+                
+                // ✅ CORRECTION CRITIQUE: Sauvegarder le gagnant dans la table winners
+                // Cela doit être fait ICI, après avoir déterminé le gagnant et trouvé participant_id
+                if (winnerParticipantId && winnerWithPlace && finishedRoundId) {
+                    try {
+                        const { saveWinner } = await import('../models/winnerModel.js');
+                        
+                        // ✅ CORRECTION CRITIQUE: Vérifier que toutes les données nécessaires sont présentes
+                        if (winnerWithPlace.number && winnerWithPlace.name) {
+                            console.log(`[RACE-RESULTS] 💾 Sauvegarde du gagnant dans winners table:`);
+                            console.log(`   - Round ID: ${finishedRoundId}`);
+                            console.log(`   - Participant ID: ${winnerParticipantId}`);
+                            console.log(`   - Number: ${winnerWithPlace.number}`);
+                            console.log(`   - Name: ${winnerWithPlace.name}`);
+                            console.log(`   - Family: ${winnerWithPlace.family ?? 0}`);
+                            console.log(`   - Prize: ${totalPrizeAll}`);
+                            
+                            const savedWinner = await saveWinner(finishedRoundId, {
+                                id: winnerParticipantId,
+                                number: winnerWithPlace.number,
+                                name: winnerWithPlace.name,
+                                family: winnerWithPlace.family ?? 0,
+                                prize: totalPrizeAll
+                            });
+                            
+                            if (savedWinner) {
+                                console.log(`[RACE-RESULTS] ✅ Gagnant sauvegardé dans winners table: ${winnerWithPlace.name} (Round #${finishedRoundId}, Prize: ${totalPrizeAll})`);
+                                console.log(`[RACE-RESULTS] 📊 Vérification sauvegarde:`, {
+                                    round_id: savedWinner.round_id,
+                                    participant_id: savedWinner.participant_id,
+                                    participant_number: savedWinner.participant_number,
+                                    participant_name: savedWinner.participant_name
+                                });
+                            } else {
+                                console.error(`[RACE-RESULTS] ❌ Échec sauvegarde gagnant pour Round #${finishedRoundId}`);
+                            }
+                        } else {
+                            console.error(`[RACE-RESULTS] ❌ Données gagnant incomplètes:`, {
+                                number: winnerWithPlace.number,
+                                name: winnerWithPlace.name,
+                                participant_id: winnerParticipantId
+                            });
+                        }
+                    } catch (saveErr) {
+                        console.error(`[RACE-RESULTS] ❌ Erreur sauvegarde gagnant:`, saveErr.message);
+                    }
+                } else {
+                    console.error(`[RACE-RESULTS] ❌ Impossible de sauvegarder gagnant: roundId=${finishedRoundId}, winnerId=${winnerParticipantId}, winner=${winnerWithPlace ? 'present' : 'null'}`);
+                }
             } catch (dbError) {
                 console.error(`[RACE-RESULTS] Erreur archivage:`, dbError);
             }
@@ -479,6 +559,20 @@ export default function createRoundsRouter(broadcast) {
                     // ✅ Broadcaster les résultats complets à T=35s
                     // ✅ IMPORTANT: Ne PAS changer l'écran, juste mettre à jour les données
                     // Le finish_screen est déjà affiché depuis race_end (T=30s)
+                    
+                    // ✅ VÉRIFICATION CRITIQUE: S'assurer que le gagnant broadcasté correspond à celui en DB
+                    console.log(`[RACE-SEQ] 🏆 Vérification du gagnant avant broadcast:`);
+                    console.log(`   - Gagnant calculé: ${raceResults.winner.name} (N°${raceResults.winner.number})`);
+                    console.log(`   - Place marquée: ${raceResults.winner.place}`);
+                    const finishScreenWinner = raceResults.participants.find(p => p.place === 1);
+                    if (finishScreenWinner) {
+                        console.log(`   - Gagnant du finish screen: ${finishScreenWinner.name} (N°${finishScreenWinner.number})`);
+                        if (finishScreenWinner.number !== raceResults.winner.number) {
+                            console.error(`[RACE-SEQ] ❌ INCOHÉRENCE: Le gagnant du finish screen ne correspond pas!`);
+                            console.error(`   ${finishScreenWinner.name} vs ${raceResults.winner.name}`);
+                        }
+                    }
+                    
                     broadcast({
                         event: "race_results",
                         roundId: raceResults.roundId,
@@ -490,7 +584,7 @@ export default function createRoundsRouter(broadcast) {
                         currentScreen: "finish_screen",  // ✅ NOUVEAU: Confirmer l'écran actuel
                         // ✅ NE PAS inclure isRaceRunning=false ici - cela sera dans new_round
                     });
-                    console.log(`[RACE-SEQ] ✅ Résultats broadcasters: winner=${raceResults.winner?.number}, totalPrize=${raceResults.totalPrize}`);
+                    console.log(`[RACE-SEQ] ✅ Résultats broadcasters: winner=${raceResults.winner?.number} ${raceResults.winner?.name}, totalPrize=${raceResults.totalPrize}`);
                 }
                 
                 // ✅ ÉTAPE 2: CRÉER LE NOUVEAU ROUND (T=35s)

@@ -48,22 +48,33 @@ FinishScreenView.prototype.update = function (game) {
     this._updateReceipts(game);
     try {
         var winner = game.getWinner();
-        // Émet un événement global pour que l'historique local se mette à jour
-        // (déduplication : n'émet que si l'id du round n'a pas déjà été traité)
+        
+        // ✅ CORRECTION CRITIQUE: Émettre l'événement round_winner avec le gagnant de game.getWinner()
+        // Cet événement est écouté par screen.html qui met à jour la liste des gagnants
+        // Cela garantit que la liste des gagnants affiche EXACTEMENT le même gagnant que le finish_screen
+        
+        // Déduplication : n'émettre que si l'id du round n'a pas déjà été traité
         if (!window.__shownRoundWinnersSet) window.__shownRoundWinnersSet = new Set();
+        
         if (!window.__shownRoundWinnersSet.has(game.id)) {
             window.__shownRoundWinnersSet.add(game.id);
+            
+            console.log(`🎯 [FINISH-SCREEN] Émission du winner au historique:`);
+            console.log(`   Round: ${game.id}, Winner: №${winner?.number} ${winner?.name} (Family: ${winner?.family})`);
+            
             $(document).trigger('round_winner', [{
-            id: game.id,
-            winner: {
-                number: winner && winner.number,
-                name: winner && winner.name,
-                family: winner && winner.family
-            }
+                id: game.id,
+                winner: {
+                    number: winner && winner.number,
+                    name: winner && winner.name,
+                    family: winner && winner.family
+                }
             }]);
-        } // end dedup
+            
+            console.log(`✅ [FINISH-SCREEN] Événement round_winner émis (déduplication active)`);
+        }
     } catch (e) {
-        // silencieux
+        console.error(`❌ [FINISH-SCREEN] Erreur lors de l'émission du winner:`, e);
     }
 };
 
