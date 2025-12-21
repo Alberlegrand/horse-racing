@@ -876,97 +876,62 @@
              * Affiche les 6 derniers gagnants dans la section dédiée
              */
             function afficherDerniersGagnants(gameHistory) {
-                console.log('🏆 Mise à jour des 6 derniers gagnants...');
+                console.log('🏆 Affichage des derniers gagnants (DESC - plus récent en premier)...');
                 console.log('📊 Données reçues:', gameHistory);
-                
-                // ✅ CORRECTION: Filtrer et valider les données avant traitement
-                const validRounds = (gameHistory || []).filter(r => {
-                    // Vérifier que le round a un ID et un gagnant valide
-                    if (!r || !r.id) {
-                        console.warn('⚠️ Round sans ID ignoré:', r);
-                        return false;
-                    }
-                    if (!r.winner) {
-                        console.warn(`⚠️ Round #${r.id} sans gagnant ignoré`);
-                        return false;
-                    }
-                    // Vérifier que le gagnant a au moins un number et un name
-                    if (!r.winner.number && !r.winner.name) {
-                        console.warn(`⚠️ Round #${r.id} avec gagnant incomplet ignoré:`, r.winner);
-                        return false;
-                    }
-                    return true;
-                });
-                
-                if (validRounds.length === 0) {
-                    console.warn('⚠️ Aucun round valide avec gagnant trouvé');
-                    const $winnersList = $('#winnersList');
-                    $winnersList.empty();
-                    $winnersList.html('<div class="winner-item empty"><div class="winner-card"><div class="winner-inner"><div class="winner-avatar"><div class="avatar_background"><div class="avatar"></div></div></div><div><div class="winner-name-inline">-</div><div class="winner-meta">Round -</div></div></div></div></div>');
-                    return;
-                }
-                
-                // Prendre les 6 derniers rounds avec des gagnants
-                // Evite d'afficher des doublons : construire une liste unique (par round id)
-                const uniqueById = [];
-                const seen = new Set();
-                // Parcourt du plus ancien au plus récent, puis on slice(-6) pour les 6 derniers
-                const ordered = validRounds.slice(-20); // limiter
-                for (let i = 0; i < ordered.length; i++) {
-                    const r = ordered[i];
-                    if (!seen.has(r.id)) {
-                        seen.add(r.id);
-                        uniqueById.push(r);
-                    }
-                }
-                const winnersWithRounds = uniqueById.slice(-6).reverse();
-                
-                console.log(`✅ ${winnersWithRounds.length} gagnants à afficher`);
                 
                 const $winnersList = $('#winnersList');
                 $winnersList.empty();
                 
-                if (winnersWithRounds.length === 0) {
-                    // Afficher un message par défaut (même structure que finish_screen)
+                // Vérifier que gameHistory est un tableau valide
+                if (!Array.isArray(gameHistory) || gameHistory.length === 0) {
+                    console.warn('⚠️ Aucun gagnant trouvé');
                     $winnersList.html('<div class="winner-item empty"><div class="winner-card"><div class="winner-inner"><div class="winner-avatar"><div class="avatar_background"><div class="avatar"></div></div></div><div><div class="winner-name-inline">-</div><div class="winner-meta">Round -</div></div></div></div></div>');
                     return;
                 }
                 
-                // ✅ CORRECTION: Afficher les gagnants avec validation des données
-                winnersWithRounds.forEach((round, index) => {
-                    const winner = round.winner;
-                    
-                    // ✅ Validation: Vérifier que le gagnant a les données nécessaires
-                    if (!winner || (!winner.number && !winner.name)) {
-                        console.warn(`⚠️ Gagnant invalide pour round #${round.id}, ignoré`);
+                // Les données du localStorage sont déjà en ordre DESC (plus récent en premier)
+                // Afficher chaque gagnant dans l'ordre reçu (DESC)
+                gameHistory.forEach((round, index) => {
+                    // Valider les données du round
+                    if (!round || !round.id || !round.winner) {
+                        console.warn(`⚠️ Round invalide ignoré:`, round);
                         return;
                     }
                     
+                    const winner = round.winner;
+                    
+                    // Validation: le gagnant doit avoir au minimum un number ou un name
+                    if (winner.number === null && winner.number === undefined && (!winner.name || winner.name.trim() === '')) {
+                        console.warn(`⚠️ Gagnant invalide pour round #${round.id}:`, winner);
+                        return;
+                    }
+                    
+                    // Créer l'élément du gagnant
                     const winnerItem = $('<div class="winner-item"></div>');
                     const card = $('<div class="winner-card"></div>');
                     const inner = $('<div class="winner-inner"></div>');
 
-                    // Structure avatar identique à finish_screen : avatar_background > avatar
+                    // Structure avatar: avatar_background > avatar
                     const avatarContainer = $('<div class="winner-avatar"></div>');
                     const avatarBg = $('<div class="avatar_background"></div>');
                     const avatar = $('<div class="avatar"></div>');
                     avatarBg.append(avatar);
                     avatarContainer.append(avatarBg);
 
-                    // ✅ CORRECTION: Nom formaté avec valeurs par défaut sécurisées
-                    const winnerNumber = winner.number || winner.participant_number || '-';
-                    const winnerName = winner.name || winner.participant_name || 'Unknown';
+                    // Formatage du nom: "№ {number} {name}"
+                    const winnerNumber = winner.number !== null && winner.number !== undefined ? winner.number : '-';
+                    const winnerName = winner.name || 'Unknown';
                     const nameEl = $('<div class="winner-name-inline"></div>').text(`№ ${winnerNumber} ${winnerName}`);
                     
-                    // Meta: round ID (utiliser round_id si id n'est pas disponible)
-                    const roundId = round.id || round.round_id || '-';
+                    // Meta: round ID
+                    const roundId = round.id || '-';
                     const meta = $('<div class="winner-meta"></div>').text('Round ' + roundId);
 
-                    // Assembler
+                    // Assembler l'élément
                     inner.append(avatarContainer).append($('<div></div>').append(nameEl).append(meta));
                     card.append(inner);
                     
-                    // ✅ CORRECTION: Appliquer la classe family avec valeur par défaut
+                    // Appliquer la classe family
                     const familyValue = winner.family !== null && winner.family !== undefined ? winner.family : 0;
                     card.addClass('family' + familyValue);
                     
@@ -974,8 +939,11 @@
                     winnerItem.data('roundId', roundId);
                     $winnersList.append(winnerItem);
                     
-                    console.log(`✅ Gagnant affiché: Round #${roundId}, Winner: №${winnerNumber} ${winnerName}, Family: ${familyValue}`);
+                    console.log(`✅ [${index + 1}/6] Gagnant affiché: Round #${roundId}, Winner: №${winnerNumber} ${winnerName}, Family: ${familyValue}`);
                 });
+                
+                const displayedCount = $winnersList.children('.winner-item').length;
+                console.log(`✅ Total: ${displayedCount} gagnants affichés (DESC)`);
             }
 
             // Ajoute/Préprend un gagnant à la barre (basée sur les infos de finish_screen)
