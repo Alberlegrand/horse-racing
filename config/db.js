@@ -406,6 +406,45 @@ const createTables = async () => {
     `);
 
     // ==========================================
+    // === GESTION DES CAISSES (CASHIER) ===
+    // ==========================================
+
+    // Table pour les comptes de caissiers
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS cashier_accounts (
+        account_id SERIAL PRIMARY KEY,
+        user_id INT NOT NULL UNIQUE,
+        current_balance DECIMAL(15,2) DEFAULT 0,
+        opening_balance DECIMAL(15,2) DEFAULT 0,
+        opening_time TIMESTAMP,
+        closing_time TIMESTAMP,
+        status VARCHAR(20) CHECK (status IN ('open', 'closed', 'suspended')) DEFAULT 'open',
+        notes TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
+      )
+    `);
+
+    // Table pour les transactions de caisse
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS account_transactions (
+        transaction_id SERIAL PRIMARY KEY,
+        account_id INT NOT NULL,
+        user_id INT NOT NULL,
+        transaction_type VARCHAR(50) CHECK (transaction_type IN ('deposit', 'withdrawal', 'payout', 'pay-receipt', 'cash-in', 'cash-out', 'opening', 'closing')) NOT NULL,
+        amount DECIMAL(15,2) NOT NULL,
+        previous_balance DECIMAL(15,2) NOT NULL,
+        new_balance DECIMAL(15,2) NOT NULL,
+        reference VARCHAR(100),
+        description TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (account_id) REFERENCES cashier_accounts(account_id) ON DELETE CASCADE,
+        FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE SET NULL
+      )
+    `);
+
+    // ==========================================
     // === CRÉER LES INDICES ===
     // ==========================================
 
@@ -436,6 +475,14 @@ const createTables = async () => {
     await client.query("CREATE INDEX IF NOT EXISTS idx_winners_round_id ON winners(round_id)");
     await client.query("CREATE INDEX IF NOT EXISTS idx_winners_participant_id ON winners(participant_id)");
     await client.query("CREATE INDEX IF NOT EXISTS idx_winners_created_at ON winners(created_at DESC)");
+
+    // ✅ NOUVEAU: Indexes sur cashier_accounts et account_transactions
+    await client.query("CREATE INDEX IF NOT EXISTS idx_cashier_accounts_user_id ON cashier_accounts(user_id)");
+    await client.query("CREATE INDEX IF NOT EXISTS idx_cashier_accounts_status ON cashier_accounts(status)");
+    await client.query("CREATE INDEX IF NOT EXISTS idx_account_transactions_account_id ON account_transactions(account_id)");
+    await client.query("CREATE INDEX IF NOT EXISTS idx_account_transactions_user_id ON account_transactions(user_id)");
+    await client.query("CREATE INDEX IF NOT EXISTS idx_account_transactions_type ON account_transactions(transaction_type)");
+    await client.query("CREATE INDEX IF NOT EXISTS idx_account_transactions_created_at ON account_transactions(created_at DESC)");
 
     // ==========================================
     // === INSERTION DES DONNÉES PAR DÉFAUT ===
@@ -472,6 +519,26 @@ const createTables = async () => {
       console.log("👤 Utilisateur caissier créé (username: caissier, password: caissier123)");
     } else {
       console.log("✅ Cashier user already exists");
+    }
+
+    // ✅ NOUVEAU: Créer les comptes de caisse pour chaque caissier
+    const cashierUsers = await client.query(
+      "SELECT user_id, username FROM users WHERE role = 'cashier'"
+    );
+    
+    for (const cashier of cashierUsers.rows) {
+      const accountExists = await client.query(
+        "SELECT account_id FROM cashier_accounts WHERE user_id = $1",
+        [cashier.user_id]
+      );
+      
+      if (accountExists.rows.length === 0) {
+        await client.query(`
+          INSERT INTO cashier_accounts (user_id, current_balance, opening_balance, status)
+          VALUES ($1, 0, 0, 'closed')
+        `, [cashier.user_id]);
+        console.log(`💰 Compte de caisse créé pour ${cashier.username}`);
+      }
     }
 
     // Insérer les participants (chevaux/sportifs)

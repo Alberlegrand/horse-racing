@@ -6,6 +6,7 @@ import { pool } from "../config/db.js";
 import { cacheResponse } from "../middleware/cache.js";
 import { cacheDelPattern } from "../config/redis.js";
 import { getSalesStats, invalidateCachePattern } from "../models/queryCache.js";
+import * as accountModel from "../models/accountModel.js";
 
 const router = express.Router();
 
@@ -59,9 +60,29 @@ router.post("/", async (req, res) => {
 // POST /api/v1/money/payout - enregistrer un décaissement/payout
 router.post("/payout", async (req, res) => {
   try {
-    const { amount, reason } = req.body;
+    const { amount, reason, receiptId } = req.body;
+    const userId = req.user?.user_id || req.user?.userId; // Support both JWT formats
+
     if (!amount || amount <= 0) {
       return res.status(400).json({ error: 'Montant invalide' });
+    }
+
+    // ✅ NOUVEAU: Si l'utilisateur est un caissier, enregistrer la transaction dans son compte
+    if (userId && req.user?.role === 'cashier') {
+      try {
+        const transaction = await accountModel.addTransaction(
+          userId,
+          'payout',
+          amount,
+          receiptId ? `Receipt #${receiptId}` : null,
+          reason || 'Manual payout'
+        );
+        console.log(`💸 Payout enregistré dans le compte du caissier: ${amount} HTG (Transaction ID: ${transaction.transaction_id})`);
+      } catch (accountErr) {
+        console.warn(`⚠️ Impossible d'enregistrer la transaction du payout: ${accountErr.message}`);
+        // Ne pas bloquer le payout si l'account transaction échoue
+        // Juste logger l'erreur et continuer
+      }
     }
 
     // Insérer dans payout_log (table optionnelle pour tracer les décaissements manuels)

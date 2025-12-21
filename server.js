@@ -17,6 +17,7 @@ import createWinnersRouter from "./routes/winners.js";
 import keepaliveRouter from "./routes/keepalive.js";
 import moneyRouter from "./routes/money.js";
 import statsRouter from "./routes/stats.js";
+import accountsRouter from "./routes/accounts.js";
 import { SERVER_WEBSOCKET_CONFIG, logWebSocketConfig } from "./config/websocket.js";
 import { 
   ROUND_WAIT_DURATION_MS,
@@ -299,6 +300,8 @@ app.get("/dashboard", requireRoleHTML('admin'), (req, res) => res.sendFile(path.
 app.get("/user-dashboard", requireAuthHTML, (req, res) => res.sendFile(path.join(__dirname, "./pages/dashboard.html")));
 app.get("/bet_frame", requireAuthHTML, (req, res) => res.sendFile(path.join(__dirname, "bet_frame.html")));
 app.get("/my-bets", requireAuthHTML, (req, res) => res.sendFile(path.join(__dirname, "./static/pages", "my-bets.html")));
+// ✅ NOUVEAU: Route pour la gestion du compte de caisse
+app.get("/cashier-account", requireRoleHTML('cashier'), (req, res) => res.sendFile(path.join(__dirname, "./static/pages", "cashier-account.html")));
 
 
 
@@ -409,6 +412,9 @@ app.use("/api/v1/my-bets/", verifyToken, createMyBetsRouter(broadcast));
 app.use("/api/v1/winners/", createWinnersRouter());
 
 app.use("/api/v1/money/", verifyToken, requireRole('cashier', 'admin'), moneyRouter);
+
+// ✅ NOUVEAU: Routes de gestion des comptes de caisse
+app.use("/api/v1/accounts/", accountsRouter);
 
 // ✅ NOUVEAU: Stats & Audit routes (PostgreSQL + Redis strategy)
 app.use("/api/v1/stats/", statsRouter);

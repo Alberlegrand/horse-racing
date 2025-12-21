@@ -41,13 +41,18 @@ window.gameConfig = {
 if (showDecimal) Currency.changeDigits({ digits: 2, visibleDigits: 2 });
 else Currency.changeDigits({ digits: 2, visibleDigits: 0 });
 
+// ✅ NOUVEAU: Charger la configuration du keepalive selon l'environnement
+// En développement: configs rapides (20s)
+// En production: configs optimales (30s)
+const nodeEnv = window.location.hostname === 'localhost' ? 'development' : 'production';
+
 client.init({
   assetPath: window.gameConfig.assetPath,
   receiptUrl: window.gameConfig.receiptUrl,
   limits: new LimitModel(new Big(minBet), new Big(maxBet)),
   keepAliveUrl: "/api/v1/keepalive/",
-  keepAliveTick: "20000",
-  keepAliveTimeout: "5000"
+  keepAliveTick: nodeEnv === 'development' ? "20000" : "30000",  // 20s dev, 30s prod
+  keepAliveTimeout: nodeEnv === 'development' ? "5000" : "8000"  // 5s dev, 8s prod
 }, Messages);
 
 /* -------------------------

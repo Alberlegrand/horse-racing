@@ -538,15 +538,20 @@
         $(document).ready(function () {
             
             // ✅ INITIALISER LE WEBCLIENT AU DÉMARRAGE
+            // Avec configuration adaptée pour écran (screen.html)
+            // - Timeout plus tolérant car écran peut être sur une autre machine
+            // - Reload automatique si déconnexion détectée
             try {
                 window.client = new WebClient();
+                const nodeEnv = window.location.hostname === 'localhost' ? 'development' : 'production';
+                
                 window.client.init({
                     assetPath: "/js/",
                     receiptUrl: "/api/v1/receipts",
                     limits: new LimitModel(0, 0),
-                    keepAliveUrl: "/api/v1/keepalive",
-                    keepAliveTick: 30000,
-                    keepAliveTimeout: 5000
+                    keepAliveUrl: "/api/v1/keepalive/",
+                    keepAliveTick: nodeEnv === 'development' ? 20000 : 30000,  // 20s dev, 30s prod
+                    keepAliveTimeout: nodeEnv === 'development' ? 5000 : 8000  // 5s dev, 8s prod
                 }, {
                     // Messages localisés (français)
                     AJAX_TIMEOUT: "Délai d'expiration de la requête"
