@@ -18,6 +18,7 @@ import keepaliveRouter from "./routes/keepalive.js";
 import moneyRouter from "./routes/money.js";
 import statsRouter from "./routes/stats.js";
 import accountsRouter from "./routes/accounts.js";
+import systemRouter from "./routes/system.js";
 import { SERVER_WEBSOCKET_CONFIG, logWebSocketConfig } from "./config/websocket.js";
 import { logKeepaliveConfig, validateConfig } from "./config/keepalive.config.js";
 import { 
@@ -34,7 +35,7 @@ import { initChaCha20 } from "./chacha20.js";
 import { initializeDatabase, pool } from "./config/db.js";
 
 // Import Redis pour cache et sessions
-import { initRedis, closeRedis, redisClient } from "./config/redis.js";
+import { initRedis, closeRedis, redisClient, getRedisStatus } from "./config/redis.js";
 import { cacheResponse } from "./middleware/cache.js";
 import auditMiddleware from "./middleware/audit.js";
 
@@ -78,7 +79,14 @@ initChaCha20();
 logKeepaliveConfig();
 validateConfig();
 
-// Initialiser Redis (avec fallback gracieux si non disponible)
+// ✅ Initialiser Redis et afficher son statut
+console.log('\n📍 [STARTUP] Redis Configuration:');
+const redisStatus = getRedisStatus();
+console.log(`   • URL: ${redisStatus.url}`);
+console.log(`   • Timeout: ${redisStatus.timeout}ms`);
+console.log(`   • Max Retries: ${redisStatus.maxAttempts}`);
+console.log(`   • Environment: ${redisStatus.environment.toUpperCase()}\n`);
+
 await initRedis().catch(err => {
   console.warn('⚠️ Redis n\'est pas disponible, fonctionnement sans cache:', err.message);
 });
@@ -167,9 +175,11 @@ app.use('/fonts', express.static(path.join(__dirname, 'static', 'fonts')));
 let wss;
 
 /**
- * Diffuse des données à tous les clients WebSocket connectés.
- * ✅ Ajoute automatiquement serverTime pour synchronisation
- * ✅ Vérifie que wss existe avant de broadcaster (évite erreurs si WebSocket pas encore initialisé)
+ * ✅ Diffuse des données à tous les clients WebSocket connectés avec synchronisation améliorée
+ * - Ajoute automatiquement serverTime pour synchronisation
+ * - Ajoute currentScreen et timeInRace si disponibles
+ * - Vérifie que wss existe avant de broadcaster
+ * - Gère les erreurs de connexion individuellement
  */
 function broadcast(data) {
   // ✅ Vérifier que WebSocket est initialisé
@@ -178,17 +188,56 @@ function broadcast(data) {
     return;
   }
   
+  const now = Date.now();
   const enhancedData = {
     ...data,
-    serverTime: Date.now() // ✅ SYNC: Timestamp serveur pour tous les broadcasts
+    serverTime: now, // ✅ SYNC: Timestamp serveur pour tous les broadcasts
+    
+    // ✅ NOUVEAU: Ajouter currentScreen si non présent et calculable
+    currentScreen: data.currentScreen || (() => {
+      if (gameState.isRaceRunning && gameState.raceStartTime) {
+        const timeInRace = now - gameState.raceStartTime;
+        if (timeInRace < MOVIE_SCREEN_DURATION_MS) return 'movie_screen';
+        if (timeInRace < TOTAL_RACE_TIME_MS) return 'finish_screen';
+      }
+      return 'game_screen';
+    })(),
+    
+    // ✅ NOUVEAU: Ajouter timeInRace si calculable
+    timeInRace: data.timeInRace !== undefined ? data.timeInRace : 
+                (gameState.isRaceRunning && gameState.raceStartTime ? now - gameState.raceStartTime : 0),
+    
+    // ✅ NOUVEAU: Ajouter timer info si disponible
+    timer: data.timer || (gameState.nextRoundStartTime ? {
+      timeLeft: Math.max(0, gameState.nextRoundStartTime - now),
+      totalDuration: ROUND_WAIT_DURATION_MS,
+      startTime: gameState.nextRoundStartTime - ROUND_WAIT_DURATION_MS,
+      endTime: gameState.nextRoundStartTime,
+      percentage: Math.max(0, Math.min(100, 100 - ((gameState.nextRoundStartTime - now) / ROUND_WAIT_DURATION_MS) * 100))
+    } : null)
   };
+  
+  let successCount = 0;
+  let errorCount = 0;
   
   try {
     wss.clients.forEach((client) => {
       if (client.readyState === 1) { // 1 = WebSocket.OPEN
-        client.send(JSON.stringify(enhancedData));
+        try {
+          client.send(JSON.stringify(enhancedData));
+          successCount++;
+        } catch (clientErr) {
+          errorCount++;
+          // ✅ Gérer les erreurs individuelles sans arrêter le broadcast
+          console.warn(`[BROADCAST] ⚠️ Erreur client individuel:`, clientErr.message);
+        }
       }
     });
+    
+    // ✅ Log seulement si erreurs significatives
+    if (errorCount > 0 && NODE_ENV === 'development') {
+      console.warn(`[BROADCAST] ⚠️ ${errorCount} erreur(s) sur ${successCount + errorCount} client(s)`);
+    }
   } catch (err) {
     console.error('[BROADCAST] ❌ Erreur lors du broadcast:', err.message);
   }
@@ -421,6 +470,9 @@ app.use("/api/v1/money/", verifyToken, requireRole('cashier', 'admin'), moneyRou
 // ✅ NOUVEAU: Routes de gestion des comptes de caisse
 app.use("/api/v1/accounts/", accountsRouter);
 
+// ✅ NOUVEAU: Routes de configuration système
+app.use("/api/v1/system/", systemRouter);
+
 // ✅ NOUVEAU: Stats & Audit routes (PostgreSQL + Redis strategy)
 app.use("/api/v1/stats/", statsRouter);
 
@@ -593,13 +645,16 @@ httpServer.listen(PORT, async () => {
   // Le client gère le timer et clique automatiquement, plus besoin de l'AUTO-RECOVERY
   // scheduleAutoStartRound();
   
-  // ✅ BROADCAST TIMER: Synchronisation client toutes les 500ms
+  // ✅ BROADCAST TIMER: Synchronisation client améliorée
+  // - Synchronisation toutes les 500ms pour le timer d'attente (game_screen)
+  // - Synchronisation toutes les 100ms pendant une course (pour timeInRace précis)
   // Cela permet aux clients de rester synchronisés même s'ils dérivent
+  
+  // Timer pour synchronisation du timer d'attente (game_screen)
   setInterval(() => {
     const now = Date.now();
-    if (gameState.nextRoundStartTime && gameState.nextRoundStartTime > now) {
+    if (gameState.nextRoundStartTime && gameState.nextRoundStartTime > now && !gameState.isRaceRunning) {
       const timeLeft = gameState.nextRoundStartTime - now;
-          // ✅ Utilise ROUND_WAIT_DURATION_MS importé depuis config/app.config.js
       
       broadcast({
         event: 'timer_update',
@@ -609,12 +664,41 @@ httpServer.listen(PORT, async () => {
           totalDuration: ROUND_WAIT_DURATION_MS,
           startTime: gameState.nextRoundStartTime - ROUND_WAIT_DURATION_MS,
           endTime: gameState.nextRoundStartTime,
-          percentage: 100 - (timeLeft / ROUND_WAIT_DURATION_MS) * 100,
+          percentage: Math.max(0, Math.min(100, 100 - (timeLeft / ROUND_WAIT_DURATION_MS) * 100)),
           serverTime: now
-        }
+        },
+        currentScreen: 'game_screen'
       });
     }
   }, 500);
+  
+  // ✅ NOUVEAU: Synchronisation pendant la course (movie_screen et finish_screen)
+  setInterval(() => {
+    const now = Date.now();
+    if (gameState.isRaceRunning && gameState.raceStartTime) {
+      const timeInRace = now - gameState.raceStartTime;
+      let currentScreen = 'game_screen';
+      
+      if (timeInRace < MOVIE_SCREEN_DURATION_MS) {
+        currentScreen = 'movie_screen';
+      } else if (timeInRace < TOTAL_RACE_TIME_MS) {
+        currentScreen = 'finish_screen';
+      }
+      
+      // ✅ Broadcast seulement toutes les 2s pour synchronisation (évite le spam)
+      if (timeInRace % 2000 < 100) { // Toutes les ~2s
+        broadcast({
+          event: 'race_sync',
+          roundId: gameState.currentRound?.id,
+          raceStartTime: gameState.raceStartTime,
+          timeInRace: timeInRace,
+          currentScreen: currentScreen,
+          serverTime: now,
+          isRaceRunning: true
+        });
+      }
+    }
+  }, 100); // Vérification toutes les 100ms pour détecter les changements d'écran rapidement
   
   // ✅ SUPPRIMÉ: Plus besoin de démarrer automatiquement la course
   // Le round est maintenant créé au démarrage avec un timer actif

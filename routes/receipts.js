@@ -3,6 +3,7 @@
 import express from "express";
 import { gameState, wrap } from "../game.js";
 import { escapeHtml, systemToPublic } from "../utils.js";
+import { SYSTEM_NAME, CURRENT_GAME } from "../config/system.config.js";
 
 // Import ChaCha20 pour les IDs de reçus sécurisés
 import { chacha20Random, chacha20RandomInt, initChaCha20 } from "../chacha20.js";
@@ -343,7 +344,8 @@ export default function createReceiptsRouter(broadcast) {
         <div class="receipt-container">
           
           <div class="header text-center">
-            <h2>PARYAJ CHEVAL</h2>
+            <h2>${SYSTEM_NAME}</h2>
+            <h3 style="margin: 5px 0; font-size: 16px; color: #666;">Jeu: ${CURRENT_GAME.displayName}</h3>
             <div class="header-info">
               <div class="header-line">
                 <span class="header-label">Ticket:</span>
