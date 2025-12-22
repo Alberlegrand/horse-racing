@@ -21,38 +21,41 @@ module.exports = {
       // ✅ Application principale - Server Node.js
       name: 'horse-racing-server',
       script: './server.js',
-      instances: 1,
-      exec_mode: 'fork',
+      instances: 1,                // 1 instance (fork mode)
+      exec_mode: 'fork',           // Mode fork (pas de clustering)
       
-      // Environnement
+      // ======================================
+      // ENVIRONNEMENT
+      // ======================================
       env: {
+        // DÉVELOPPEMENT
         NODE_ENV: 'development',
         PORT: 8080,
         LOG_LEVEL: 'debug'
       },
       
-      // Production environment
       env_production: {
+        // PRODUCTION
         NODE_ENV: 'production',
         PORT: 8080,
         LOG_LEVEL: 'info'
       },
       
-      // Options de redémarrage automatique
-      restart_delay: 4000,        // Délai avant redémarrage (4s)
-      max_restarts: 10,           // Nombre max de redémarrages
-      min_uptime: '30s',          // Temps min avant comptabiliser comme crash (augmenté pour capturer les erreurs)
-      exp_backoff_restart_delay: 100, // Augmenter délai après chaque crash
+      // ======================================
+      // STRATÉGIE DE REDÉMARRAGE
+      // ======================================
+      restart_delay: 4000,         // Délai avant redémarrage (4s)
+      max_restarts: 5,             // Max 5 redémarrages en 15s
+      min_uptime: '10s',           // Considérer comme crash si arrêt < 10s
+      exp_backoff_restart_delay: 100, // +100ms à chaque tentative
       
-      // Fichiers à ignorer pour le watch mode
-      watch: [
-        'server.js',
-        'game.js',
-        'routes/',
-        'models/',
-        'middleware/',
-        '.env'
-      ],
+      // ======================================
+      // MONITORING DES FICHIERS (Watch)
+      // ======================================
+      watch: false,                // ❌ DÉSACTIVER en production
+      // ✅ Utiliser en développement (décommenter):
+      // watch: ['server.js', 'game.js', 'routes/', 'middleware/', '.env'],
+      
       ignore_watch: [
         'node_modules',
         'logs',
@@ -62,25 +65,29 @@ module.exports = {
         'package-lock.json'
       ],
       
-      // Logging
-      output: './logs/out.log',
-      error: './logs/error.log',
+      // ======================================
+      // LOGGING
+      // ======================================
+      output: './logs/out.log',              // Sortie standard
+      error: './logs/error.log',             // Sorties d'erreur
       log_date_format: 'YYYY-MM-DD HH:mm:ss Z',
+      merge_logs: true,              // Fusionner logs
       
-      // Gestion de la mémoire
-      max_memory_restart: '500M',  // Redémarrer si dépassement 500MB
+      // ======================================
+      // GESTION DES RESSOURCES
+      // ======================================
+      max_memory_restart: '500M',    // Redémarrer si > 500MB
       
-      // Signaux de terminaison
-      kill_timeout: 3000,          // Timeout avant kill forcé (3s)
-      listen_timeout: 5000,        // Timeout avant considérer comme démarré (5s)
+      // ======================================
+      // SIGNAUX & TIMEOUTS
+      // ======================================
+      kill_timeout: 5000,            // Timeout SIGKILL (5s)
+      listen_timeout: 8000,          // Timeout démarrage (8s)
       
-      // Merges des logs des instances
-      merge_logs: true,
-      
-      // Pas d'autorestart au démarrage si sauvegardé
+      // ======================================
+      // COMPORTEMENT GÉNÉRAL
+      // ======================================
       autorestart: true,
-      
-      // Détails des erreurs
       instance_var: 'INSTANCE_ID'
     }
   ],
