@@ -41,7 +41,8 @@ module.exports = {
       // Options de redémarrage automatique
       restart_delay: 4000,        // Délai avant redémarrage (4s)
       max_restarts: 10,           // Nombre max de redémarrages
-      min_uptime: '10s',          // Temps min avant comptabiliser comme crash
+      min_uptime: '30s',          // Temps min avant comptabiliser comme crash (augmenté pour capturer les erreurs)
+      exp_backoff_restart_delay: 100, // Augmenter délai après chaque crash
       
       // Fichiers à ignorer pour le watch mode
       watch: [

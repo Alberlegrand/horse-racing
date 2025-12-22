@@ -1,0 +1,54 @@
+# Render.com Deployment Configuration
+# Pour deployer sur Render.com avec PM2
+
+services:
+  - type: web
+    name: horse-racing
+    runtime: node
+    region: oregon
+    plan: free
+    
+    # Build
+    buildCommand: npm ci
+    startCommand: npm run pm2:start
+    
+    # Environment
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 8080
+      - key: LOG_LEVEL
+        value: info
+      
+      # ⚠️ A CONFIGURER:
+      # Database
+      - key: DATABASE_URL
+        sync: false  # À définir dans Render dashboard
+      
+      # Redis
+      - key: REDIS_URL
+        sync: false  # À définir dans Render dashboard
+      
+      # JWT
+      - key: JWT_SECRET
+        sync: false  # À définir dans Render dashboard
+    
+    # Health check
+    healthCheckPath: /api/v1/health
+    
+    # Autoscale (optionnel)
+    autoDeploy: true
+
+# Pour utiliser ce fichier:
+# 1. Créez un repository GitHub
+# 2. Poussez ce fichier à la racine
+# 3. Connectez Render à GitHub
+# 4. Créez une Web Service
+# 5. Render detectera automatiquement render.yml
+# 6. Configurez les variables d'environnement dans le dashboard Render
+
+# Variables à définir manuellement dans Render:
+#   DATABASE_URL: postgresql://...
+#   REDIS_URL: redis://:password@host:port
+#   JWT_SECRET: votre-secret-jwt
