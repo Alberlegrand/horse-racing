@@ -69,9 +69,11 @@ export const initializeDatabase = async () => {
   if (!(await testConnection())) return;
 
   try {
-    // Drop and recreate tables to ensure schema is correct (dev/test only)
+    // Drop and recreate tables only in development
     // In production, use proper migrations instead
-    await dropTablesIfExist();
+    if (process.env.NODE_ENV !== 'production') {
+      await dropTablesIfExist();
+    }
     
     await createTables();
     console.log("✅ Initialisation de la base de données réussie");
@@ -115,6 +117,12 @@ const dropTablesIfExist = async () => {
     await client.query("DROP TABLE IF EXISTS user_profiles CASCADE");
     await client.query("DROP TABLE IF EXISTS users CASCADE");
     await client.query("DROP TABLE IF EXISTS app_settings CASCADE");
+    
+    // Drop custom types/enums if they exist
+    await client.query("DROP TYPE IF EXISTS user_role CASCADE");
+    await client.query("DROP TYPE IF EXISTS role_type CASCADE");
+    await client.query("DROP TYPE IF EXISTS status_type CASCADE");
+    await client.query("DROP TYPE IF EXISTS bet_status CASCADE");
 
     await client.query("COMMIT");
     console.log("🗑️ Anciennes tables supprimées");
