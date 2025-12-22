@@ -1,0 +1,1087 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Panneau d'Administration - Horse Racing</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    :root {
+      --primary: #2c3e50;
+      --secondary: #e74c3c;
+      --success: #27ae60;
+      --warning: #f39c12;
+      --info: #3498db;
+      --light: #ecf0f1;
+      --border: #bdc3c7;
+      --text: #2c3e50;
+    }
+
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+      color: var(--text);
+    }
+
+    .container {
+      max-width: 1400px;
+      margin: 0 auto;
+      padding: 20px;
+    }
+
+    /* HEADER */
+    .header {
+      background: white;
+      padding: 20px;
+      border-radius: 10px;
+      margin-bottom: 30px;
+      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 20px;
+    }
+
+    .header h1 {
+      font-size: 28px;
+      color: var(--primary);
+    }
+
+    .header-actions {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .btn {
+      padding: 10px 20px;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 600;
+      transition: all 0.3s ease;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .btn-primary {
+      background: var(--info);
+      color: white;
+    }
+
+    .btn-primary:hover {
+      background: #2980b9;
+      transform: translateY(-2px);
+      box-shadow: 0 5px 15px rgba(52, 152, 219, 0.4);
+    }
+
+    .btn-danger {
+      background: var(--secondary);
+      color: white;
+    }
+
+    .btn-danger:hover {
+      background: #c0392b;
+      transform: translateY(-2px);
+      box-shadow: 0 5px 15px rgba(231, 76, 60, 0.4);
+    }
+
+    .btn-success {
+      background: var(--success);
+      color: white;
+    }
+
+    .btn-success:hover {
+      background: #229954;
+      transform: translateY(-2px);
+      box-shadow: 0 5px 15px rgba(39, 174, 96, 0.4);
+    }
+
+    .btn-warning {
+      background: var(--warning);
+      color: white;
+    }
+
+    .btn-warning:hover {
+      background: #e67e22;
+      transform: translateY(-2px);
+      box-shadow: 0 5px 15px rgba(243, 156, 18, 0.4);
+    }
+
+    .btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+      transform: none;
+    }
+
+    /* GRID LAYOUT */
+    .dashboard-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      gap: 20px;
+      margin-bottom: 30px;
+    }
+
+    .card {
+      background: white;
+      border-radius: 10px;
+      padding: 20px;
+      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+      transition: all 0.3s ease;
+    }
+
+    .card:hover {
+      box-shadow: 0 5px 20px rgba(0, 0, 0, 0.15);
+      transform: translateY(-2px);
+    }
+
+    .card h2 {
+      font-size: 18px;
+      margin-bottom: 15px;
+      color: var(--primary);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .card h2::before {
+      content: "";
+      display: inline-block;
+      width: 4px;
+      height: 24px;
+      background: var(--info);
+      border-radius: 2px;
+    }
+
+    /* STATUS SECTION */
+    .status-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 10px 0;
+      border-bottom: 1px solid var(--light);
+      font-size: 14px;
+    }
+
+    .status-item:last-child {
+      border-bottom: none;
+    }
+
+    .status-label {
+      font-weight: 600;
+      color: var(--text);
+    }
+
+    .status-value {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--secondary);
+    }
+
+    .status-badge {
+      display: inline-block;
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      background: var(--success);
+    }
+
+    .status-badge.offline {
+      background: var(--secondary);
+    }
+
+    .status-badge.warning {
+      background: var(--warning);
+    }
+
+    /* CONTROLS SECTION */
+    .controls {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .control-group {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .control-group.vertical {
+      flex-direction: column;
+    }
+
+    /* TIMER SECTION */
+    .timer-display {
+      font-size: 24px;
+      font-weight: bold;
+      color: var(--info);
+      text-align: center;
+      padding: 20px;
+      background: #f8f9fa;
+      border-radius: 8px;
+      margin: 10px 0;
+      font-family: 'Courier New', monospace;
+    }
+
+    .timer-label {
+      font-size: 12px;
+      color: #7f8c8d;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+
+    /* LOGS SECTION */
+    .logs-container {
+      background: #f8f9fa;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 15px;
+      max-height: 400px;
+      overflow-y: auto;
+      font-family: 'Courier New', monospace;
+      font-size: 12px;
+      line-height: 1.6;
+    }
+
+    .log-entry {
+      padding: 5px 0;
+      border-bottom: 1px solid #e0e0e0;
+    }
+
+    .log-entry:last-child {
+      border-bottom: none;
+    }
+
+    .log-timestamp {
+      color: #7f8c8d;
+      margin-right: 10px;
+    }
+
+    .log-info { color: #3498db; }
+    .log-success { color: #27ae60; }
+    .log-warning { color: #f39c12; }
+    .log-error { color: #e74c3c; }
+
+    /* STATS GRID */
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 10px;
+    }
+
+    .stat {
+      background: #f8f9fa;
+      padding: 15px;
+      border-radius: 8px;
+      border-left: 4px solid var(--info);
+    }
+
+    .stat-label {
+      font-size: 12px;
+      color: #7f8c8d;
+      text-transform: uppercase;
+      margin-bottom: 5px;
+    }
+
+    .stat-value {
+      font-size: 24px;
+      font-weight: bold;
+      color: var(--primary);
+    }
+
+    /* MODAL */
+    .modal {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.5);
+      z-index: 1000;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .modal.active {
+      display: flex;
+    }
+
+    .modal-content {
+      background: white;
+      border-radius: 10px;
+      padding: 30px;
+      max-width: 500px;
+      width: 90%;
+      box-shadow: 0 5px 40px rgba(0, 0, 0, 0.3);
+    }
+
+    .modal h3 {
+      margin-bottom: 15px;
+      color: var(--primary);
+    }
+
+    .modal-actions {
+      display: flex;
+      gap: 10px;
+      justify-content: flex-end;
+      margin-top: 20px;
+    }
+
+    /* ALERT */
+    .alert {
+      padding: 15px;
+      border-radius: 8px;
+      margin-bottom: 15px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .alert-success {
+      background: #d4edda;
+      color: #155724;
+      border: 1px solid #c3e6cb;
+    }
+
+    .alert-danger {
+      background: #f8d7da;
+      color: #721c24;
+      border: 1px solid #f5c6cb;
+    }
+
+    .alert-warning {
+      background: #fff3cd;
+      color: #856404;
+      border: 1px solid #ffeaa7;
+    }
+
+    .alert-info {
+      background: #d1ecf1;
+      color: #0c5460;
+      border: 1px solid #bee5eb;
+    }
+
+    /* RESPONSIVE */
+    @media (max-width: 768px) {
+      .container {
+        padding: 10px;
+      }
+
+      .header {
+        flex-direction: column;
+        text-align: center;
+      }
+
+      .header h1 {
+        font-size: 22px;
+      }
+
+      .dashboard-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .stats-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .control-group {
+        flex-direction: column;
+      }
+
+      .btn {
+        width: 100%;
+        justify-content: center;
+      }
+
+      .timer-display {
+        font-size: 18px;
+      }
+    }
+
+    /* LOADING STATE */
+    .loading {
+      opacity: 0.6;
+      pointer-events: none;
+    }
+
+    .spinner {
+      display: inline-block;
+      width: 16px;
+      height: 16px;
+      border: 2px solid #f3f3f3;
+      border-top: 2px solid var(--info);
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+    }
+
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+
+    /* LOGOUT */
+    .user-info {
+      display: flex;
+      align-items: center;
+      gap: 15px;
+      padding: 10px 15px;
+      background: #f8f9fa;
+      border-radius: 8px;
+    }
+
+    .user-info .btn {
+      margin: 0;
+      padding: 8px 12px;
+      font-size: 12px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <!-- HEADER -->
+    <div class="header">
+      <div>
+        <h1>🎯 Panneau d'Administration</h1>
+        <p style="color: #7f8c8d; font-size: 14px; margin-top: 5px;">Système de Gestion du Serveur Horse Racing</p>
+      </div>
+      <div class="user-info">
+        <span id="userName">Chargement...</span>
+        <button class="btn btn-danger" onclick="logout()">Déconnexion</button>
+      </div>
+    </div>
+
+    <!-- ALERTS -->
+    <div id="alertContainer"></div>
+
+    <!-- STATUS & SERVER INFO -->
+    <div class="dashboard-grid">
+      <!-- SERVER STATUS -->
+      <div class="card">
+        <h2>État du Serveur</h2>
+        <div class="status-item">
+          <span class="status-label">Statut</span>
+          <span class="status-value">
+            <span class="status-badge" id="statusBadge"></span>
+            <span id="statusText">Vérification...</span>
+          </span>
+        </div>
+        <div class="status-item">
+          <span class="status-label">Uptime</span>
+          <span class="status-value" id="uptimeValue">-</span>
+        </div>
+        <div class="status-item">
+          <span class="status-label">Port</span>
+          <span class="status-value" id="portValue">-</span>
+        </div>
+        <div class="status-item">
+          <span class="status-label">Node.js</span>
+          <span class="status-value" id="nodeVersion">-</span>
+        </div>
+        <div class="status-item">
+          <span class="status-label">Mode</span>
+          <span class="status-value" id="nodeEnv">-</span>
+        </div>
+      </div>
+
+      <!-- DATABASE STATUS -->
+      <div class="card">
+        <h2>Base de Données</h2>
+        <div class="status-item">
+          <span class="status-label">PostgreSQL</span>
+          <span class="status-value">
+            <span class="status-badge" id="dbBadge"></span>
+            <span id="dbStatus">Vérification...</span>
+          </span>
+        </div>
+        <div class="status-item">
+          <span class="status-label">Connexions</span>
+          <span class="status-value" id="dbConnections">-</span>
+        </div>
+        <div class="status-item">
+          <span class="status-label">Redis</span>
+          <span class="status-value">
+            <span class="status-badge" id="redisBadge"></span>
+            <span id="redisStatus">Vérification...</span>
+          </span>
+        </div>
+      </div>
+
+      <!-- GAME STATUS -->
+      <div class="card">
+        <h2>État du Jeu</h2>
+        <div class="status-item">
+          <span class="status-label">Round Actif</span>
+          <span class="status-value" id="currentRound">-</span>
+        </div>
+        <div class="status-item">
+          <span class="status-label">Joueurs en Ligne</span>
+          <span class="status-value" id="onlinePlayers">-</span>
+        </div>
+        <div class="status-item">
+          <span class="status-label">Parieur Actif</span>
+          <span class="status-value" id="activeBettors">-</span>
+        </div>
+        <div class="status-item">
+          <span class="status-label">Total Pariés (H)</span>
+          <span class="status-value" id="totalBets">-</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- CONTROLS -->
+    <div class="dashboard-grid">
+      <!-- SERVER CONTROLS -->
+      <div class="card">
+        <h2>Contrôle du Serveur</h2>
+        <div class="controls">
+          <div class="control-group">
+            <button class="btn btn-warning" onclick="restartServer()">
+              ⟳ Redémarrer le Serveur
+            </button>
+          </div>
+          <div class="control-group">
+            <button class="btn btn-primary" onclick="clearCache()">
+              🗑️ Vider le Cache
+            </button>
+            <button class="btn btn-primary" onclick="healthCheck()">
+              ✓ Vérifier la Santé
+            </button>
+          </div>
+          <div class="control-group vertical">
+            <small style="color: #7f8c8d;">Gestion des services principaux</small>
+          </div>
+        </div>
+      </div>
+
+      <!-- GAME CONTROLS -->
+      <div class="card">
+        <h2>Contrôle du Jeu</h2>
+        <div class="controls">
+          <div class="control-group">
+            <button class="btn btn-primary" onclick="forceNewRound()">
+              ⚡ Forcer Nouveau Round
+            </button>
+          </div>
+          <div class="control-group">
+            <button class="btn btn-info" onclick="pauseGame()">
+              ⏸️ Pause Jeu
+            </button>
+            <button class="btn btn-success" onclick="resumeGame()">
+              ▶️ Reprendre Jeu
+            </button>
+          </div>
+          <div class="control-group vertical">
+            <small style="color: #7f8c8d;">Gestion des rounds et du flux du jeu</small>
+          </div>
+        </div>
+      </div>
+
+      <!-- DATABASE CONTROLS -->
+      <div class="card">
+        <h2>Contrôle BD</h2>
+        <div class="controls">
+          <div class="control-group">
+            <button class="btn btn-primary" onclick="backupDatabase()">
+              💾 Sauvegarder BD
+            </button>
+          </div>
+          <div class="control-group">
+            <button class="btn btn-warning" onclick="rebuildCache()">
+              🔄 Reconstruire Cache
+            </button>
+          </div>
+          <div class="control-group vertical">
+            <small style="color: #7f8c8d;">Gestion de la base de données</small>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- STATISTICS -->
+    <div class="card">
+      <h2>Statistiques Détaillées</h2>
+      <div class="stats-grid">
+        <div class="stat">
+          <div class="stat-label">Revenue Aujourd'hui</div>
+          <div class="stat-value" id="revenueToday">-</div>
+        </div>
+        <div class="stat">
+          <div class="stat-label">Avg Pari/Round</div>
+          <div class="stat-value" id="avgBetPerRound">-</div>
+        </div>
+        <div class="stat">
+          <div class="stat-label">Rounds Complétés</div>
+          <div class="stat-value" id="completedRounds">-</div>
+        </div>
+        <div class="stat">
+          <div class="stat-label">Taux de Succès</div>
+          <div class="stat-value" id="successRate">-</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- LOGS -->
+    <div class="card">
+      <h2>Logs du Serveur</h2>
+      <button class="btn btn-primary" onclick="clearLogs()" style="margin-bottom: 10px;">
+        🗑️ Effacer les Logs
+      </button>
+      <div class="logs-container" id="logsContainer">
+        <div class="log-entry"><span class="log-timestamp">[INIT]</span> En attente de connexion...</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL CONFIRMATION -->
+  <div class="modal" id="confirmModal">
+    <div class="modal-content">
+      <h3 id="modalTitle">Confirmation</h3>
+      <p id="modalMessage">Êtes-vous sûr?</p>
+      <div class="modal-actions">
+        <button class="btn btn-primary" onclick="closeModal()">Annuler</button>
+        <button class="btn btn-danger" id="confirmBtn" onclick="executeConfirm()">Confirmer</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // ===== CONFIGURATION =====
+    const API_BASE = 'http://localhost:8080';
+    let authToken = localStorage.getItem('authToken');
+    let confirmAction = null;
+
+    // ===== INIT =====
+    document.addEventListener('DOMContentLoaded', () => {
+      if (!authToken) {
+        window.location.href = '/login.html';
+        return;
+      }
+
+      loadUserInfo();
+      loadServerStatus();
+      loadDatabaseStats();
+      
+      // Actualiser le statut toutes les 5 secondes
+      setInterval(loadServerStatus, 5000);
+      
+      // Actualiser les stats BD chaque 30 secondes
+      setInterval(loadDatabaseStats, 30000);
+      
+      // Actualiser les logs toutes les 2 secondes
+      setInterval(loadLogs, 2000);
+
+      addLog('✅ Connexion au panneau d\'administration', 'success');
+    });
+
+    // ===== USER INFO =====
+    async function loadUserInfo() {
+      try {
+        const response = await fetch(`${API_BASE}/api/v1/auth/me`, {
+          headers: { 'Authorization': `Bearer ${authToken}` }
+        });
+        const data = await response.json();
+        if (data.user) {
+          document.getElementById('userName').textContent = `👤 ${data.user.username}`;
+        }
+      } catch (e) {
+        addLog('Erreur chargement utilisateur: ' + e.message, 'error');
+      }
+    }
+
+    // ===== SERVER STATUS =====
+    async function loadServerStatus() {
+      try {
+        const response = await fetch(`${API_BASE}/api/v1/admin/health`, {
+          headers: { 'Authorization': `Bearer ${authToken}` }
+        });
+        const data = await response.json();
+
+        if (!response.ok) {
+          addLog('❌ Erreur accès API admin: ' + (data.error || response.status), 'error');
+          updateStatus('statusBadge', false);
+          document.getElementById('statusText').textContent = '❌ Erreur API';
+          return;
+        }
+
+        updateStatus('statusBadge', data.status === 'ok');
+        document.getElementById('statusText').textContent = data.status === 'ok' ? '✅ En Ligne' : '⚠️ Dégradé';
+        document.getElementById('uptimeValue').textContent = formatUptime(data.uptime);
+        document.getElementById('nodeEnv').textContent = (data.nodeEnv || 'N/A').toUpperCase();
+        document.getElementById('portValue').textContent = data.port || '8080';
+        document.getElementById('nodeVersion').textContent = data.nodeVersion || 'N/A';
+
+        // DATABASE
+        updateStatus('dbBadge', data.database?.connected);
+        document.getElementById('dbStatus').textContent = data.database?.connected ? '✅ Connectée' : '❌ Déconnectée';
+        document.getElementById('dbConnections').textContent = (data.database?.connections || 0);
+
+        // REDIS
+        updateStatus('redisBadge', data.redis?.connected);
+        document.getElementById('redisStatus').textContent = data.redis?.connected ? '✅ Connectée' : '❌ Déconnectée';
+
+        // GAME
+        document.getElementById('currentRound').textContent = data.gameState?.currentRound || '0';
+        document.getElementById('onlinePlayers').textContent = data.gameState?.onlinePlayers || '0';
+        document.getElementById('activeBettors').textContent = data.gameState?.activeBettors || '0';
+        document.getElementById('totalBets').textContent = formatCurrency(data.gameState?.totalBets || 0);
+
+        // STATS
+        document.getElementById('revenueToday').textContent = formatCurrency(data.stats?.revenueToday || 0);
+        document.getElementById('avgBetPerRound').textContent = formatCurrency(data.stats?.avgBetPerRound || 0);
+        document.getElementById('completedRounds').textContent = data.stats?.completedRounds || '0';
+        document.getElementById('successRate').textContent = (data.stats?.successRate || 0).toFixed(1) + '%';
+
+      } catch (e) {
+        addLog('❌ Erreur chargement statut: ' + e.message, 'error');
+        updateStatus('statusBadge', false);
+        document.getElementById('statusText').textContent = '❌ Erreur de Connexion';
+      }
+    }
+
+    // ===== DATABASE STATS =====
+    async function loadDatabaseStats() {
+      try {
+        const response = await fetch(`${API_BASE}/api/v1/admin/database/stats`, {
+          headers: { 'Authorization': `Bearer ${authToken}` }
+        });
+        const data = await response.json();
+        
+        if (response.ok && data.success) {
+          window.dbStats = data;
+        }
+      } catch (e) {
+        console.warn('DB stats error:', e.message);
+      }
+    }
+
+    // ===== SERVER ACTIONS =====
+    async function restartServer() {
+      showConfirm(
+        '⟳ Redémarrage du Serveur',
+        'Cela va redémarrer le serveur.\nLes connexions actives seront temporairement perdues.\nLe serveur reviendra en ligne automatiquement.\n\nContinuer?',
+        async () => {
+          try {
+            addLog('⟳ Envoi de la demande de redémarrage...', 'warning');
+            
+            const response = await fetch(`${API_BASE}/api/v1/admin/server/restart`, {
+              method: 'POST',
+              headers: { 'Authorization': `Bearer ${authToken}` }
+            });
+            const data = await response.json();
+            
+            if (!response.ok) {
+              showAlert('❌ Erreur: ' + (data.error || response.status), 'danger');
+              addLog('❌ Erreur redémarrage: ' + (data.error || response.status), 'error');
+              return;
+            }
+
+            showAlert('⟳ ' + (data.message || 'Serveur en cours de redémarrage...'), 'warning');
+            addLog('⟳ Redémarrage du serveur initialisé par ' + (data.triggeredBy || 'admin'), 'warning');
+            addLog('⏳ Attente du redémarrage (3 secondes)...', 'info');
+            
+            // Désactiver les boutons pendant le redémarrage
+            document.querySelectorAll('button').forEach(btn => {
+              btn.disabled = true;
+              btn.style.opacity = '0.5';
+            });
+            
+            // Attendre que le serveur redémarre et vérifier la connexion
+            let attempts = 0;
+            const maxAttempts = 30; // 30 essais = 30 secondes max
+            const checkConnection = setInterval(async () => {
+              attempts++;
+              try {
+                const healthResponse = await fetch(`${API_BASE}/api/v1/admin/health`, {
+                  headers: { 'Authorization': `Bearer ${authToken}` }
+                });
+                
+                if (healthResponse.ok) {
+                  clearInterval(checkConnection);
+                  showAlert('✅ Serveur redémarré avec succès!', 'success');
+                  addLog('✅ Reconnexion au serveur réussie', 'success');
+                  
+                  // Réactiver les boutons
+                  document.querySelectorAll('button').forEach(btn => {
+                    btn.disabled = false;
+                    btn.style.opacity = '1';
+                  });
+                  
+                  // Recharger les données
+                  loadServerStatus();
+                } else if (attempts > maxAttempts) {
+                  clearInterval(checkConnection);
+                  showAlert('⏱️ Timeout - Le serveur prend du temps à redémarrer', 'warning');
+                  addLog('⏱️ Timeout après ' + maxAttempts + ' essais', 'warning');
+                  
+                  // Réactiver les boutons
+                  document.querySelectorAll('button').forEach(btn => {
+                    btn.disabled = false;
+                    btn.style.opacity = '1';
+                  });
+                }
+              } catch (e) {
+                if (attempts % 5 === 0) {
+                  addLog(`⏳ Tentative ${attempts}/${maxAttempts} - serveur redémarre...`, 'info');
+                }
+                
+                if (attempts > maxAttempts) {
+                  clearInterval(checkConnection);
+                  showAlert('❌ Le serveur ne répond pas après redémarrage', 'danger');
+                  addLog('❌ Erreur: serveur ne répond pas', 'error');
+                  
+                  // Réactiver les boutons
+                  document.querySelectorAll('button').forEach(btn => {
+                    btn.disabled = false;
+                    btn.style.opacity = '1';
+                  });
+                }
+              }
+            }, 1000); // Vérifier toutes les 1 seconde
+            
+          } catch (e) {
+            showAlert('❌ Erreur redémarrage: ' + e.message, 'danger');
+            addLog('❌ Erreur redémarrage: ' + e.message, 'error');
+          }
+        }
+      );
+    }
+
+    async function clearCache() {
+      try {
+        const response = await fetch(`${API_BASE}/api/v1/admin/server/cache/clear`, {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${authToken}` }
+        });
+        const data = await response.json();
+        showAlert(data.message || '🗑️ Cache vidé avec succès', 'success');
+        addLog('🗑️ Cache vidé: ' + (data.cacheType || 'Redis'), 'success');
+      } catch (e) {
+        showAlert('❌ Erreur vidage cache: ' + e.message, 'danger');
+        addLog('❌ Erreur vidage cache: ' + e.message, 'error');
+      }
+    }
+
+    async function healthCheck() {
+      try {
+        const response = await fetch(`${API_BASE}/api/v1/admin/health`, {
+          headers: { 'Authorization': `Bearer ${authToken}` }
+        });
+        const data = await response.json();
+        
+        if (!response.ok) {
+          showAlert('❌ Erreur santé: ' + (data.error || response.status), 'danger');
+          addLog('❌ Vérification santé échouée', 'error');
+          return;
+        }
+
+        const dbOk = data.database?.connected;
+        const redisOk = data.redis?.connected;
+        const allOk = data.status === 'ok' && dbOk && redisOk;
+        
+        const message = allOk 
+          ? '✅ Tous les systèmes fonctionnent correctement' 
+          : `⚠️ Certains systèmes ont des problèmes (DB: ${dbOk ? '✅' : '❌'}, Redis: ${redisOk ? '✅' : '❌'}, Status: ${data.status})`;
+        
+        showAlert(message, allOk ? 'success' : 'warning');
+        addLog('Vérification de santé: ' + (allOk ? '✅ OK' : '⚠️ Dégradé'), allOk ? 'success' : 'warning');
+      } catch (e) {
+        showAlert('❌ Erreur santé: ' + e.message, 'danger');
+        addLog('❌ Erreur vérification santé: ' + e.message, 'error');
+      }
+    }
+
+    // ===== GAME CONTROLS =====
+    async function forceNewRound() {
+      showConfirm(
+        'Forcer un Nouveau Round',
+        'Cela terminera le round actuel et en démarrera un nouveau immédiatement. Continuer?',
+        async () => {
+          try {
+            const response = await fetch(`${API_BASE}/api/v1/admin/game/round/force`, {
+              method: 'POST',
+              headers: { 'Authorization': `Bearer ${authToken}` }
+            });
+            const data = await response.json();
+            showAlert('Nouveau round forcé', 'success');
+            addLog('Nouveau round forcé', 'warning');
+          } catch (e) {
+            showAlert('Erreur: ' + e.message, 'danger');
+          }
+        }
+      );
+    }
+
+    async function pauseGame() {
+      try {
+        const response = await fetch(`${API_BASE}/api/v1/admin/game/pause`, {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${authToken}` }
+        });
+        const data = await response.json();
+        showAlert('Jeu en pause', 'warning');
+        addLog('Jeu mis en pause', 'warning');
+      } catch (e) {
+        showAlert('Erreur: ' + e.message, 'danger');
+      }
+    }
+
+    async function resumeGame() {
+      try {
+        const response = await fetch(`${API_BASE}/api/v1/admin/game/resume`, {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${authToken}` }
+        });
+        const data = await response.json();
+        showAlert('Jeu repris', 'success');
+        addLog('Jeu repris', 'success');
+      } catch (e) {
+        showAlert('Erreur: ' + e.message, 'danger');
+      }
+    }
+
+    // ===== DATABASE CONTROLS =====
+    async function backupDatabase() {
+      showConfirm(
+        'Sauvegarder la Base de Données',
+        'Cela va créer une sauvegarde de la base de données. Continuer?',
+        async () => {
+          try {
+            const response = await fetch(`${API_BASE}/api/v1/admin/database/backup`, {
+              method: 'POST',
+              headers: { 'Authorization': `Bearer ${authToken}` }
+            });
+            const data = await response.json();
+            showAlert('Sauvegarde en cours: ' + (data.filename || 'backup.sql'), 'success');
+            addLog('Sauvegarde de la BD initiée', 'success');
+          } catch (e) {
+            showAlert('Erreur: ' + e.message, 'danger');
+          }
+        }
+      );
+    }
+
+    async function rebuildCache() {
+      try {
+        const response = await fetch(`${API_BASE}/api/v1/admin/database/cache/rebuild`, {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${authToken}` }
+        });
+        const data = await response.json();
+        showAlert('Cache en cours de reconstruction...', 'info');
+        addLog('Reconstruction du cache initiée', 'info');
+      } catch (e) {
+        showAlert('Erreur: ' + e.message, 'danger');
+      }
+    }
+
+    // ===== LOGS =====
+    let logBuffer = [];
+    const MAX_LOGS = 100;
+
+    function addLog(message, level = 'info') {
+      const timestamp = new Date().toLocaleTimeString();
+      logBuffer.unshift({ timestamp, message, level });
+      if (logBuffer.length > MAX_LOGS) logBuffer.pop();
+    }
+
+    function loadLogs() {
+      const container = document.getElementById('logsContainer');
+      container.innerHTML = logBuffer.map(log => `
+        <div class="log-entry">
+          <span class="log-timestamp">[${log.timestamp}]</span>
+          <span class="log-${log.level}">${log.message}</span>
+        </div>
+      `).join('');
+    }
+
+    function clearLogs() {
+      logBuffer = [];
+      loadLogs();
+      showAlert('Logs effacés', 'success');
+    }
+
+    // ===== UTILITIES =====
+    function updateStatus(elementId, isOnline) {
+      const badge = document.getElementById(elementId);
+      if (isOnline) {
+        badge.classList.remove('offline', 'warning');
+      } else {
+        badge.classList.add('offline');
+      }
+    }
+
+    function formatUptime(seconds) {
+      if (!seconds) return '0s';
+      const days = Math.floor(seconds / 86400);
+      const hours = Math.floor((seconds % 86400) / 3600);
+      const mins = Math.floor((seconds % 3600) / 60);
+      const secs = seconds % 60;
+      
+      if (days > 0) return `${days}j ${hours}h`;
+      if (hours > 0) return `${hours}h ${mins}m`;
+      if (mins > 0) return `${mins}m ${secs}s`;
+      return `${secs}s`;
+    }
+
+    function formatCurrency(amount) {
+      return new Intl.NumberFormat('fr-FR', {
+        style: 'currency',
+        currency: 'EUR'
+      }).format(amount);
+    }
+
+    // ===== MODALS & ALERTS =====
+    function showConfirm(title, message, onConfirm) {
+      document.getElementById('modalTitle').textContent = title;
+      document.getElementById('modalMessage').textContent = message;
+      confirmAction = onConfirm;
+      document.getElementById('confirmModal').classList.add('active');
+    }
+
+    function closeModal() {
+      document.getElementById('confirmModal').classList.remove('active');
+      confirmAction = null;
+    }
+
+    function executeConfirm() {
+      if (confirmAction) confirmAction();
+      closeModal();
+    }
+
+    function showAlert(message, type = 'info') {
+      const container = document.getElementById('alertContainer');
+      const alert = document.createElement('div');
+      alert.className = `alert alert-${type}`;
+      alert.innerHTML = `
+        <span>${message}</span>
+        <button onclick="this.parentElement.remove()" style="background: none; border: none; color: inherit; cursor: pointer; font-size: 18px;">×</button>
+      `;
+      container.appendChild(alert);
+      
+      setTimeout(() => alert.remove(), 5000);
+    }
+
+    function logout() {
+      localStorage.removeItem('authToken');
+      window.location.href = '/login.html';
+    }
+
+    // Fermer modal avec Escape
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') closeModal();
+    });
+  </script>
+</body>
+</html>

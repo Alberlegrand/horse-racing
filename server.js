@@ -18,6 +18,7 @@ import moneyRouter from "./routes/money.js";
 import statsRouter from "./routes/stats.js";
 import accountsRouter from "./routes/accounts.js";
 import systemRouter from "./routes/system.js";
+import adminRouter from "./routes/admin.js";
 import { SERVER_WEBSOCKET_CONFIG, logWebSocketConfig } from "./config/websocket.js";
 import { logKeepaliveConfig, validateConfig } from "./config/keepalive.config.js";
 import { 
@@ -469,6 +470,9 @@ app.use("/api/v1/system/", systemRouter);
 
 // ✅ NOUVEAU: Stats & Audit routes (PostgreSQL + Redis strategy)
 app.use("/api/v1/stats/", statsRouter);
+
+// ✅ NOUVEAU: Routes d'administration (dashboard, contrôle serveur)
+app.use("/api/v1/admin/", adminRouter);
 
 // ✅ NOUVEAU: Audit middleware (enregistre automatiquement les actions)
 app.use(auditMiddleware);

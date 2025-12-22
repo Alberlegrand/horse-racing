@@ -62,7 +62,7 @@ export default function createAuthRouter() {
       });
 
       // Also store token in localStorage-compatible response
-      const redirect = user.role === 'admin' ? '/dashboard' : '/user-dashboard';
+      const redirect = user.role === 'admin' ? '/admin-dashboard.html' : '/user-dashboard.html';
 
       return res.json({ 
         success: true, 
@@ -79,6 +79,22 @@ export default function createAuthRouter() {
   router.post('/logout', (req, res) => {
     res.clearCookie(SESSION_COOKIE_NAME, { path: '/' });
     return res.json({ success: true, message: 'Logged out successfully' });
+  });
+
+  // Get current user info
+  router.get('/me', verifyToken, (req, res) => {
+    try {
+      return res.json({ 
+        success: true, 
+        user: {
+          userId: req.user?.userId,
+          username: req.user?.username,
+          role: req.user?.role
+        }
+      });
+    } catch (err) {
+      return res.status(500).json({ success: false, error: 'Server error' });
+    }
   });
 
   return router;

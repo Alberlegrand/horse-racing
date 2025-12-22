@@ -220,3 +220,6 @@ const restored = await restoreGameStateFromRedis();
 
 **Prochaines étapes**: Appliquer les corrections proposées
 
+
+
+
