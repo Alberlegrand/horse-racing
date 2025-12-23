@@ -41,6 +41,87 @@
         .page-content.active {
             display: block;
         }
+
+        /* ============================================
+           RESPONSIVE MOBILE LANDSCAPE (Mode Paysage)
+           ============================================ */
+        @media (max-width: 900px) and (orientation: landscape) {
+            nav {
+                padding: 8px 12px;
+            }
+
+            nav .text-sm {
+                font-size: 0.7rem;
+            }
+
+            nav .text-xs {
+                font-size: 0.65rem;
+            }
+
+            header {
+                padding: 6px 12px;
+            }
+
+            header h1 {
+                font-size: 0.9rem;
+            }
+
+            main {
+                padding: 8px;
+            }
+
+            #topMenu {
+                display: none !important;
+            }
+
+            .nav-link {
+                padding: 6px 10px !important;
+                font-size: 0.7rem !important;
+            }
+
+            #cashBalanceHeader {
+                font-size: 0.75rem;
+            }
+
+            #refreshBtn, #logoutBtn {
+                padding: 6px 10px !important;
+                font-size: 0.7rem !important;
+            }
+        }
+
+        @media (max-width: 700px) and (orientation: landscape) {
+            nav {
+                padding: 6px 10px;
+                flex-wrap: wrap;
+            }
+
+            nav > div {
+                flex: 1 1 100%;
+                margin-bottom: 4px;
+            }
+
+            header h1 {
+                font-size: 0.8rem;
+            }
+
+            main {
+                padding: 6px;
+            }
+        }
+
+        @media (max-width: 600px) and (orientation: landscape) {
+            nav {
+                padding: 5px 8px;
+            }
+
+            header {
+                padding: 4px 8px;
+            }
+
+            header h1 {
+                font-size: 0.75rem;
+            }
+        }
     </style>
 </head>
 
@@ -69,12 +150,12 @@
             </button>
 
             <button data-page="course-chevaux" data-title="Course Chevaux"
-                class="nav-link px-3 py-1.5 rounded hover:bg-slate-800 text-xs">
+                class="nav-link px-3 py-1.5 rounded hover:bg-slate-800 text-xs hidden">
                 Course Chevaux
             </button>
 
             <button data-page="betting" data-title="Placer un pari"
-                class="nav-link px-3 py-1.5 rounded hover:bg-slate-800 text-xs">
+                class="nav-link px-3 py-1.5 rounded hover:bg-slate-800 text-xs hidden">
                 Placer un pari
             </button>
 

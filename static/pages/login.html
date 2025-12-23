@@ -6,6 +6,59 @@
   <title>Connexion — HITBET777</title>
   <!-- Tailwind via CDN for quick prototyping -->
   <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    /* ============================================
+       RESPONSIVE MOBILE LANDSCAPE (Mode Paysage)
+       ============================================ */
+    @media (max-width: 900px) and (orientation: landscape) {
+      .max-w-md {
+        max-width: 90%;
+        padding: 1rem;
+      }
+
+      h1 {
+        font-size: 1.25rem;
+      }
+
+      p {
+        font-size: 0.75rem;
+      }
+
+      input, button {
+        padding: 0.5rem 0.75rem;
+        font-size: 0.875rem;
+      }
+
+      label {
+        font-size: 0.75rem;
+      }
+    }
+
+    @media (max-width: 700px) and (orientation: landscape) {
+      .max-w-md {
+        padding: 0.75rem;
+      }
+
+      h1 {
+        font-size: 1.1rem;
+      }
+
+      input, button {
+        padding: 0.4rem 0.6rem;
+        font-size: 0.8rem;
+      }
+    }
+
+    @media (max-width: 600px) and (orientation: landscape) {
+      h1 {
+        font-size: 1rem;
+      }
+
+      .space-y-4 > * + * {
+        margin-top: 0.75rem;
+      }
+    }
+  </style>
 </head>
 <body class="bg-slate-900 text-slate-100 min-h-screen flex items-center justify-center">
   <div class="w-full max-w-md p-8 bg-slate-800/70 backdrop-blur rounded-xl shadow-lg">
@@ -15,11 +68,6 @@
     </div>
 
     <form id="loginForm" class="space-y-4">
-      <div>
-        <label for="station" class="block text-sm text-slate-300 mb-1">Numéro de station</label>
-        <input id="station" name="station" type="text" required
-               class="w-full px-3 py-2 rounded-md bg-slate-700 border border-slate-600 focus:outline-none focus:ring-2 focus:ring-emerald-400" placeholder="Ex: 01" />
-      </div>
 
       <div>
         <label for="username" class="block text-sm text-slate-300 mb-1">Identifiant</label>
@@ -60,12 +108,11 @@
       e.preventDefault();
       msg.textContent = '';
 
-      const station = document.getElementById('station').value.trim();
       const username = document.getElementById('username').value.trim();
       const password = document.getElementById('password').value;
       const remember = document.getElementById('remember').checked;
 
-      if (!station || !username || !password) {
+      if (!username || !password) {
         msg.textContent = 'Veuillez remplir tous les champs.';
         return;
       }
@@ -74,7 +121,7 @@
         const resp = await fetch('/api/v1/auth/login', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ station, username, password, remember })
+          body: JSON.stringify({username, password, remember })
         });
 
         if (!resp.ok) {

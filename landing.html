@@ -47,6 +47,142 @@
     .links { display:flex; gap:14px; flex-wrap:wrap; }
     .downloads a { display:inline-block; margin-right:8px; margin-bottom:8px; }
     .downloads .btn { border-color:#1d2a36; }
+
+    /* ============================================
+       RESPONSIVE MOBILE LANDSCAPE (Mode Paysage)
+       ============================================ */
+    @media (max-width: 900px) and (orientation: landscape) {
+      header {
+        padding: 8px 12px;
+      }
+
+      .nav {
+        padding: 8px 12px;
+        flex-wrap: wrap;
+      }
+
+      .brand {
+        font-size: 14px;
+      }
+
+      .menu {
+        gap: 10px;
+        font-size: 12px;
+      }
+
+      .menu a {
+        font-size: 11px;
+      }
+
+      .btn {
+        padding: 8px 12px;
+        font-size: 11px;
+      }
+
+      .hero {
+        padding: 40px 15px;
+      }
+
+      .hero h1 {
+        font-size: 28px;
+      }
+
+      .hero p {
+        font-size: 13px;
+      }
+
+      .grid {
+        padding: 30px 15px;
+      }
+
+      .section-title {
+        font-size: 20px;
+      }
+
+      .section-sub {
+        font-size: 12px;
+      }
+
+      .cards {
+        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        gap: 12px;
+      }
+
+      .card {
+        padding: 12px;
+      }
+
+      .card h3 {
+        font-size: 14px;
+      }
+
+      .card p {
+        font-size: 11px;
+      }
+
+      .gallery {
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 12px;
+      }
+
+      .figure img {
+        height: 140px;
+      }
+
+      footer {
+        padding: 20px 15px;
+        font-size: 11px;
+      }
+    }
+
+    @media (max-width: 700px) and (orientation: landscape) {
+      .nav {
+        padding: 6px 10px;
+      }
+
+      .brand {
+        font-size: 12px;
+      }
+
+      .menu {
+        display: none;
+      }
+
+      .hero h1 {
+        font-size: 24px;
+      }
+
+      .hero p {
+        font-size: 12px;
+      }
+
+      .cards {
+        grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+        gap: 10px;
+      }
+
+      .gallery {
+        grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      }
+    }
+
+    @media (max-width: 600px) and (orientation: landscape) {
+      .hero {
+        padding: 30px 12px;
+      }
+
+      .hero h1 {
+        font-size: 20px;
+      }
+
+      .grid {
+        padding: 20px 12px;
+      }
+
+      .section-title {
+        font-size: 18px;
+      }
+    }
   </style>
 </head>
 <body>

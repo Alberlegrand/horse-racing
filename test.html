@@ -38,6 +38,28 @@
         .translated-content .ytCoreImageHost {
             visibility: visible;
         }
+
+        /* ============================================
+           RESPONSIVE MOBILE LANDSCAPE (Mode Paysage)
+           ============================================ */
+        @media (max-width: 900px) and (orientation: landscape) {
+            .money-horse-section {
+                transform: scale(0.85);
+                transform-origin: top center;
+            }
+        }
+
+        @media (max-width: 700px) and (orientation: landscape) {
+            .money-horse-section {
+                transform: scale(0.75);
+            }
+        }
+
+        @media (max-width: 600px) and (orientation: landscape) {
+            .money-horse-section {
+                transform: scale(0.65);
+            }
+        }
     </style>
 </head>
 

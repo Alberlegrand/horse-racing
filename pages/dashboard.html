@@ -120,6 +120,68 @@
     .user-info {
       animation: slideDown 0.6s ease-out 0.6s both;
     }
+
+    /* ============================================
+       RESPONSIVE MOBILE LANDSCAPE (Mode Paysage)
+       ============================================ */
+    @media (max-width: 900px) and (orientation: landscape) {
+      .container {
+        padding: 12px;
+      }
+
+      .header {
+        padding: 12px;
+        margin-bottom: 20px;
+      }
+
+      .header h1 {
+        font-size: 20px;
+      }
+
+      .card {
+        padding: 12px;
+      }
+
+      .card h2 {
+        font-size: 18px;
+      }
+
+      table {
+        font-size: 11px;
+      }
+
+      th, td {
+        padding: 6px;
+      }
+    }
+
+    @media (max-width: 700px) and (orientation: landscape) {
+      .container {
+        padding: 10px;
+      }
+
+      .header {
+        padding: 10px;
+      }
+
+      .header h1 {
+        font-size: 18px;
+      }
+
+      table {
+        font-size: 10px;
+      }
+    }
+
+    @media (max-width: 600px) and (orientation: landscape) {
+      .header h1 {
+        font-size: 16px;
+      }
+
+      table {
+        font-size: 9px;
+      }
+    }
   </style>
 </head>
 <body class="text-slate-100 min-h-screen flex flex-col">

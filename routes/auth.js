@@ -14,12 +14,11 @@ export default function createAuthRouter() {
 
   router.post('/login', async (req, res) => {
     const body = req.body || {};
-    const station = (body.station || '').toString();
     const username = (body.username || '').toString();
     const password = (body.password || '').toString();
 
     // Basic validation
-    if (!station || !username || !password) {
+    if (!username || !password) {
       return res.status(400).json({ success: false, error: 'Missing credentials' });
     }
 
@@ -31,7 +30,7 @@ export default function createAuthRouter() {
       );
 
       if (userRes.rows.length === 0) {
-        console.log(`[AUTH] ❌ Failed login attempt for station=${station} username=${username}`);
+        console.log(`[AUTH] ❌ Failed login attempt for username=${username}`);
         return res.status(401).json({ success: false, error: 'Invalid credentials' });
       }
 
@@ -45,12 +44,12 @@ export default function createAuthRouter() {
 
       // Generate JWT token
       const token = jwt.sign(
-        { userId: user.user_id, username: user.username, role: user.role, station },
+        { userId: user.user_id, username: user.username, role: user.role },
         JWT_SECRET,
         { expiresIn: '24h' }
       );
 
-      console.log(`[AUTH] ✅ Login successful: station=${station} username=${username} role=${user.role}`);
+      console.log(`[AUTH] ✅ Login successful: username=${username} role=${user.role}`);
 
       // Set secure httpOnly cookie
       res.cookie(SESSION_COOKIE_NAME, token, {

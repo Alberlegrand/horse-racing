@@ -377,6 +377,207 @@
         .winner-name { display:none; }
 
         .winner-round { display:none; }
+
+        /* ============================================
+           RESPONSIVE MOBILE LANDSCAPE (Mode Paysage)
+           ============================================ */
+        @media (max-width: 900px) and (orientation: landscape) {
+            /* Réduction générale du header/timer */
+            #countdownPanel {
+                top: 8px;
+                min-width: 250px;
+                max-width: 90%;
+                width: 90%;
+            }
+
+            .panel-content {
+                padding: 10px 14px;
+                gap: 8px;
+            }
+
+            .panel-text {
+                font-size: 0.85em;
+                letter-spacing: 0.5px;
+            }
+
+            #currentRound {
+                font-size: 0.95em;
+            }
+
+            #timeRemainingDisplay {
+                font-size: 1.1em;
+                letter-spacing: 1px;
+                min-width: 60px;
+            }
+
+            .panel-timer .progress-container {
+                height: 8px;
+            }
+
+            /* Réduction du conteneur des participants */
+            .participants_container {
+                margin-top: 60px;
+                padding-bottom: 70px;
+                height: calc(100% - 60px);
+            }
+
+            /* Grille des participants adaptée pour mobile landscape */
+            .participants {
+                grid-template-columns: repeat(3, 1fr);
+                grid-row-gap: 12px;
+                grid-column-gap: 15px;
+                padding: 0 10px;
+            }
+
+            /* Réduction des éléments de participant */
+            .participants .participant {
+                transform: scale(0.75);
+                transform-origin: top center;
+            }
+
+            /* Section des gagnants réduite */
+            .winners-section {
+                padding: 6px 10px;
+            }
+
+            .winners-title {
+                font-size: 0.8em;
+                margin-bottom: 4px;
+            }
+
+            .winners-list {
+                gap: 6px;
+            }
+
+            .winner-card {
+                width: 120px;
+                height: 50px;
+            }
+
+            .winner-inner {
+                padding: 5px 8px;
+                gap: 6px;
+            }
+
+            .winner-avatar {
+                width: 40px;
+                height: 40px;
+            }
+
+            .winners-section .avatar_background {
+                transform: scale(0.25);
+            }
+
+            .winner-name-inline {
+                font-size: 10px;
+                max-width: 55px;
+            }
+
+            .winner-meta {
+                font-size: 9px;
+                margin-top: -2px;
+            }
+
+            .winner-number {
+                font-size: 16px;
+            }
+        }
+
+        /* Mobile landscape très petit (écrans très étroits) */
+        @media (max-width: 700px) and (orientation: landscape) {
+            #countdownPanel {
+                top: 5px;
+                min-width: 200px;
+            }
+
+            .panel-content {
+                padding: 8px 10px;
+                gap: 6px;
+            }
+
+            .panel-text {
+                font-size: 0.75em;
+            }
+
+            #currentRound {
+                font-size: 0.85em;
+            }
+
+            #timeRemainingDisplay {
+                font-size: 0.95em;
+                min-width: 50px;
+            }
+
+            .participants_container {
+                margin-top: 50px;
+                padding-bottom: 60px;
+            }
+
+            .participants {
+                grid-row-gap: 8px;
+                grid-column-gap: 10px;
+                padding: 0 8px;
+            }
+
+            .participants .participant {
+                transform: scale(0.65);
+            }
+
+            .winners-section {
+                padding: 5px 8px;
+            }
+
+            .winner-card {
+                width: 100px;
+                height: 42px;
+            }
+
+            .winner-avatar {
+                width: 35px;
+                height: 35px;
+            }
+
+            .winner-name-inline {
+                font-size: 9px;
+                max-width: 45px;
+            }
+
+            .winner-meta {
+                font-size: 8px;
+            }
+        }
+
+        /* Ajustements pour les écrans très petits en landscape */
+        @media (max-width: 600px) and (orientation: landscape) {
+            .participants {
+                grid-template-columns: repeat(3, 1fr);
+                grid-row-gap: 6px;
+                grid-column-gap: 8px;
+            }
+
+            .participants .participant {
+                transform: scale(0.6);
+            }
+
+            .winners-list {
+                gap: 4px;
+            }
+
+            .winner-card {
+                width: 90px;
+                height: 38px;
+            }
+
+            .winner-inner {
+                padding: 4px 6px;
+                gap: 4px;
+            }
+
+            .winner-avatar {
+                width: 30px;
+                height: 30px;
+            }
+        }
     </style>
 </head>
 

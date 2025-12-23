@@ -122,6 +122,64 @@
         #ticketsScroll::-webkit-scrollbar-thumb:hover {
             background: rgba(148, 163, 184, 0.4);
         }
+
+        /* ============================================
+           RESPONSIVE MOBILE LANDSCAPE (Mode Paysage)
+           ============================================ */
+        @media (max-width: 900px) and (orientation: landscape) {
+            #betFrameContainer {
+                height: calc(100vh - 120px);
+            }
+
+            #ticketsSection {
+                height: 80px;
+            }
+
+            #ticketsHeader {
+                padding: 0.3rem;
+                font-size: 0.7rem;
+            }
+
+            #ticketsScroll table {
+                font-size: 0.65rem;
+            }
+
+            #ticketsScroll th, #ticketsScroll td {
+                padding: 0.2rem;
+            }
+
+            .panel-timer .progress-container {
+                height: 5px;
+            }
+
+            #timeRemainingDisplay {
+                font-size: 0.9em;
+            }
+        }
+
+        @media (max-width: 700px) and (orientation: landscape) {
+            #betFrameContainer {
+                height: calc(100vh - 100px);
+            }
+
+            #ticketsSection {
+                height: 70px;
+            }
+
+            #ticketsScroll table {
+                font-size: 0.6rem;
+            }
+        }
+
+        @media (max-width: 600px) and (orientation: landscape) {
+            #ticketsSection {
+                height: 60px;
+            }
+
+            #ticketsScroll th, #ticketsScroll td {
+                padding: 0.15rem;
+            }
+        }
     </style>
 
     <!-- Overlay Course en cours -->

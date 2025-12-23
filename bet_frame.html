@@ -135,6 +135,99 @@
         .amount-btn:active {
             background-color: #d0d0d0 !important;
         }
+
+        /* ============================================
+           RESPONSIVE MOBILE LANDSCAPE (Mode Paysage)
+           ============================================ */
+        @media (max-width: 900px) and (orientation: landscape) {
+            .participants_container {
+                margin-top: 10px;
+                padding-bottom: 50px;
+                height: calc(100% - 40px);
+            }
+
+            .participants {
+                grid-row-gap: 8px;
+                grid-column-gap: 10px;
+                padding: 5px;
+            }
+
+            .money-horse-section .game_screen .participant {
+                width: 220px !important;
+                height: 110px !important;
+                transform: scale(0.7) !important;
+            }
+
+            .money-horse-section .game_screen .participant .name {
+                font-size: 14px !important;
+            }
+
+            .money-horse-section .game_screen .participant .coeff {
+                font-size: 18px !important;
+            }
+
+            .money-horse-section .game_screen .participant .coeff_hint {
+                font-size: 10px !important;
+            }
+
+            .money-horse-section .game_screen .participant .bet {
+                height: 30px !important;
+            }
+
+            .money-horse-section .game_screen .controls {
+                margin-top: -15px !important;
+                gap: 4px !important;
+            }
+
+            .money-horse-section .game_screen .controls .button {
+                font-size: 14px !important;
+                padding: 8px 14px !important;
+                min-height: 35px !important;
+            }
+
+            .amount-grid {
+                width: 150px !important;
+                gap: 4px !important;
+                padding: 6px !important;
+            }
+
+            .amount-btn {
+                padding: 6px 4px !important;
+                font-size: 11px !important;
+            }
+        }
+
+        @media (max-width: 700px) and (orientation: landscape) {
+            .participants {
+                grid-row-gap: 6px;
+                grid-column-gap: 8px;
+            }
+
+            .money-horse-section .game_screen .participant {
+                width: 200px !important;
+                height: 100px !important;
+                transform: scale(0.6) !important;
+            }
+
+            .money-horse-section .game_screen .controls .button {
+                font-size: 12px !important;
+                padding: 6px 12px !important;
+                min-height: 32px !important;
+            }
+        }
+
+        @media (max-width: 600px) and (orientation: landscape) {
+            .participants {
+                grid-row-gap: 4px;
+                grid-column-gap: 6px;
+            }
+
+            .money-horse-section .game_screen .participant {
+                width: 180px !important;
+                height: 90px !important;
+                transform: scale(0.55) !important;
+            }
+        }
     </style>
 </head>
 

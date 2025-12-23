@@ -11,7 +11,7 @@ pids*
 # Ignore runtime data
 pids/*
 runtime
-
+.env
 # Ignore test data
 test-data
 
