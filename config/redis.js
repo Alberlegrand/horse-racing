@@ -30,6 +30,54 @@ let redisDisabled = false; // ✅ NOUVEAU: Flag pour désactiver Redis après tr
 
 // ✅ NOUVEAU: Cache local en mémoire comme fallback quand Redis n'est pas disponible
 const localCache = new Map(); // { key: { value, expiresAt } }
+
+/**
+ * ✅ Supprime tous les caches Redis (uniquement en mode développement)
+ * Utilisé au démarrage du serveur pour avoir un état propre
+ */
+export async function clearAllCaches() {
+  if (!isDevelopment) {
+    console.log('[CACHE] ⚠️ clearAllCaches() ignoré - mode production');
+    return false;
+  }
+
+  const client = await initRedis();
+  if (!client) {
+    console.warn('[CACHE] ⚠️ Redis non disponible, impossible de supprimer les caches');
+    // Vider quand même le cache local
+    localCache.clear();
+    console.log('✅ [CACHE] Cache local vidé');
+    return false;
+  }
+
+  try {
+    // Supprimer toutes les clés de cache (mais pas les sessions si nécessaire)
+    // On peut utiliser FLUSHDB pour supprimer toutes les clés de la base actuelle
+    // Ou supprimer par pattern pour être plus sélectif
+    
+    // Option 1: FLUSHDB (supprime TOUT dans la base Redis actuelle)
+    await client.flushDb();
+    console.log('✅ [CACHE] Tous les caches Redis supprimés (mode développement)');
+    
+    // Option 2: Supprimer par patterns (plus sélectif, garde les sessions si nécessaire)
+    // const patterns = ['query:*', 'round:*', 'stats:*', 'game:state:*'];
+    // for (const pattern of patterns) {
+    //   const keys = await client.keys(pattern);
+    //   if (keys.length > 0) {
+    //     await client.del(keys);
+    //   }
+    // }
+    
+    // Vider aussi le cache local
+    localCache.clear();
+    console.log('✅ [CACHE] Cache local vidé');
+    
+    return true;
+  } catch (err) {
+    console.error('[CACHE] ❌ Erreur lors de la suppression des caches:', err.message);
+    return false;
+  }
+}
 let lastLogTime = 0; // Pour throttling des logs
 const LOG_THROTTLE_MS = 10000; // Log max toutes les 10s
 
@@ -38,10 +86,18 @@ const MAX_DEV_RECONNECT_ATTEMPTS = 20;
 
 // ✅ Fonction de configuration d'URL Redis sécurisée avec différenciation dev/prod
 function getRedisConfig() {
-  const isSSL = REDIS_URL.startsWith('rediss://');
+  // ✅ CRITIQUE: Redis Cloud nécessite une configuration spéciale
+  // Convertir rediss:// en redis:// avec TLS explicite
+  let configUrl = REDIS_URL;
+  
+  // ✅ Si URL commence par rediss://, la convertir en redis://
+  if (configUrl.startsWith('rediss://')) {
+    configUrl = configUrl.replace('rediss://', 'redis://');
+    console.log(`🔄 [REDIS] URL convertie: rediss:// → redis:// (TLS activé via config)`);
+  }
   
   const config = {
-    url: REDIS_URL,
+    url: configUrl,
     socket: {
       connectTimeout: REDIS_TIMEOUT_MS,
       keepAlive: isProduction ? 60000 : 30000, // 60s en prod, 30s en dev
@@ -93,25 +149,14 @@ function getRedisConfig() {
     }
   };
   
-  // ✅ CRITIQUE: Configuration SSL/TLS pour Redis Cloud (rediss://)
-  // node-redis v4 détecte automatiquement SSL depuis l'URL rediss://
-  // Mais il faut configurer les options TLS correctement pour Redis Cloud
-  if (isSSL) {
-    // ✅ Extraire le hostname pour SNI
-    const hostnameMatch = REDIS_URL.match(/@([^:]+)/);
-    const hostname = hostnameMatch ? hostnameMatch[1] : undefined;
-    
-    // ✅ Configuration TLS pour Redis Cloud
-    // node-redis v4 utilise socket.tls comme objet de configuration TLS
+  // ✅ CRITIQUE: Configuration TLS pour Redis Cloud
+  // node-redis v4 + Redis Cloud = besoin d'une config TLS explicite et minimale
+  if (REDIS_URL.includes('redislabs.com') || REDIS_URL.includes('redis-')) {
+    // ✅ C'est probablement Redis Cloud, activer TLS
     config.socket.tls = {
-      rejectUnauthorized: false, // ✅ Accepter les certificats auto-signés de Redis Cloud
-      servername: hostname, // ✅ SNI (Server Name Indication) pour Redis Cloud
-      // ✅ Options supplémentaires pour compatibilité Redis Cloud
-      minVersion: 'TLSv1.2',
-      maxVersion: 'TLSv1.3'
+      rejectUnauthorized: false // ✅ Accepter les certificats de Redis Cloud
     };
-    
-    console.log(`🔒 [REDIS] Configuration SSL/TLS activée pour Redis Cloud (hostname: ${hostname || 'N/A'})`);
+    console.log(`🔒 [REDIS] Configuration TLS activée pour Redis Cloud`);
   }
   
   // ✅ PRODUCTION: Configuration supplémentaire pour la stabilité

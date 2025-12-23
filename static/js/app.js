@@ -17,6 +17,17 @@ class App {
         this.bettingLocked = false; // État de verrouillage des paris (quelques secondes avant le lancement)
         this.timerTimeLeft = 0; // Temps restant avant le lancement (en ms)
         this.bettingLockDurationMs = 5000; // Délai de sécurité : 5 secondes avant le lancement
+        this.debugWs = false; // ✅ Perf: éviter de spammer la console à chaque message WS
+        this.currentRoundId = null; // ✅ CORRECTION: Round ID actuel (pour affichage dashboard)
+
+        // ✅ Overlay bet_frame + auto-finish (anciennement dans main.js)
+        this.betFrameState = {
+            currentRoundId: null,
+            countdownInterval: null,
+            countdownStart: 0,
+            countdownDuration: 0,
+            finishInFlight: false
+        };
         this.pages = {
             // Use absolute paths to avoid relative-fetch issues when the app is loaded
             // from a nested route (e.g. /dashboard). Leading slash ensures fetch() hits
@@ -39,7 +50,7 @@ class App {
 
     async loadPage(pageId) {
         try {
-            console.log(`Chargement de la page: ${this.pages[pageId]}`);
+            console.debug(`Chargement de la page: ${this.pages[pageId]}`);
 
             const response = await fetch(this.pages[pageId]);
 
@@ -55,15 +66,10 @@ class App {
             this.currentPage = pageId;
             this.updateActiveNavLink(pageId);
 
-            // Attendre que le DOM soit prêt avant d'initialiser les composants
-            // Cela permet aux scripts dans dashboard.html de se charger et aux éléments DOM d'être disponibles
-            await new Promise(resolve => {
-                // Utiliser requestAnimationFrame pour s'assurer que le DOM est rendu
-                requestAnimationFrame(() => {
-                    // Petit délai supplémentaire pour laisser les scripts se charger
-                    setTimeout(resolve, 50);
-                });
-            });
+            // ✅ OPTIMISATION: la page est injectée via innerHTML.
+            // Les <script> du HTML injecté ne sont pas exécutés, donc pas besoin d'attendre 50ms.
+            // Un frame suffit pour laisser le DOM se peindre.
+            await new Promise(resolve => requestAnimationFrame(resolve));
 
             // Réinitialiser les gestionnaires d'événements après le chargement
             this.initPageComponents(pageId);
@@ -121,7 +127,7 @@ class App {
     }
 
     initDashboard() {
-        console.log('Initialisation de la page Dashboard');
+        console.debug('Initialisation de la page Dashboard');
 
         // IMPORTANT: Nettoyer l'ancien intervalle AVANT de réinitialiser
         // pour éviter les fuites mémoire et les conflits
@@ -141,6 +147,9 @@ class App {
 
         // Helper function
         const el = (id) => document.getElementById(id);
+        
+        // ✅ Overlay bet_frame (iframe) - géré ici (plus de main.js)
+        this.initBetFrameOverlay();
 
         /* -------------------------
            Formatage du statut
@@ -542,8 +551,8 @@ class App {
                             // Ne pas bloquer le processus si l'impression échoue
                         }
                         
-                        // 3️⃣ Attendre que la DB soit mise à jour, puis rafraîchir la liste des tickets
-                        setTimeout(() => refreshTickets(), 300);
+                        // ✅ OPTIMISATION: Refresh via WebSocket (receipt_paid event) - pas besoin de setTimeout
+                        // refreshTickets() sera appelé automatiquement par handleWebSocketMessage('receipt_paid')
                         
                         // 4️⃣ Message de confirmation
                         const prizeAmount = data.data?.prize ? Number(data.data.prize).toFixed(2) : 'N/A';
@@ -664,125 +673,82 @@ class App {
         /* -------------------------
            Rafraîchissement
         ------------------------- */
-        const refreshTickets = async () => {
+        // ✅ OPTIMISATION: Cache pour éviter les requêtes répétées
+        let ticketsCache = { data: null, timestamp: 0, ttl: 2000 }; // Cache 2s
+        
+        const refreshTickets = async (force = false) => {
             try {
-                // ✅ CORRECTION: Utiliser /api/v1/my-bets/ pour récupérer les tickets de l'utilisateur connecté
-                // Cette route récupère depuis la DB, donc les tickets restent visibles même après la fin du round
-                // Limiter à 50 tickets récents pour le dashboard
+                // ✅ OPTIMISATION: Utiliser le cache si récent (évite requêtes répétées)
+                const now = Date.now();
+                if (!force && ticketsCache.data && (now - ticketsCache.timestamp) < ticketsCache.ttl) {
+                    const { tickets, stats, round } = ticketsCache.data;
+                    updateTicketsTable(tickets);
+                    if (round) updateStats(round, stats);
+                    if (this.updateBettingButtonsState) this.updateBettingButtonsState();
+                    return;
+                }
+                
+                // ✅ OPTIMISATION: Un seul fetch (my-bets contient déjà les stats)
                 const res = await fetch('/api/v1/my-bets/?limit=50&page=1', { credentials: 'include' });
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 const data = await res.json();
                 const myBetsData = data?.data || {};
                 
-                // Récupérer les tickets de l'utilisateur (depuis DB, tous les rounds)
                 const tickets = myBetsData.tickets || [];
                 const stats = myBetsData.stats || {};
                 
-                // Récupérer aussi les infos du round actuel pour les stats
-                let round = null;
-                try {
-                    const roundRes = await fetch('/api/v1/rounds/', { 
-                        method: 'POST',
-                        credentials: 'include',
-                        headers: { 
-                            'Content-Type': 'application/json',
-                            'Accept': 'application/json' 
-                        },
-                        body: JSON.stringify({ action: 'get' })
-                    });
-                    if (roundRes.ok) {
-                        const roundData = await roundRes.json();
-                        round = roundData?.data || {};
+                // ✅ CORRECTION: Récupérer le round ID depuis les tickets ou le serveur
+                let roundId = this.currentRoundId;
+                // Si pas de round ID en mémoire, prendre depuis le premier ticket
+                if (!roundId && tickets.length > 0) {
+                    roundId = tickets[0]?.roundId || null;
+                    if (roundId) {
+                        this.currentRoundId = roundId; // Mettre à jour pour la prochaine fois
                     }
-                } catch (roundErr) {
-                    console.warn('Erreur récupération round:', roundErr);
+                }
+                // Si toujours pas de round ID, essayer de récupérer depuis l'API
+                if (!roundId) {
+                    try {
+                        const roundRes = await fetch('/api/v1/rounds/', { 
+                            method: 'POST',
+                            credentials: 'include',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ action: 'get' })
+                        });
+                        if (roundRes.ok) {
+                            const roundData = await roundRes.json();
+                            roundId = roundData?.data?.id || null;
+                            if (roundId) this.currentRoundId = roundId;
+                        }
+                    } catch (err) {
+                        console.debug('Erreur récupération round ID:', err);
+                    }
                 }
                 
-                // Préparer le round avec les receipts pour updateStats
-                const roundWithReceipts = round ? {
-                    ...round,
-                    receipts: tickets.filter(t => t.roundId === round.id)
-                } : null;
+                const round = roundId ? { id: roundId, receipts: tickets.filter(t => t.roundId === roundId) } : null;
                 
-                // Mettre à jour les stats avec les données du round et des tickets
-                if (roundWithReceipts) {
-                    updateStats(roundWithReceipts, stats);
-                } else {
-                    // Fallback: utiliser seulement les stats des tickets
-                    const el = (id) => document.getElementById(id);
-                    if (el('totalBetsAmount')) el('totalBetsAmount').textContent = `${(stats.totalBetAmount || 0).toFixed(2)} HTG`;
-                    if (el('activeTicketsCount')) el('activeTicketsCount').textContent = stats.activeTicketsCount || 0;
-                    if (round && round.id && el('currentRound')) el('currentRound').textContent = round.id;
-                }
-
+                // Mettre à jour le cache
+                ticketsCache = { data: { tickets, stats, round }, timestamp: now, ttl: 2000 };
+                
                 updateTicketsTable(tickets);
-                
-                // ✅ SÉCURITÉ: Mettre à jour l'état des boutons après le rafraîchissement
-                if (this.updateBettingButtonsState) {
-                    setTimeout(() => this.updateBettingButtonsState(), 100);
-                }
+                if (round) updateStats(round, stats);
+                if (this.updateBettingButtonsState) this.updateBettingButtonsState();
             } catch (err) {
                 console.error('Erreur refreshTickets:', err);
                 this.showToast('Erreur de connexion à l\'API.', 'error');
             }
         };
 
-        // Fonction pour synchroniser le timer depuis le serveur
-        const synchroniserTimer = async () => {
-            try {
-                const res = await fetch('/api/v1/rounds/status', { 
-                    method: 'GET',
-                    credentials: 'include',
-                    headers: { 
-                        'Accept': 'application/json' 
+        // ✅ OPTIMISATION: Timer synchronisé via WebSocket (timer_update event) - plus besoin de fetch
+        const synchroniserTimer = () => {
+            // Le timer est maintenant synchronisé via WebSocket events (timer_update)
+            // Cette fonction est gardée pour compatibilité mais ne fait plus de fetch
+            if (!this.dashboardDemarrerTimer) {
+                requestAnimationFrame(() => {
+                    if (this.dashboardDemarrerTimer && this.timerTimeLeft > 0) {
+                        this.dashboardDemarrerTimer(this.timerTimeLeft, 60000);
                     }
                 });
-                if (!res.ok) throw new Error(`HTTP ${res.status}`);
-                const data = await res.json();
-                
-                console.log('📊 État serveur récupéré:', data);
-
-                // Mettre à jour le round actuel si disponible
-                if (data.currentRound && data.currentRound.id) {
-                    const currentRoundEl = document.getElementById('currentRound');
-                    const currentRoundTimerEl = document.getElementById('currentRoundTimer');
-                    if (currentRoundEl) currentRoundEl.textContent = data.currentRound.id;
-                    if (currentRoundTimerEl) currentRoundTimerEl.textContent = `Round ${data.currentRound.id}`;
-                }
-
-                // Attendre que dashboardDemarrerTimer soit disponible
-                if (!this.dashboardDemarrerTimer) {
-                    console.warn('⚠️ dashboardDemarrerTimer non encore disponible, réessai dans 100ms...');
-                    setTimeout(() => synchroniserTimer(), 100);
-                    return;
-                }
-
-                // Synchroniser le timer si un timer est actif
-                if (data.timerTimeLeft && data.timerTimeLeft > 0) {
-                    console.log('⏰ Synchronisation du timer depuis le serveur:', {
-                        timeLeft: data.timerTimeLeft,
-                        totalDuration: data.timerTotalDuration
-                    });
-                    this.dashboardDemarrerTimer(data.timerTimeLeft, data.timerTotalDuration || 60000);
-                } else if (data.nextRoundStartTime) {
-                    // Calculer le temps restant depuis nextRoundStartTime
-                    const timeLeft = Math.max(0, data.nextRoundStartTime - Date.now());
-                    if (timeLeft > 0) {
-                        console.log('⏰ Synchronisation du timer depuis nextRoundStartTime:', {
-                            timeLeft,
-                            totalDuration: data.timerTotalDuration
-                        });
-                        this.dashboardDemarrerTimer(timeLeft, data.timerTotalDuration || 60000);
-                    }
-                } else if (data.isRaceRunning) {
-                    // Si une course est en cours, arrêter le timer
-                    if (this.dashboardArreterTimer) {
-                        this.dashboardArreterTimer();
-                    }
-                }
-            } catch (err) {
-                console.error('Erreur synchroniserTimer:', err);
-                // Ne pas afficher de toast pour cette erreur, c'est silencieux
             }
         };
 
@@ -812,10 +778,18 @@ class App {
             const totalBetsAmountEl = document.getElementById('totalBetsAmount');
             const activeTicketsCountEl = document.getElementById('activeTicketsCount');
             const currentRoundEl = document.getElementById('currentRound');
+            const currentRoundTimerEl = document.getElementById('currentRoundTimer');
 
             if (totalBetsAmountEl) totalBetsAmountEl.textContent = `${total.toFixed(2)} HTG`;
             if (activeTicketsCountEl) activeTicketsCountEl.textContent = activeCount;
-            if (currentRoundEl && round?.id) currentRoundEl.textContent = round.id;
+            
+            // ✅ CORRECTION: Mettre à jour le round ID dans le header ET dans currentRoundId
+            const roundId = round?.id || this.currentRoundId;
+            if (roundId) {
+                this.currentRoundId = roundId;
+                if (currentRoundEl) currentRoundEl.textContent = roundId;
+                if (currentRoundTimerEl) currentRoundTimerEl.textContent = `Round ${roundId}`;
+            }
         }
 
         /* -------------------------
@@ -984,14 +958,39 @@ class App {
         this.isBettingAllowed = isBettingAllowed; // Exposer la fonction de vérification
         this.updateBettingButtonsState = updateBettingButtonsState; // Exposer la fonction de mise à jour des boutons
 
+        // ✅ CORRECTION: Initialiser le round ID au chargement
+        const initRoundId = async () => {
+            try {
+                const res = await fetch('/api/v1/rounds/', { 
+                    method: 'POST',
+                    credentials: 'include',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ action: 'get' })
+                });
+                if (res.ok) {
+                    const data = await res.json();
+                    const roundId = data?.data?.id || null;
+                    if (roundId) {
+                        this.currentRoundId = roundId;
+                        const currentRoundEl = document.getElementById('currentRound');
+                        const currentRoundTimerEl = document.getElementById('currentRoundTimer');
+                        if (currentRoundEl) currentRoundEl.textContent = roundId;
+                        if (currentRoundTimerEl) currentRoundTimerEl.textContent = `Round ${roundId}`;
+                    }
+                }
+            } catch (err) {
+                console.debug('Erreur init round ID:', err);
+            }
+        };
+        
         // Rafraîchir immédiatement
         refreshTickets();
+        
+        // Initialiser le round ID
+        initRoundId();
 
-        // Synchroniser le timer depuis le serveur après un court délai
-        // pour s'assurer que les éléments DOM sont disponibles
-        setTimeout(() => {
-            synchroniserTimer();
-        }, 200);
+        // ✅ OPTIMISATION: Synchronisation via requestAnimationFrame (plus rapide)
+        requestAnimationFrame(() => synchroniserTimer());
 
         // Configurer le bouton de rafraîchissement
         const refreshBtn = document.getElementById('refreshBtn');
@@ -1003,17 +1002,17 @@ class App {
         }
 
         // Le WebSocket mettra à jour automatiquement via handleWebSocketMessage
-        console.log('✅ Dashboard initialisé avec WebSocket en temps réel');
+        console.debug('✅ Dashboard initialisé avec WebSocket en temps réel');
     }
 
     initCourseChevaux() {
         // Initialiser la page Course Chevaux
-        console.log('Initialisation de la page Course Chevaux');
+        console.debug('Initialisation de la page Course Chevaux');
         // Le jeu devrait s'initialiser automatiquement via les scripts existants
     }
 
     initMyBets() {
-        console.log("%c[INIT] Chargement de la page Mes Paris...", "color: #3b82f6");
+        console.debug("%c[INIT] Chargement de la page Mes Paris...", "color: #3b82f6");
 
         const API_URL = '/api/v1/my-bets/';
         let currentPage = 1;
@@ -1780,8 +1779,8 @@ class App {
         
         // initial load + periodic refresh
         refreshCashierDashboard();
-        if (state.refreshInterval) clearInterval(state.refreshInterval);
-        state.refreshInterval = setInterval(refreshCashierDashboard, 15000);
+        // ✅ OPTIMISATION: Supprimé setInterval - refresh via WebSocket events uniquement
+        // Les événements receipt_added, receipt_paid, money_update déclenchent déjà refreshCashierDashboard
         // start websocket
         connectWebSocket();
     }
@@ -2261,6 +2260,104 @@ class App {
             }
         }
 
+    // =================================================================
+    // ===   BET FRAME OVERLAY + AUTO-FINISH (cashier perf)           ===
+    // =================================================================
+
+    initBetFrameOverlay() {
+        // Le dashboard contient l'iframe #betFrame + overlay. D'autres pages non.
+        const overlay = document.getElementById('betFrameOverlay');
+        if (!overlay) return;
+        this.cancelBetFrameCountdown();
+    }
+
+    cancelBetFrameCountdown() {
+        if (this.betFrameState && this.betFrameState.countdownInterval) {
+            clearInterval(this.betFrameState.countdownInterval);
+            this.betFrameState.countdownInterval = null;
+        }
+        const progressBar = document.getElementById('betLaunchProgressBar');
+        const timerEl = document.getElementById('betLaunchTimer');
+        if (progressBar) progressBar.style.width = '0%';
+        if (timerEl) timerEl.textContent = '';
+    }
+
+    reloadBetFrame() {
+        const iframe = document.getElementById('betFrame');
+        if (!iframe) return;
+        const base = iframe.getAttribute('src')?.split('?')[0] || '/bet_frame';
+        iframe.setAttribute('src', base + '?t=' + Date.now());
+    }
+
+    setBetFrameDisabled(disabled = true, message, durationMs, triggerFinishOnEnd = false) {
+        const overlay = document.getElementById('betFrameOverlay');
+        const textEl = document.getElementById('betFrameOverlayText');
+        if (!overlay) return;
+
+        if (message && textEl) textEl.textContent = message;
+
+        if (disabled) {
+            this.cancelBetFrameCountdown();
+            overlay.classList.remove('hidden');
+            overlay.classList.remove('opacity-0');
+            overlay.classList.add('opacity-100');
+            if (durationMs && durationMs > 0) {
+                this.startBetFrameCountdown(durationMs, triggerFinishOnEnd);
+            }
+        } else {
+            this.cancelBetFrameCountdown();
+            overlay.classList.remove('opacity-100');
+            overlay.classList.add('opacity-0');
+            setTimeout(() => overlay.classList.add('hidden'), 300);
+        }
+    }
+
+    startBetFrameCountdown(durationMs, triggerFinishOnEnd) {
+        if (!durationMs || durationMs <= 0) return;
+        const progressBar = document.getElementById('betLaunchProgressBar');
+        const timerEl = document.getElementById('betLaunchTimer');
+        if (!progressBar || !timerEl) return;
+
+        this.betFrameState.countdownStart = Date.now();
+        this.betFrameState.countdownDuration = durationMs;
+        progressBar.style.width = '0%';
+        timerEl.textContent = `${Math.ceil(durationMs / 1000)}s`;
+
+        this.betFrameState.countdownInterval = setInterval(async () => {
+            const elapsed = Date.now() - this.betFrameState.countdownStart;
+            const pct = Math.min(100, (elapsed / this.betFrameState.countdownDuration) * 100);
+            progressBar.style.width = pct + '%';
+            const remainingSec = Math.max(0, Math.ceil((this.betFrameState.countdownDuration - elapsed) / 1000));
+            timerEl.textContent = `${remainingSec}s`;
+
+            if (elapsed >= this.betFrameState.countdownDuration) {
+                this.cancelBetFrameCountdown();
+                if (triggerFinishOnEnd) {
+                    await this.autoFinishRace();
+                }
+            }
+        }, 100);
+    }
+
+    async autoFinishRace() {
+        if (this.betFrameState.finishInFlight) return;
+        this.betFrameState.finishInFlight = true;
+        try {
+            const r = await fetch('/api/v1/rounds', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action: 'finish' })
+            });
+            const data = await r.json().catch(() => ({}));
+            if (this.debugWs) console.log('⏱️ [AUTO-CLICK] action=finish envoyé:', data);
+            this.reloadBetFrame();
+        } catch (err) {
+            console.error('❌ [AUTO-CLICK] Erreur:', err?.message || err);
+        } finally {
+            setTimeout(() => { this.betFrameState.finishInFlight = false; }, 1500);
+        }
+    }
+
     logout() {
         this.confirmModal(
             'Êtes-vous sûr de vouloir vous déconnecter ?',
@@ -2286,6 +2383,8 @@ class App {
 
         try {
             this.ws = new WebSocket(window.wsConfig.connectionString);
+            // ✅ Compat: certains modules legacy regardent window.ws
+            window.ws = this.ws;
         } catch (err) {
             console.error('❌ Impossible d\'ouvrir WebSocket:', err);
             this.scheduleWsReconnect();
@@ -2327,13 +2426,15 @@ class App {
     }
 
     handleWebSocketMessage(data) {
-        console.log('📨 WebSocket message reçu:', data.event);
+        if (this.debugWs) console.log('📨 WebSocket message reçu:', data.event);
 
         switch (data.event) {
             case 'connected':
                 console.log('🔌 WebSocket connecté, round actuel:', data.roundId);
-                // Mettre à jour le round actuel immédiatement
+                // ✅ CORRECTION: Synchroniser currentRoundId
                 if (data.roundId) {
+                    this.currentRoundId = data.roundId;
+                    this.betFrameState.currentRoundId = data.roundId;
                     const currentRoundEl = document.getElementById('currentRound');
                     const currentRoundTimerEl = document.getElementById('currentRoundTimer');
                     if (currentRoundEl) currentRoundEl.textContent = data.roundId;
@@ -2366,25 +2467,32 @@ class App {
                         console.warn('⚠️ dashboardDemarrerTimer non disponible, initDashboard pas encore terminé');
                     }
                 }
-                // Synchroniser l'état de la course si elle est en cours
-                // Note: betFrameOverlay est géré par main.js
-                if (this.currentPage === 'dashboard' && data.isRaceRunning && data.raceStartTime) {
-                    // Arrêter le timer pendant la course
-                    if (this.dashboardArreterTimer) {
-                        this.dashboardArreterTimer();
+                // ✅ Overlay bet_frame (dashboard)
+                if (this.currentPage === 'dashboard') {
+                    const roundId = data.roundId || 'N/A';
+                    if (data.isRaceRunning && data.raceStartTime) {
+                        // Course en cours: overlay (sans auto-finish)
+                        const elapsed = Date.now() - data.raceStartTime;
+                        const remaining = Math.max(0, 10000 - elapsed);
+                        this.betFrameState.currentRoundId = roundId;
+                        this.setBetFrameDisabled(true, `Course en cours — Round ${roundId}`, remaining, false);
+                        // Arrêter le timer pendant la course
+                        if (this.dashboardArreterTimer) this.dashboardArreterTimer();
+                    } else if (data.roundId) {
+                        this.betFrameState.currentRoundId = data.roundId;
                     }
                 }
-                // Rafraîchir immédiatement pour avoir les données à jour
+                // ✅ OPTIMISATION: Rafraîchissement direct (pas de setTimeout)
                 if (this.currentPage === 'dashboard' && this.dashboardRefreshTickets) {
-                    setTimeout(() => this.dashboardRefreshTickets(), 100);
+                    requestAnimationFrame(() => this.dashboardRefreshTickets());
                 }
                 if (this.currentPage === 'my-bets' && this.myBetsFetchMyBets) {
-                    setTimeout(() => this.myBetsFetchMyBets(1), 100);
+                    requestAnimationFrame(() => this.myBetsFetchMyBets(1));
                 }
                 
-                // ✅ SÉCURITÉ: Mettre à jour l'état des boutons après la connexion
+                // ✅ OPTIMISATION: Mise à jour directe des boutons
                 if (this.updateBettingButtonsState) {
-                    setTimeout(() => this.updateBettingButtonsState(), 200);
+                    requestAnimationFrame(() => this.updateBettingButtonsState());
                 }
                 break;
 
@@ -2425,6 +2533,13 @@ class App {
 
             case 'new_round':
                 console.log('🆕 Nouveau tour:', data.roundId || data.game?.id);
+                // ✅ CORRECTION: Synchroniser currentRoundId
+                const newRoundId = data.roundId || data.game?.id || data.currentRound?.id;
+                if (newRoundId) {
+                    this.currentRoundId = newRoundId;
+                    this.betFrameState.currentRoundId = newRoundId;
+                }
+                
                 // Réinitialiser l'état de la course
                 this.isRaceRunning = false;
                 this.bettingLocked = false; // Les paris sont ouverts pour le nouveau round
@@ -2435,11 +2550,10 @@ class App {
                     this.bettingLocked = this.timerTimeLeft > 0 && this.timerTimeLeft <= this.bettingLockDurationMs;
                 }
                 
-                // ✅ SÉCURITÉ: Mettre à jour l'état des boutons
+                // ✅ OPTIMISATION: Mise à jour directe
                 if (this.updateBettingButtonsState) {
-                    setTimeout(() => this.updateBettingButtonsState(), 100);
+                    requestAnimationFrame(() => this.updateBettingButtonsState());
                 }
-                const newRoundId = data.roundId || data.game?.id || data.currentRound?.id;
                 // Note: betFrameOverlay est caché par main.js quand nouveau round différent
                 // Mettre à jour le round actuel immédiatement
                 const currentRoundEl = document.getElementById('currentRound');
@@ -2450,17 +2564,14 @@ class App {
                 if (currentRoundTimerEl && newRoundId) {
                     currentRoundTimerEl.textContent = `Round ${newRoundId}`;
                 }
-                // Démarrer le timer si disponible dans les données
+                // ✅ OPTIMISATION: Démarrer le timer directement (requestAnimationFrame si nécessaire)
                 if (this.currentPage === 'dashboard' && data.timer && data.timer.timeLeft > 0) {
                     if (this.dashboardDemarrerTimer) {
-                        // Petit délai pour s'assurer que initDashboard est terminé
-                        setTimeout(() => {
+                        requestAnimationFrame(() => {
                             if (this.dashboardDemarrerTimer) {
                                 this.dashboardDemarrerTimer(data.timer.timeLeft, data.timer.totalDuration || 60000);
                             }
-                        }, 100);
-                    } else {
-                        console.warn('⚠️ dashboardDemarrerTimer non disponible, initDashboard pas encore terminé');
+                        });
                     }
                 } else if (this.currentPage === 'dashboard' && data.nextRoundStartTime) {
                     // Calculer le temps restant depuis nextRoundStartTime
@@ -2478,12 +2589,12 @@ class App {
                     }
                 }
                 // Rafraîchir les données avec un petit délai pour laisser le serveur finaliser
+                // ✅ OPTIMISATION: Mise à jour directe
                 if (this.currentPage === 'dashboard' && this.dashboardRefreshTickets) {
-                    setTimeout(() => this.dashboardRefreshTickets(), 300);
+                    this.dashboardRefreshTickets();
                 }
-                // Les tickets en attente restent valides mais sont liés à l'ancien round
                 if (this.currentPage === 'my-bets' && this.myBetsFetchMyBets) {
-                    setTimeout(() => this.myBetsFetchMyBets(1), 300);
+                    this.myBetsFetchMyBets(1);
                 }
                 // Notification
                 this.showToast(`🆕 Nouveau round #${newRoundId}`, 'success');

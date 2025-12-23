@@ -283,58 +283,9 @@
 
 
     <!-- Scripts de jeu (conservés tels quels) -->
-    <script src="/js/print.min.js?v=33054"></script>
-    <script src="/js/big_min.js?v=33054"></script>
-    <script src="/js/async.min.js?v=33054"></script>
-    <script src="/js/crafty-0.5.4.js?v=33054"></script>
-    <script src="/js/currency.js?v=33054"></script>
-    <script src="/js/context.js?v=33054"></script>
-    <script src="/js/managers.js?v=33054"></script>
-    <script src="/js/misc.js?v=33054"></script>
-    <script src="/js/models.js?v=33054"></script>
-    <script src="/js/server.js?v=33054"></script>
-    <script src="/js/webclient.js?v=33054"></script>
-    <script src="/js/user_manager.js?v=33054"></script>
-    <script src="/js/components.js?v=33054"></script>
-    <script src="/js/movie.js?v=33054"></script>
-    <script src="/js/path_generator.js?v=33054"></script>
-    <script src="/js/scene_builders.js?v=33054"></script>
-    <script src="/js/game.js?v=33054"></script>
-    <script src="/js/movie1.js?v=33054"></script>
-    <script src="/js/finish.js?v=33054"></script>
-    <script src="/js/fullscreen.js?v=33054"></script>
-    <script src="/js/centrifuge.min.js"></script>
-    <script src="/js/jackpots.ws.js?v=33054"></script>
-    <script src="/js/main.js?v=33054"></script>
-    <script>
-        (function () {
-            async function fetchCashierBalance() {
-                try {
-                    const res = await fetch('/api/v1/money/');
-                    const json = await res.json();
-                    const payload = json && json.data ? json.data : json;
-                    const balance = payload && (payload.cashBalance !== undefined ? payload.cashBalance : (payload.cashBalanceHTG || null));
-                    const el = document.getElementById('cashierBalance');
-                    if (el) {
-                        if (balance === null || balance === undefined) {
-                            el.textContent = '-- HTG';
-                        } else {
-                            // assume API returns numeric HTG value
-                            el.textContent = Number(balance).toFixed(2) + ' HTG';
-                        }
-                    }
-                } catch (err) {
-                    console.error('Erreur fetch cashier balance:', err);
-                }
-            }
-
-            // initial fetch
-            fetchCashierBalance();
-            // periodic refresh
-            setInterval(fetchCashierBalance, 10000);
-
-            const btn = document.getElementById('refreshCashierBalance');
-            if (btn) btn.addEventListener('click', fetchCashierBalance);
-        })();
-    </script>
+    <!-- ✅ OPTIMISATION:
+         Cette page est injectée via app.js (innerHTML). Les <script> dans le HTML injecté
+         ne sont pas exécutés et alourdissent inutilement le DOM/HTML.
+         Toute la logique doit vivre dans static/js/app.js (initDashboard + WebSocket).
+    -->
 </div>

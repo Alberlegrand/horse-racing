@@ -217,164 +217,47 @@
 
     <!-- Scripts -->
     <!-- ⚠️ IMPORTANT: Load websocket-config.js BEFORE app.js so window.wsConfig is available -->
-    <script src="/js/websocket-config.js"></script>
-    <script src="/js/jquery_min.js?v=33054"></script>
-    <script src="/js/app.js"></script>
-    <script src="/js/print.min.js?v=33054"></script>
-    <script src="/js/big_min.js?v=33054"></script>
-    <script src="/js/async.min.js?v=33054"></script>
-    <script src="/js/crafty-0.5.4.js?v=33054"></script>
-    <script src="/js/currency.js?v=33054"></script>
-    <script src="/js/context.js?v=33054"></script>
-    <script src="/js/managers.js?v=33054"></script>
-    <script src="/js/misc.js?v=33054"></script>
-    <script src="/js/models.js?v=33054"></script>
-    <script src="/js/server.js?v=33054"></script>
-    <script src="/js/webclient.js?v=33054"></script>
-    <script src="/js/user_manager.js?v=33054"></script>
-    <script src="/js/components.js?v=33054"></script>
-    <script src="/js/movie.js?v=33054"></script>
-    <script src="/js/path_generator.js?v=33054"></script>
-    <script src="/js/scene_builders.js?v=33054"></script>
-    <script src="/js/game.js?v=33054"></script>
-    <script src="/js/movie1.js?v=33054"></script>
-    <script src="/js/finish.js?v=33054"></script>
-    <script src="/js/fullscreen.js?v=33054"></script>
-    <!-- ✅ NOUVEAU: Gestionnaire de compte de caisse -->
-    <script src="/js/cashier-account-manager.js"></script>
+    <!-- ✅ OPTIMISATION PERF:
+         On ne charge que le strict nécessaire sur l'app Caissier.
+         Le moteur legacy (crafty/movie/etc) est chargé DANS l'iframe bet_frame si besoin.
+         App.js gère pages + WebSocket + overlay.
+    -->
+    <script src="/js/websocket-config.js" defer></script>
+    <script src="/js/jquery_min.js?v=33054" defer></script>
+    <script src="/js/print.min.js?v=33054" defer></script>
+    <script src="/js/big_min.js?v=33054" defer></script>
+    <script src="/js/currency.js?v=33054" defer></script>
+    <!-- ✅ Gestionnaire de compte de caisse -->
+    <script src="/js/cashier-account-manager.js" defer></script>
+    <!-- ✅ App (pages + WebSocket) -->
+    <script src="/js/app.js" defer></script>
 
-    <script src="/js/centrifuge.min.js"></script>
-    <script src="/js/jackpots.ws.js?v=33054"></script>
-    <script src="/js/main.js?v=33054"></script>
-
-    <!-- ✅ NOUVEAU: Initialisation du gestionnaire de compte -->
+    <!-- ✅ Initialisation du gestionnaire de compte (après scripts defer) -->
     <script>
-      // Créer une instance globale du gestionnaire de compte
-      window.accountManager = new CashierAccountManager();
-
-      // Initialiser le gestionnaire dès que le DOM est chargé
-      if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', async () => {
-          try {
-            console.log('🔄 Chargement du gestionnaire de compte...');
-            const success = await accountManager.init();
-            if (success) {
-              console.log('✅ Gestionnaire de compte initialisé avec succès');
-              console.log(`💰 Solde NET du caissier: ${accountManager.currentBalance.toFixed(2)} HTG`);
-            } else {
-              console.warn('⚠️ Gestionnaire initialisé avec erreurs');
-            }
-          } catch (err) {
-            console.error('❌ Erreur lors de l\'initialisation du gestionnaire:', err);
+      // ⚠️ Avec les scripts en defer, on instancie APRÈS que le DOM soit prêt
+      // (et après que CashierAccountManager soit défini).
+      document.addEventListener('DOMContentLoaded', async () => {
+        try {
+          if (typeof CashierAccountManager !== 'function') {
+            console.warn('⚠️ CashierAccountManager indisponible, init accountManager ignorée');
+            return;
           }
-        });
-      } else {
-        // Si le DOM est déjà chargé, initialiser immédiatement
-        (async () => {
-          try {
-            console.log('🔄 Chargement immédiat du gestionnaire de compte...');
-            const success = await accountManager.init();
-            if (success) {
-              console.log('✅ Gestionnaire de compte initialisé avec succès');
-              console.log(`💰 Solde NET du caissier: ${accountManager.currentBalance.toFixed(2)} HTG`);
-            }
-          } catch (err) {
-            console.error('❌ Erreur lors de l\'initialisation:', err);
+          window.accountManager = new CashierAccountManager();
+          console.log('🔄 Chargement du gestionnaire de compte...');
+          const success = await window.accountManager.init();
+          if (success) {
+            console.log('✅ Gestionnaire de compte initialisé avec succès');
+            console.log(`💰 Solde NET du caissier: ${window.accountManager.currentBalance.toFixed(2)} HTG`);
+          } else {
+            console.warn('⚠️ Gestionnaire initialisé avec erreurs');
           }
-        })();
-      }
-
-      // Écouter les changements de solde
-      if (window.accountManager) {
-        window.accountManager.onChange((data) => {
-          console.log(`💰 Solde mis à jour: ${data.balance.toFixed(2)} HTG (${data.status})`);
-        });
-      }
-    </script>
-
-    <!-- WebSocket Script avec intégration au gestionnaire de compte -->
-    <script>
-        let cashierWS = null;
-        let cashierWsRetryDelay = 1000;
-        const cashierWsRetryMax = 30000;
-
-        function connectCashierWebSocket() {
-            if (!window.wsConfig || !window.wsConfig.connectionString) {
-                console.error('❌ Configuration WebSocket non trouvée pour cashier');
-                setTimeout(connectCashierWebSocket, 2000);
-                return;
-            }
-
-            try {
-                cashierWS = new WebSocket(window.wsConfig.connectionString);
-            } catch (err) {
-                console.error('❌ Impossible d\'ouvrir WebSocket cashier:', err);
-                scheduleCashierWsReconnect();
-                return;
-            }
-
-            cashierWS.onopen = () => {
-                console.log('✅ WebSocket cashier connecté');
-                cashierWsRetryDelay = 1000;
-            };
-
-            cashierWS.onmessage = (event) => {
-                try {
-                    const data = JSON.parse(event.data);
-                    handleCashierWebSocketMessage(data);
-                } catch (e) {
-                    console.error('❌ Erreur parsing WebSocket cashier:', e);
-                }
-            };
-
-            cashierWS.onclose = () => {
-                console.warn('⚠️ WebSocket cashier fermé, reconnexion...');
-                scheduleCashierWsReconnect();
-            };
-
-            cashierWS.onerror = (err) => {
-                console.error('❌ Erreur WebSocket cashier:', err);
-            };
+          window.accountManager.onChange((data) => {
+            console.log(`💰 Solde mis à jour: ${data.balance.toFixed(2)} HTG (${data.status})`);
+          });
+        } catch (err) {
+          console.error('❌ Erreur lors de l\'initialisation du gestionnaire:', err);
         }
-
-        function scheduleCashierWsReconnect() {
-            setTimeout(() => {
-                connectCashierWebSocket();
-                cashierWsRetryDelay = Math.min(cashierWsRetryDelay * 2, cashierWsRetryMax);
-            }, cashierWsRetryDelay);
-        }
-
-        function handleCashierWebSocketMessage(data) {
-            // ✅ NOUVEAU: Gérer les mises à jour de statuts de receipts immédiatement
-            if (data.event === 'receipt_status_updated' || data.event === 'receipts_status_updated') {
-                console.log('🎫 [CASHIER] Mise à jour des statuts de tickets - Round:', data.roundId);
-                // Mise à jour immédiate du dashboard cashier
-                if (typeof refreshCashierDashboard === 'function') {
-                    refreshCashierDashboard(); // Pas de délai - mise à jour immédiate
-                }
-                return;
-            }
-            // ✅ NOUVEAU: Recharger le solde si transaction détectée via WebSocket
-            if (data.event === 'payout' || data.event === 'payment' || data.event === 'transaction') {
-                console.log('💳 Transaction détectée, mise à jour du solde...');
-                if (window.accountManager) {
-                    window.accountManager.loadAccountData().catch(err => {
-                        console.warn('⚠️ Erreur mise à jour solde:', err.message);
-                    });
-                }
-            }
-
-            // Appeler le handler original s'il existe
-            if (window.app && window.app.handleWebSocketMessage) {
-                window.app.handleWebSocketMessage(data);
-            }
-        }
-
-        if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', connectCashierWebSocket);
-        } else {
-            connectCashierWebSocket();
-        }
+      });
     </script>
 
 </body>

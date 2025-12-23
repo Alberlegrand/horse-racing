@@ -1,24 +1,25 @@
 import { pool } from "../config/db.js";
 
 // Créer un ticket (receipt)
-export async function createReceipt({ round_id, user_id, total_amount, status = 'pending', prize = 0, receipt_id = null }) {
-  if (receipt_id) {
-    const res = await pool.query(
-      `INSERT INTO receipts (receipt_id, round_id, user_id, total_amount, status, prize, created_at)
-       VALUES ($1, $2, $3, $4, $5, $6, CURRENT_TIMESTAMP)
-       RETURNING *`,
-      [receipt_id, round_id, user_id, total_amount, status, prize]
-    );
-    return res.rows[0];
-  } else {
-    const res = await pool.query(
-      `INSERT INTO receipts (round_id, user_id, total_amount, status, prize, created_at)
-       VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP)
-       RETURNING *`,
-      [round_id, user_id, total_amount, status, prize]
-    );
-    return res.rows[0];
+// ✅ OBLIGATOIRE: receipt_id et round_id ne peuvent PAS être null
+export async function createReceipt({ round_id, user_id, total_amount, status = 'pending', prize = 0, receipt_id }) {
+  // ✅ VALIDATION: receipt_id est obligatoire
+  if (!receipt_id && receipt_id !== 0) {
+    throw new Error('receipt_id est obligatoire et ne peut pas être null');
   }
+  
+  // ✅ VALIDATION: round_id est obligatoire
+  if (!round_id && round_id !== 0) {
+    throw new Error('round_id est obligatoire et ne peut pas être null');
+  }
+  
+  const res = await pool.query(
+    `INSERT INTO receipts (receipt_id, round_id, user_id, total_amount, status, prize, created_at)
+     VALUES ($1, $2, $3, $4, $5, $6, CURRENT_TIMESTAMP)
+     RETURNING *`,
+    [receipt_id, round_id, user_id, total_amount, status, prize]
+  );
+  return res.rows[0];
 }
 
 // Créer un pari (bet) pour un ticket - OPTIMISÉ

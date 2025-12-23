@@ -37,7 +37,7 @@ import { initChaCha20 } from "./chacha20.js";
 import { initializeDatabase, pool } from "./config/db.js";
 
 // Import Redis pour cache et sessions
-import { initRedis, closeRedis, redisClient, getRedisStatus } from "./config/redis.js";
+import { initRedis, closeRedis, redisClient, getRedisStatus, clearAllCaches } from "./config/redis.js";
 import { cacheResponse } from "./middleware/cache.js";
 import auditMiddleware from "./middleware/audit.js";
 
@@ -92,6 +92,13 @@ console.log(`   • Environment: ${redisStatus.environment.toUpperCase()}\n`);
 await initRedis().catch(err => {
   console.warn('⚠️ Redis n\'est pas disponible, fonctionnement sans cache:', err.message);
 });
+
+// ✅ NOUVEAU: Supprimer tous les caches en mode développement
+if (NODE_ENV === 'development') {
+  console.log('\n🧹 [STARTUP] Mode développement - Suppression des caches...');
+  await clearAllCaches();
+  console.log('✅ [STARTUP] Caches supprimés\n');
+}
 
 // Initialiser la base de données au démarrage
 await initializeDatabase();
@@ -735,13 +742,35 @@ httpServer.listen(PORT, async () => {
   // Cela permet aux clients de rester synchronisés même s'ils dérivent
   
   // Timer pour synchronisation du timer d'attente (game_screen) + Auto-start de la course
+  // ✅ Guard anti re-entrance: setInterval + async peut se chevaucher et déclencher plusieurs fois
+  // (ex: startNewRound/DB prend > 500ms). On n'exécute jamais 2 auto-start simultanément.
+  let autoStartInProgress = false;
+
   setInterval(async () => {
     const now = Date.now();
     
-    // ✅ LANCER AUTOMATIQUEMENT LA COURSE quand le timer expire
+    // ✅ IMPORTANT:
+    // Le client gère déjà le lancement de la course via auto-click:
+    // POST /api/v1/rounds { action: 'finish' } (voir static/js/main.js).
+    //
+    // Donc, côté serveur, on NE DOIT PAS créer un nouveau round à l'expiration du timer,
+    // sinon on saute des rounds (double trigger + création de rounds en boucle).
+    //
+    // On se contente de notifier les clients qu'on est arrivé à 0.
     if (gameState.nextRoundStartTime && gameState.nextRoundStartTime <= now && !gameState.isRaceRunning) {
-      console.log(`🚀 [AUTO-START] Le timer a expiré! Lancement automatique de la course...`);
-      await startNewRound(broadcast, false);
+      if (!autoStartInProgress) {
+        autoStartInProgress = true;
+        console.log(`🚀 [AUTO-START] Le timer a expiré (signalé aux clients)`);
+
+        broadcast({
+          event: 'timer_expired',
+          roundId: gameState.currentRound?.id,
+          serverTime: now
+        });
+      }
+    } else {
+      // Reset le guard dès que l'état n'est plus "timer expiré & pas en course"
+      autoStartInProgress = false;
     }
     
     // Synchroniser le timer d'attente pour les clients

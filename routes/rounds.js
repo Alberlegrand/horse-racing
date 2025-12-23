@@ -24,6 +24,10 @@ import {
     getRoundParticipantsFromCache
 } from "../config/db-strategy.js";
 
+// Import pour invalider le cache HTTP
+import { invalidateCachePattern } from "../models/queryCache.js";
+import { cacheDelPattern } from "../config/redis.js";
+
 // Import de pool pour persister les rounds en DB
 import { pool } from "../config/db.js";
 
@@ -288,11 +292,11 @@ export default function createRoundsRouter(broadcast) {
             const dbResult = await pool.query(
                 `SELECT receipt_id, round_id, user_id, total_amount, status, prize, created_at
                  FROM receipts 
-                 WHERE round_id = $1`,
+                 WHERE round_id = $1 OR round_id IS NULL`,
                 [finishedRoundId]
             );
             receiptsFromDb = dbResult.rows || [];
-            console.log(`[RACE-RESULTS] 📊 ${receiptsFromDb.length} ticket(s) trouvé(s) en DB pour round ${finishedRoundId}`);
+            console.log(`[RACE-RESULTS] 📊 ${receiptsFromDb.length} ticket(s) trouvé(s) en DB pour round ${finishedRoundId} (incluant round_id=NULL)`);
         } catch (dbErr) {
             console.error(`[RACE-RESULTS] ❌ Erreur récupération tickets depuis DB:`, dbErr.message);
         }
@@ -300,22 +304,43 @@ export default function createRoundsRouter(broadcast) {
         // ✅ ÉTAPE 2: Mapper les tickets de gameState avec ceux de la DB
         // ✅ AMÉLIORATION: Matching amélioré avec fallback par receipt_id
         const receiptsToUpdate = receipts.map(receipt => {
-            // Calculer total_amount depuis les bets pour matching
+            // Calculer total_amount depuis les bets pour matching (en système)
             const receiptTotalAmount = (receipt.bets || []).reduce((sum, b) => sum + (Number(b.value) || 0), 0);
             
-            // Tentative 1: Match par user_id + total_amount (plus fiable que ID car l'ID peut avoir changé)
-            let dbReceipt = receiptsFromDb.find(db => {
-                // Match par user_id et total_amount (tolérance 0.01 pour arrondis)
-                const userMatch = (db.user_id === receipt.user_id) || (!db.user_id && !receipt.user_id);
-                const amountMatch = Math.abs(Number(db.total_amount) - receiptTotalAmount) < 0.01;
-                return userMatch && amountMatch;
-            });
-            
-            // ✅ NOUVEAU: Tentative 2: Fallback par receipt_id si disponible et matching échoué
-            if (!dbReceipt && receipt.id) {
+            // ✅ CORRECTION: Tentative 1: Match par receipt_id d'abord (le plus fiable)
+            let dbReceipt = null;
+            if (receipt.id) {
                 dbReceipt = receiptsFromDb.find(db => Number(db.receipt_id) === Number(receipt.id));
                 if (dbReceipt) {
-                    console.log(`[RACE-RESULTS] 🔄 Matching par receipt_id pour ticket #${receipt.id} (matching user_id+amount échoué)`);
+                    console.log(`[RACE-RESULTS] ✓ Matching par receipt_id pour ticket #${receipt.id}`);
+                }
+            }
+            
+            // ✅ CORRECTION: Tentative 2: Match par user_id + total_amount si receipt_id échoué
+            if (!dbReceipt) {
+                dbReceipt = receiptsFromDb.find(db => {
+                    // Match par user_id et total_amount (tolérance 0.01 pour arrondis)
+                    const userMatch = (db.user_id === receipt.user_id) || (!db.user_id && !receipt.user_id);
+                    const amountMatch = Math.abs(Number(db.total_amount) - receiptTotalAmount) < 0.01;
+                    return userMatch && amountMatch;
+                });
+                if (dbReceipt) {
+                    console.log(`[RACE-RESULTS] ✓ Matching par user_id+amount pour ticket #${receipt.id} (receipt_id=${dbReceipt.receipt_id})`);
+                }
+            }
+            
+            // ✅ CORRECTION: Tentative 3: Match par round_id + created_at si toujours pas trouvé
+            if (!dbReceipt && receipt.created_time) {
+                const receiptCreatedTime = new Date(receipt.created_time);
+                dbReceipt = receiptsFromDb.find(db => {
+                    const dbCreatedTime = db.created_at ? new Date(db.created_at) : null;
+                    if (!dbCreatedTime) return false;
+                    // Match si créé dans les 5 secondes
+                    const timeDiff = Math.abs(receiptCreatedTime.getTime() - dbCreatedTime.getTime());
+                    return timeDiff < 5000;
+                });
+                if (dbReceipt) {
+                    console.log(`[RACE-RESULTS] ✓ Matching par created_at pour ticket #${receipt.id} (receipt_id=${dbReceipt.receipt_id})`);
                 }
             }
             
@@ -332,15 +357,53 @@ export default function createRoundsRouter(broadcast) {
         const updatedReceipts = []; // ✅ NOUVEAU: Stocker les receipts mis à jour pour broadcast
         
         for (const { receipt, dbReceipt, dbId } of receiptsToUpdate) {
+            // ✅ CORRECTION: Si pas de dbReceipt, essayer de mettre à jour directement avec receipt.id
             if (!dbReceipt) {
-                console.warn(`[RACE-RESULTS] ⚠️ Ticket non trouvé en DB pour receipt.id=${receipt.id} (user_id=${receipt.user_id}, total=${receipt.bets?.reduce((s,b)=>s+(Number(b.value)||0),0) || 0}), skip`);
-                failedCount++;
-                continue;
+                console.warn(`[RACE-RESULTS] ⚠️ Ticket non trouvé en DB pour receipt.id=${receipt.id}, tentative mise à jour directe...`);
+                
+                // Essayer de mettre à jour directement avec receipt.id
+                try {
+                    const newStatus = receipt.prize > 0 ? 'won' : 'lost';
+                    const updateResult = await updateReceiptStatus(receipt.id, newStatus, receipt.prize || 0);
+                    
+                    if (updateResult?.success && updateResult.rowsAffected > 0) {
+                        console.log(`[DB] ✓ Ticket #${receipt.id}: status mis à jour directement (status=${newStatus}, prize=${receipt.prize})`);
+                        updatedCount++;
+                        receipt.status = newStatus;
+                        
+                        // Mettre à jour le round_id si NULL
+                        await pool.query(
+                            `UPDATE receipts SET round_id = $1 WHERE receipt_id = $2 AND (round_id IS NULL OR round_id != $1)`,
+                            [finishedRoundId, receipt.id]
+                        );
+                        
+                        updatedReceipts.push({
+                            receiptId: receipt.id,
+                            roundId: finishedRoundId,
+                            status: newStatus,
+                            prize: receipt.prize || 0,
+                            receipt: JSON.parse(JSON.stringify(receipt))
+                        });
+                        
+                        if (finishedRoundId) {
+                            await updateTicketInRoundCache(finishedRoundId, receipt.id, newStatus, receipt.prize || 0);
+                        }
+                        continue; // Succès, passer au suivant
+                    } else {
+                        console.error(`[DB] ✗ Ticket #${receipt.id}: Échec mise à jour directe (${updateResult?.reason || 'unknown'})`);
+                        failedCount++;
+                        continue;
+                    }
+                } catch (directUpdateErr) {
+                    console.error(`[DB] ✗ Erreur mise à jour directe ticket #${receipt.id}:`, directUpdateErr.message);
+                    failedCount++;
+                    continue;
+                }
             }
             
             try {
                 const newStatus = receipt.prize > 0 ? 'won' : 'lost';
-                const oldStatus = receipt.status || 'pending';
+                const oldStatus = dbReceipt.status || receipt.status || 'pending';
                 receipt.status = newStatus;
                 
                 // ✅ Utiliser le vrai ID de la DB (même si différent de receipt.id)
@@ -354,6 +417,15 @@ export default function createRoundsRouter(broadcast) {
                     if (receipt.id !== dbId) {
                         receipt.id = dbId;
                         console.log(`[DB] 🔄 ID synchronisé dans gameState: ${receipt.id} → ${dbId}`);
+                    }
+                    
+                    // ✅ CORRECTION: Mettre à jour le round_id si NULL ou différent
+                    if (!dbReceipt.round_id || dbReceipt.round_id !== finishedRoundId) {
+                        await pool.query(
+                            `UPDATE receipts SET round_id = $1 WHERE receipt_id = $2`,
+                            [finishedRoundId, dbId]
+                        );
+                        console.log(`[DB] ✓ Ticket #${dbId}: round_id mis à jour → ${finishedRoundId}`);
                     }
                     
                     // ✅ NOUVEAU: Stocker le receipt mis à jour pour broadcast immédiat
@@ -380,6 +452,19 @@ export default function createRoundsRouter(broadcast) {
         }
         
         console.log(`[RACE-RESULTS] 📊 Résumé mise à jour: ${updatedCount} réussie(s), ${failedCount} échouée(s) sur ${receipts.length} ticket(s)`);
+        
+        // ✅ CORRECTION: Invalider le cache HTTP pour forcer le rafraîchissement des données
+        try {
+            const { invalidateCachePattern } = await import("../models/queryCache.js");
+            const { cacheDelPattern } = await import("../config/redis.js");
+            await invalidateCachePattern("my-bets");
+            await invalidateCachePattern("receipts");
+            await cacheDelPattern("http:*/api/v1/my-bets*");
+            await cacheDelPattern("http:*/api/v1/receipts*");
+            console.log(`[RACE-RESULTS] ✅ Cache HTTP invalidé pour my-bets et receipts`);
+        } catch (cacheErr) {
+            console.warn(`[RACE-RESULTS] ⚠️ Erreur invalidation cache:`, cacheErr.message);
+        }
         
         // ✅ NOUVEAU: Mettre à jour les tickets avec round_id = null qui appartiennent à ce round
         // Ces tickets ont été créés avant que le round soit persisté en DB

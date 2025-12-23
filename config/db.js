@@ -247,7 +247,7 @@ const createTables = async () => {
     await client.query(`
       CREATE TABLE IF NOT EXISTS receipts (
         receipt_id BIGINT PRIMARY KEY,
-        round_id BIGINT,
+        round_id BIGINT NOT NULL,
         user_id INT,
         status VARCHAR(20) CHECK (status IN ('pending', 'won', 'lost', 'paid', 'cancelled')) DEFAULT 'pending',
         total_amount DECIMAL(15,2) NOT NULL,
@@ -255,7 +255,7 @@ const createTables = async () => {
         paid_at TIMESTAMP,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (round_id) REFERENCES rounds(round_id) ON DELETE SET NULL,
+        FOREIGN KEY (round_id) REFERENCES rounds(round_id) ON DELETE RESTRICT,
         FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE SET NULL
       )
     `);
@@ -461,6 +461,68 @@ const createTables = async () => {
     // ==========================================
     // Indexes sur receipts pour recherches rapides
     await client.query("CREATE INDEX IF NOT EXISTS idx_receipts_round_id ON receipts(round_id)");
+    
+    // ✅ MIGRATION: Mettre à jour le schéma pour rendre round_id NOT NULL
+    // 1. Corriger les receipts existants avec round_id = null (les associer au round actuel ou les supprimer)
+    try {
+      const nullRoundReceipts = await client.query(
+        "SELECT receipt_id FROM receipts WHERE round_id IS NULL LIMIT 100"
+      );
+      if (nullRoundReceipts.rows.length > 0) {
+        console.warn(`⚠️ [MIGRATION] ${nullRoundReceipts.rows.length} receipts avec round_id=NULL trouvés. Tentative de correction...`);
+        // Essayer de trouver le round le plus récent pour ces receipts
+        const latestRound = await client.query(
+          "SELECT round_id FROM rounds ORDER BY created_at DESC LIMIT 1"
+        );
+        if (latestRound.rows.length > 0) {
+          const defaultRoundId = latestRound.rows[0].round_id;
+          await client.query(
+            `UPDATE receipts SET round_id = $1 WHERE round_id IS NULL`,
+            [defaultRoundId]
+          );
+          console.log(`✅ [MIGRATION] ${nullRoundReceipts.rows.length} receipts corrigés avec round_id=${defaultRoundId}`);
+        } else {
+          console.warn(`⚠️ [MIGRATION] Aucun round trouvé, suppression des receipts orphelins...`);
+          await client.query("DELETE FROM receipts WHERE round_id IS NULL");
+        }
+      }
+    } catch (migErr) {
+      console.warn(`⚠️ [MIGRATION] Erreur correction receipts orphelins:`, migErr.message);
+    }
+    
+    // 2. Appliquer la contrainte NOT NULL sur round_id
+    try {
+      await client.query(`
+        ALTER TABLE receipts 
+        ALTER COLUMN round_id SET NOT NULL
+      `);
+      console.log("✅ [MIGRATION] Contrainte NOT NULL appliquée sur receipts.round_id");
+    } catch (alterErr) {
+      // Si la contrainte existe déjà ou si la colonne est déjà NOT NULL, ignorer
+      if (alterErr.code !== '42710' && !alterErr.message.includes('already')) {
+        console.warn(`⚠️ [MIGRATION] Erreur application NOT NULL sur round_id:`, alterErr.message);
+      }
+    }
+    
+    // 3. Changer ON DELETE SET NULL en ON DELETE RESTRICT pour round_id
+    try {
+      // Supprimer l'ancienne FK
+      await client.query(`
+        ALTER TABLE receipts 
+        DROP CONSTRAINT IF EXISTS receipts_round_id_fkey
+      `);
+      // Recréer avec RESTRICT
+      await client.query(`
+        ALTER TABLE receipts 
+        ADD CONSTRAINT receipts_round_id_fkey 
+        FOREIGN KEY (round_id) REFERENCES rounds(round_id) ON DELETE RESTRICT
+      `);
+      console.log("✅ [MIGRATION] FK receipts.round_id mise à jour avec ON DELETE RESTRICT");
+    } catch (fkErr) {
+      if (fkErr.code !== '42710' && !fkErr.message.includes('already')) {
+        console.warn(`⚠️ [MIGRATION] Erreur mise à jour FK round_id:`, fkErr.message);
+      }
+    }
     await client.query("CREATE INDEX IF NOT EXISTS idx_receipts_user_id ON receipts(user_id)");
     await client.query("CREATE INDEX IF NOT EXISTS idx_receipts_status ON receipts(status)");
     await client.query("CREATE INDEX IF NOT EXISTS idx_receipts_created_at ON receipts(created_at DESC)");

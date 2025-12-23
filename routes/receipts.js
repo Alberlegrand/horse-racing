@@ -882,22 +882,39 @@ export default function createReceiptsRouter(broadcast) {
         });
       }
 
-      // If the currentRound hasn't been persisted to DB yet, wait up to 5s for persistence.
-      // This avoids creating receipts referencing a round that doesn't yet exist in DB
-      // and prevents FK errors / nullable round fallback.
-      const waitForPersist = async (timeoutMs = 5000, intervalMs = 100) => {
-        const start = Date.now();
-        while (!gameState.currentRound.persisted && (Date.now() - start) < timeoutMs) {
-          await new Promise(r => setTimeout(r, intervalMs));
+      // ✅ CORRECTION: Vérifier que le round existe en DB (même si persisted=false)
+      // Au lieu de bloquer sur persisted, on vérifie directement en DB
+      const roundId = gameState.currentRound.id;
+      let roundExistsInDb = false;
+      
+      // Vérification directe en DB (plus fiable que persisted flag)
+      for (let attempt = 0; attempt < 20; attempt++) {
+        try {
+          const dbCheck = await pool.query(
+            "SELECT round_id FROM rounds WHERE round_id = $1 LIMIT 1",
+            [roundId]
+          );
+          if (dbCheck.rows && dbCheck.rows[0]) {
+            roundExistsInDb = true;
+            console.log(`[DB] ✓ Round ${roundId} trouvé en DB (attempt ${attempt + 1})`);
+            break;
+          }
+        } catch (checkErr) {
+          console.warn(`[DB] Erreur vérification round ${roundId} (attempt ${attempt + 1}):`, checkErr.message);
         }
-        return !!gameState.currentRound.persisted;
-      };
-
-      const persisted = await waitForPersist(5000, 100);
-      if (!persisted) {
-        // If round still not persisted after waiting, reject the request so client can retry.
-        console.warn('[DB] ❌ currentRound not persisted after wait - ask client to retry');
-        return res.status(503).json({ error: 'Round not ready. Please retry in a moment.', code: 'ROUND_NOT_PERSISTED' });
+        if (attempt < 19) {
+          await new Promise(r => setTimeout(r, 100));
+        }
+      }
+      
+      if (!roundExistsInDb) {
+        console.warn(`[DB] ❌ Round ${roundId} non trouvé en DB après 20 tentatives (persisted=${gameState.currentRound.persisted})`);
+        // ✅ CORRECTION: Ne pas bloquer complètement - permettre la création en mémoire
+        // Le round sera créé en DB de manière asynchrone
+        console.warn('[DB] ⚠️ Création du receipt en mémoire uniquement (round sera créé en DB plus tard)');
+      } else {
+        // Si le round existe en DB, mettre à jour le flag persisted
+        gameState.currentRound.persisted = true;
       }
 
       // ✅ SÉCURITÉ: Vérifier si les paris sont autorisés (quelques secondes avant le lancement)
@@ -1060,6 +1077,9 @@ export default function createReceiptsRouter(broadcast) {
       }
 
       receipt.prize = prizeForThisReceipt;
+      // ✅ OBLIGATOIRE: round_id doit être défini (round actuel)
+      receipt.roundId = gameState.currentRound.id;
+      receipt.round_id = gameState.currentRound.id;
       // Ajout de la date de création si elle n'existe pas
       if (!receipt.created_time) {
         receipt.created_time = new Date().toISOString();
@@ -1080,36 +1100,54 @@ export default function createReceiptsRouter(broadcast) {
 
       console.log("✅ Ticket ajouté ID :", receipt.id, `(cache: ${cacheResult ? 'OK' : 'FALLBACK'})`);
       (async () => {
-        // ✅ AMÉLIORATION: Vérifier que le round est persisté AVANT de créer le ticket
-        const ensureRoundPersisted = async (roundId, maxRetries = 20, delayMs = 100) => {
-          for (let i = 0; i < maxRetries; i++) {
-            try {
-              const res = await pool.query(
-                "SELECT round_id, status FROM rounds WHERE round_id = $1 LIMIT 1",
-                [roundId]
-              );
-              if (res.rows && res.rows[0]) {
-                console.log(`[DB] ✓ Round ${roundId} trouvé en DB après ${i * delayMs}ms (status: ${res.rows[0].status})`);
-                return true;
-              }
-            } catch (err) {
-              console.error('[DB] Erreur lookup round:', err.message);
-            }
-            if (i < maxRetries - 1) {
-              await new Promise(resolve => setTimeout(resolve, delayMs));
-            }
-          }
-          console.error(`[DB] ❌ Round ${roundId} non trouvé après ${maxRetries * delayMs}ms`);
-          return false;
-        };
+        // ✅ OBLIGATOIRE: Vérifier que le round existe AVANT de créer le receipt
+        const roundId = gameState.currentRound.id;
+        if (!roundId) {
+          throw new Error('Impossible de créer un receipt: aucun round actif (round_id est obligatoire)');
+        }
         
-        // ✅ Utiliser la nouvelle fonction avec nom plus explicite
-        const waitForRound = ensureRoundPersisted;
-
-        // Vérifier que le round existe avant de persister le receipt
-        const roundExists = await waitForRound(gameState.currentRound.id);
+        // ✅ OPTIMISATION: Vérifier que le round existe vraiment en DB (même si persisted=true)
+        // Il peut y avoir un délai de commit/visibilité, donc on fait plusieurs tentatives
+        let roundExists = false;
+        const maxDbChecks = 50; // 50 tentatives (augmenté pour plus de tolérance)
+        const dbCheckDelay = 150; // 150ms entre chaque tentative = 7.5s max
+        
+        console.log(`[DB] 🔍 Vérification round ${roundId} en DB (persisted=${gameState.currentRound.persisted})...`);
+        
+        for (let attempt = 0; attempt < maxDbChecks; attempt++) {
+          try {
+            const dbCheck = await pool.query(
+              "SELECT round_id, status FROM rounds WHERE round_id = $1 LIMIT 1",
+              [roundId]
+            );
+            if (dbCheck.rows && dbCheck.rows[0]) {
+              console.log(`[DB] ✓ Round ${roundId} trouvé en DB (attempt ${attempt + 1}/${maxDbChecks}, status: ${dbCheck.rows[0].status})`);
+              roundExists = true;
+              break;
+            }
+          } catch (checkErr) {
+            console.warn(`[DB] Erreur vérification round ${roundId} (attempt ${attempt + 1}):`, checkErr.message);
+          }
+          
+          // Attendre avant la prochaine tentative (sauf pour la dernière)
+          if (attempt < maxDbChecks - 1) {
+            await new Promise(resolve => setTimeout(resolve, dbCheckDelay));
+          }
+        }
+        
+        // ✅ CORRECTION: Ne créer le receipt en DB que si le round existe
         if (!roundExists) {
-          console.warn('[DB] ⚠️ Round FK check failed, but continuing (will use nullable round_id)');
+          // ✅ CORRECTION: Ne pas bloquer - le round sera créé en DB plus tard
+          // Le receipt est déjà créé en mémoire et sera persisté quand le round sera disponible
+          console.warn(`[DB] ⚠️ Round ${roundId} non trouvé en DB après ${maxDbChecks} tentatives. Le receipt ${receipt.id} sera persisté plus tard (quand le round sera en DB).`);
+          // Ne pas lancer d'erreur - permettre la création en mémoire
+          // Le round sera créé en DB de manière asynchrone et le receipt sera persisté ensuite
+          return; // Sortir de la fonction asynchrone - le receipt reste en mémoire
+        }
+
+        // ✅ VALIDATION: receipt.id est obligatoire
+        if (!receipt.id && receipt.id !== 0) {
+          throw new Error('Impossible de créer un receipt: receipt_id est obligatoire');
         }
 
         let dbReceipt = null;
@@ -1125,16 +1163,23 @@ export default function createReceiptsRouter(broadcast) {
         try {
           // calculer total_amount (somme des mises en valeur publique)
           const totalAmount = (receipt.bets || []).reduce((sum, b) => sum + (Number(b.value) || 0), 0);
-          // Créer le receipt en base (utilise receipt.id comme receipt_id si fourni)
-          // Si le round n'a pas été trouvé en base, envoyer `null` pour round_id afin d'éviter
-          // une violation de contrainte FK lorsque la table `rounds` n'a pas encore l'entrée.
-          const dbRoundId = roundExists ? gameState.currentRound.id : null;
+          
+          // ✅ OBLIGATOIRE: round_id doit être le round actuel (pas null)
+          const dbRoundId = roundId;
 
           // Retry loop: if insert fails with duplicate key, regenerate id and retry
           const MAX_INSERT_ATTEMPTS = 5;
           for (let attempt = 1; attempt <= MAX_INSERT_ATTEMPTS; attempt++) {
             try {
-              dbReceipt = await dbCreateReceipt({ round_id: dbRoundId, user_id: receipt.user_id || null, total_amount: totalAmount, status: isRaceFinished ? (receipt.prize > 0 ? 'won' : 'lost') : 'pending', prize: receipt.prize || 0, receipt_id: receipt.id });
+              // ✅ OBLIGATOIRE: receipt_id et round_id sont maintenant obligatoires
+              dbReceipt = await dbCreateReceipt({ 
+                receipt_id: receipt.id,  // ✅ OBLIGATOIRE
+                round_id: dbRoundId,     // ✅ OBLIGATOIRE (round actuel)
+                user_id: receipt.user_id || null, 
+                total_amount: totalAmount, 
+                status: isRaceFinished ? (receipt.prize > 0 ? 'won' : 'lost') : 'pending', 
+                prize: receipt.prize || 0 
+              });
               // ✅ CORRECTION: Synchroniser l'ID dans gameState si l'ID a changé
               if (dbReceipt && (dbReceipt.receipt_id || dbReceipt.receipt_id === 0)) {
                 const oldId = receipt.id;

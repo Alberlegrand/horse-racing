@@ -150,10 +150,12 @@ export async function createNewRound(options = {}) {
         console.log(`[ROUND-CREATE] ✅ Nouveau round #${newRoundId} en mémoire`);
 
         // 4️⃣ PERSISTER EN BASE DE DONNÉES (TRANSACTION ATOMIQUE)
+        console.log(`[ROUND-CREATE] 🔄 Début persistance round ${newRoundId} en DB...`);
         try {
             const client = await pool.connect();
             try {
                 await client.query('BEGIN');
+                console.log(`[ROUND-CREATE] 🔄 Transaction BEGIN pour round ${newRoundId}`);
                 
                 const roundNum = await getNextRoundNumber();
                 const insertRes = await client.query(
@@ -165,27 +167,75 @@ export async function createNewRound(options = {}) {
                 );
                 
                 // ✅ VÉRIFICATION: S'assurer que l'insertion a réussi
+                // Si ON CONFLICT DO NOTHING est déclenché, insertRes.rows sera vide
+                // Il faut vérifier si le round existe déjà dans la même transaction
                 if (!insertRes.rows || !insertRes.rows[0]) {
-                    // Vérifier si le round existe déjà
+                    // Vérifier si le round existe déjà (dans la même transaction)
                     const existingRes = await client.query(
                         `SELECT round_id, status FROM rounds WHERE round_id = $1`,
                         [newRoundId]
                     );
                     if (existingRes.rows && existingRes.rows[0]) {
                         const existingRound = existingRes.rows[0];
-                        console.warn(`[ROUND-CREATE] ⚠️ Round ${newRoundId} existe déjà avec status=${existingRound.status}`);
+                        console.log(`[ROUND-CREATE] ℹ️ Round ${newRoundId} existe déjà avec status=${existingRound.status} (ON CONFLICT)`);
                         // Si le round existe déjà, considérer comme persisté
                         gameState.currentRound.persisted = true;
                         await client.query('COMMIT');
+                        // ✅ VÉRIFICATION POST-COMMIT: S'assurer que le round est visible
+                        await new Promise(resolve => setTimeout(resolve, 100)); // Délai pour la visibilité du commit
+                        const verifyRes = await pool.query(
+                            `SELECT round_id FROM rounds WHERE round_id = $1`,
+                            [newRoundId]
+                        );
+                        if (!verifyRes.rows || !verifyRes.rows[0]) {
+                            console.error(`[ROUND-CREATE] ❌ Round ${newRoundId} non visible après commit!`);
+                            gameState.currentRound.persisted = false; // Marquer comme non persisté si non visible
+                        } else {
+                            console.log(`[ROUND-CREATE] ✅ Round ${newRoundId} vérifié et visible en DB`);
+                        }
                         return newRoundId;
                     } else {
-                        throw new Error(`Round ${newRoundId} insertion failed: no rows returned`);
+                        // Round n'existe pas et insertion a échoué - erreur critique
+                        throw new Error(`Round ${newRoundId} insertion failed: no rows returned and round does not exist`);
                     }
                 }
                 
                 await client.query('COMMIT');
-                gameState.currentRound.persisted = true;
-                console.log(`[ROUND-CREATE] ✅ Round #${roundNum} (ID: ${newRoundId}) persisté en DB`);
+                console.log(`[ROUND-CREATE] ✅ Round #${roundNum} (ID: ${newRoundId}) commité en DB`);
+                
+                // Libérer le client AVANT la vérification (utiliser le pool global)
+                client.release();
+                
+                // ✅ VÉRIFICATION POST-COMMIT: S'assurer que le round est visible immédiatement
+                // Utiliser le pool global (nouvelle connexion) pour vérifier la visibilité
+                await new Promise(resolve => setTimeout(resolve, 100)); // Délai pour la visibilité du commit
+                
+                let verified = false;
+                for (let verifyAttempt = 0; verifyAttempt < 10; verifyAttempt++) {
+                    try {
+                        const verifyRes = await pool.query(
+                            `SELECT round_id, status FROM rounds WHERE round_id = $1`,
+                            [newRoundId]
+                        );
+                        if (verifyRes.rows && verifyRes.rows[0]) {
+                            console.log(`[ROUND-CREATE] ✅ Round ${newRoundId} vérifié et visible en DB (attempt ${verifyAttempt + 1}, status: ${verifyRes.rows[0].status})`);
+                            verified = true;
+                            gameState.currentRound.persisted = true;
+                            break;
+                        }
+                    } catch (verifyErr) {
+                        console.warn(`[ROUND-CREATE] Erreur vérification round ${newRoundId} (attempt ${verifyAttempt + 1}):`, verifyErr.message);
+                    }
+                    if (verifyAttempt < 9) {
+                        await new Promise(resolve => setTimeout(resolve, 100));
+                    }
+                }
+                
+                if (!verified) {
+                    console.error(`[ROUND-CREATE] ❌ Round ${newRoundId} non visible après commit après 10 tentatives!`);
+                    gameState.currentRound.persisted = false; // Marquer comme non persisté
+                    throw new Error(`Round ${newRoundId} non visible en DB après commit - persistance échouée`);
+                }
             } catch (err) {
                 await client.query('ROLLBACK');
                 throw err;
@@ -292,7 +342,9 @@ export async function startNewRound(broadcast, archiveCurrentRound = false) {
     return await createNewRound({
         broadcast: broadcast,
         archiveCurrentRound: shouldArchive,  // Archive seulement si un round existe
-        checkLock: false             // Pas de lock au démarrage
+        // ✅ IMPORTANT: activer le lock pour éviter les doubles créations (auto-start, double clic, re-entrance)
+        // Si un appel spécifique doit bypass le lock, utiliser createNewRound({ checkLock: false }) directement.
+        checkLock: true
     });
 }
 
