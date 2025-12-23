@@ -1,4 +1,4 @@
-# 📚 Documentation Index - Horse Racing Betting Application
+# 📚 Documentation Index - HITBET777 Betting Application
 
 **Last Updated**: December 20, 2025  
 **Project Status**: ✅ COMPLETE & PRODUCTION READY

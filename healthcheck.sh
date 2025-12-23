@@ -1,9 +1,9 @@
 #!/bin/bash
 
-# 📊 Script de health check pour Horse Racing
+# 📊 Script de health check pour HITBET777
 # Teste si le serveur répond correctement
 
-echo "🏥 Health Check - Horse Racing Server"
+echo "🏥 Health Check - HITBET777 Server"
 echo "========================================"
 echo ""
 

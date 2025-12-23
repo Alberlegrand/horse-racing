@@ -1,9 +1,9 @@
 @echo off
 
-REM 📊 Script de health check pour Horse Racing (Windows)
+REM 📊 Script de health check pour HITBET777 (Windows)
 REM Teste si le serveur répond correctement
 
-echo 🏥 Health Check - Horse Racing Server
+echo 🏥 Health Check - HITBET777 Server
 echo ========================================
 echo.
 

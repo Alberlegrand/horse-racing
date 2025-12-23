@@ -1,8 +1,8 @@
 @echo off
-REM ✅ Script de démarrage PM2 pour Horse Racing (Windows)
+REM ✅ Script de démarrage PM2 pour HITBET777 (Windows)
 REM Usage: start-pm2.bat
 
-echo 🚀 Démarrage de Horse Racing avec PM2...
+echo 🚀 Démarrage de HITBET777 avec PM2...
 
 REM Vérifier que PM2 est installé
 where pm2 >nul 2>nul
@@ -29,7 +29,7 @@ echo 📊 État des processus:
 pm2 list
 
 echo.
-echo ✅ Horse Racing est maintenant en cours d'exécution avec PM2!
+echo ✅ HITBET777 est maintenant en cours d'exécution avec PM2!
 echo.
 echo Commandes utiles:
 echo   npm run pm2:logs      - Voir les logs en temps réel

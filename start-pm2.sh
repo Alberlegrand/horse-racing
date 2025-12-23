@@ -1,9 +1,9 @@
 #!/bin/bash
 
-# ✅ Script de démarrage PM2 pour Horse Racing
+# ✅ Script de démarrage PM2 pour HITBET777
 # Usage: ./start-pm2.sh
 
-echo "🚀 Démarrage de Horse Racing avec PM2..."
+echo "🚀 Démarrage de HITBET777 avec PM2..."
 
 # Vérifier que PM2 est installé
 if ! command -v pm2 &> /dev/null; then
@@ -29,7 +29,7 @@ echo "📊 État des processus:"
 pm2 list
 
 echo ""
-echo "✅ Horse Racing est maintenant en cours d'exécution avec PM2!"
+echo "✅ HITBET777 est maintenant en cours d'exécution avec PM2!"
 echo ""
 echo "Commandes utiles:"
 echo "  npm run pm2:logs      - Voir les logs en temps réel"

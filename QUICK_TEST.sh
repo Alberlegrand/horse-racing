@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Quick Test & Verification Script for Horse Racing Betting App
+# Quick Test & Verification Script for HITBET777 Betting App
 
-echo "🚀 Horse Racing Betting App - Quick Tests"
+echo "🚀 HITBET777 Betting App - Quick Tests"
 echo "=========================================="
 echo ""
 

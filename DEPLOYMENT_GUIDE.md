@@ -1,4 +1,4 @@
-# Deployment Guide - Horse Racing Betting App
+# Deployment Guide - HITBET777 Betting App
 
 **Date**: December 20, 2025  
 **Version**: 1.0  

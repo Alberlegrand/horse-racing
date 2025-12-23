@@ -1,4 +1,4 @@
-# PM2 Configuration pour Horse Racing
+# PM2 Configuration pour HITBET777
 
 ## Installation
 

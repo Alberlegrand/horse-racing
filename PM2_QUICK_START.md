@@ -1,4 +1,4 @@
-# 🚀 PM2 - Gestion des Processus Horse Racing
+# 🚀 PM2 - Gestion des Processus HITBET777
 
 PM2 a été intégré au projet pour une meilleure gestion et monitoring des processus Node.js.
 

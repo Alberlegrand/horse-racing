@@ -1,4 +1,4 @@
-# 📊 Analyse Complète du Projet Horse Racing
+# 📊 Analyse Complète du Projet HITBET777
 
 ## 🎯 Vue d'Ensemble
 Application de pari sur courses de chevaux (Paryaj Cheval) développée avec Node.js/Express côté serveur et JavaScript côté client.
