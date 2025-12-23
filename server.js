@@ -490,7 +490,7 @@ app.post("/api/v1/receipts/", verifyToken, (req, res, next) => {
   next();
 });
 
-app.use("/api/v1/receipts/", createReceiptsRouter(broadcast));
+app.use("/api/v1/receipts/", verifyToken, createReceiptsRouter(broadcast));
 
 app.use("/api/v1/my-bets/", verifyToken, createMyBetsRouter(broadcast));
 
@@ -500,7 +500,8 @@ app.use("/api/v1/diagnostic/", verifyToken, diagnosticRouter);
 app.use("/api/v1/money/", verifyToken, requireRole('cashier', 'admin'), moneyRouter);
 
 // ✅ NOUVEAU: Routes de gestion des comptes de caisse
-app.use("/api/v1/accounts/", accountsRouter);
+// ✅ CORRECTION: Protection par verifyToken pour isolation des données
+app.use("/api/v1/accounts/", verifyToken, accountsRouter);
 
 // ✅ NOUVEAU: Routes de configuration système
 app.use("/api/v1/system/", systemRouter);

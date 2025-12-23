@@ -11,10 +11,38 @@ import * as accountModel from "../models/accountModel.js";
 const router = express.Router();
 
 // GET /api/v1/money/ - calcule le solde caisse depuis la base (CACHED)
+// ✅ CORRECTION: Filtre par user_id pour isolation des données par caissier
 router.get("/", cacheResponse(30), async (req, res) => {
   try {
-    // OPTIMISATION: Utiliser la query cache - combine 2 queries en 1 + multi-tier caching
-    const stats = await getSalesStats();
+    // ✅ OBLIGATOIRE: Récupérer user_id depuis req.user (JWT)
+    const userId = req.user?.userId || req.user?.user_id;
+    if (!userId) {
+      return res.status(401).json({ error: 'Authentification requise' });
+    }
+    
+    // ✅ CORRECTION: Utiliser le compte de caisse du caissier connecté
+    // Pour les caissiers, utiliser le compte de caisse au lieu des stats globales
+    if (req.user?.role === 'cashier') {
+      try {
+        const account = await accountModel.getAccountByUserId(userId);
+        if (account) {
+          const balance = Number(account.balance) || 0;
+          console.log(`💰 Money (Cashier ${userId}): balance=${balance} HTG depuis compte de caisse`);
+          return res.json(wrap({ 
+            money: balance, 
+            totalReceived: 0, 
+            totalPayouts: 0,
+            source: 'cashier_account'
+          }));
+        }
+      } catch (accountErr) {
+        console.warn(`⚠️ Erreur récupération compte caissier:`, accountErr.message);
+        // Fallback sur stats si compte non trouvé
+      }
+    }
+    
+    // OPTIMISATION: Utiliser la query cache filtrée par user_id
+    const stats = await getSalesStats(userId);
     
     const totalReceivedSystem = Number(stats.total_received) || 0;
     const totalPayoutsSystem = Number(stats.total_payouts) || 0;
@@ -23,7 +51,7 @@ router.get("/", cacheResponse(30), async (req, res) => {
     const totalPayouts = systemToPublic(totalPayoutsSystem);
     const cashBalance = totalReceived - totalPayouts;
 
-    console.log(`💰 Money: received=${totalReceived}, payouts=${totalPayouts}, balance=${cashBalance}`);
+    console.log(`💰 Money (User ${userId}): received=${totalReceived}, payouts=${totalPayouts}, balance=${cashBalance}`);
     return res.json(wrap({ money: cashBalance, totalReceived, totalPayouts }));
   } catch (err) {
     console.error('Erreur /api/v1/money:', err);
@@ -32,10 +60,41 @@ router.get("/", cacheResponse(30), async (req, res) => {
 });
 
 // Support legacy clients that POST to /api/v1/money/ (some frontends expect POST)
+// ✅ CORRECTION: Filtre par user_id pour isolation des données par caissier
 router.post("/", async (req, res) => {
   try {
-    // OPTIMISATION: Utiliser la query cache - combine 2 queries en 1 + multi-tier caching
-    const stats = await getSalesStats();
+    // ✅ OBLIGATOIRE: Récupérer user_id depuis req.user (JWT)
+    const userId = req.user?.userId || req.user?.user_id;
+    if (!userId) {
+      return res.status(401).json({ error: 'Authentification requise' });
+    }
+    
+    // ✅ CORRECTION: Utiliser le compte de caisse du caissier connecté
+    if (req.user?.role === 'cashier') {
+      try {
+        const account = await accountModel.getAccountByUserId(userId);
+        if (account) {
+          const balance = Number(account.balance) || 0;
+          console.log(`💰 Money (POST, Cashier ${userId}): balance=${balance} HTG depuis compte de caisse`);
+          
+          // Invalider le cache pour ce user
+          await invalidateCachePattern(`sales_stats:user:${userId}`);
+          await cacheDelPattern(`http:*/api/v1/money*`);
+          
+          return res.json(wrap({ 
+            money: balance, 
+            totalReceived: 0, 
+            totalPayouts: 0,
+            source: 'cashier_account'
+          }));
+        }
+      } catch (accountErr) {
+        console.warn(`⚠️ Erreur récupération compte caissier:`, accountErr.message);
+      }
+    }
+    
+    // OPTIMISATION: Utiliser la query cache filtrée par user_id
+    const stats = await getSalesStats(userId);
     
     const totalReceivedSystem = Number(stats.total_received) || 0;
     const totalPayoutsSystem = Number(stats.total_payouts) || 0;
@@ -44,10 +103,10 @@ router.post("/", async (req, res) => {
     const totalPayouts = systemToPublic(totalPayoutsSystem);
     const cashBalance = totalReceived - totalPayouts;
 
-    console.log(`💰 Money (POST): received=${totalReceived}, payouts=${totalPayouts}, balance=${cashBalance}`);
+    console.log(`💰 Money (POST, User ${userId}): received=${totalReceived}, payouts=${totalPayouts}, balance=${cashBalance}`);
     
-    // Invalidate cache after money state change
-    await invalidateCachePattern("sales_stats");
+    // Invalidate cache after money state change (pour ce user)
+    await invalidateCachePattern(`sales_stats:user:${userId}`);
     await cacheDelPattern("http:*/api/v1/money*");
     
     return res.json(wrap({ money: cashBalance, totalReceived, totalPayouts }));

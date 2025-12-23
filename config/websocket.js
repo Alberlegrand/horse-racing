@@ -27,7 +27,7 @@ export const WEBSOCKET_CONFIG = {
     },
     production: {
       protocol: "wss",
-      host: "horse-racing-gmqj.onrender.com",
+      host: "horses.hitbet777.store",
       port: null, // Utilise le port standard pour wss (443)
       path: "/connection/websocket",
       description: "WebSocket sécurisé (TLS/SSL) pour production Render"

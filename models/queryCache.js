@@ -70,9 +70,15 @@ async function cachedQuery(cacheKey, queryFn, ttlSeconds = 60) {
  * Get sales statistics (cached)
  * Used by /api/v1/money route
  * Expected savings: 2 queries -> 1 query + caching = ~80% reduction
+ * ✅ CORRECTION: Filtre par user_id si fourni pour isolation des données
  */
-export async function getSalesStats() {
-  return cachedQuery("query:sales_stats", async () => {
+export async function getSalesStats(userId = null) {
+  const cacheKey = userId ? `query:sales_stats:user:${userId}` : "query:sales_stats";
+  
+  return cachedQuery(cacheKey, async () => {
+    const whereClause = userId ? `WHERE user_id = $1` : '';
+    const params = userId ? [userId] : [];
+    
     const res = await pool.query(`
       SELECT 
         COALESCE(SUM(CASE WHEN status IN ('pending', 'won', 'paid', 'lost') THEN total_amount ELSE 0 END), 0) AS total_received,
@@ -83,7 +89,8 @@ export async function getSalesStats() {
         SUM(CASE WHEN status = 'paid' THEN 1 ELSE 0 END) as paid_count,
         SUM(CASE WHEN status = 'lost' THEN 1 ELSE 0 END) as lost_count
       FROM receipts
-    `);
+      ${whereClause}
+    `, params);
     return res.rows[0];
   }, 60); // 60 second Redis TTL
 }
