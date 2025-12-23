@@ -379,7 +379,7 @@ const createTables = async () => {
     await client.query(`
       CREATE TABLE IF NOT EXISTS app_settings (
         setting_id SERIAL PRIMARY KEY,
-        app_name VARCHAR(150) DEFAULT 'HITBET777',
+        app_name VARCHAR(150) DEFAULT 'Horse Racing',
         company_name VARCHAR(150) DEFAULT 'Racing Organization',
         contact_email VARCHAR(255),
         phone VARCHAR(20),
@@ -582,7 +582,7 @@ const createTables = async () => {
       await client.query(`
         INSERT INTO app_settings (app_name, company_name, contact_email, phone, address, timezone, currency)
         VALUES (
-          'HITBET777 Betting',
+          'Horse Racing Betting',
           'Racing Management Inc.',
           'contact@horseracing.local',
           '+33 1 23 45 67 89',

@@ -456,7 +456,12 @@ router.post("/pay/:id", async (req, res) => {
     try {
       await dbCreatePayment({ receipt_id: ticketId, user_id: receipt.user_id || null, amount: prize || 0, method: 'cash', status: 'completed' });
       // Mettre à jour le statut du receipt en base
-      await dbUpdateReceiptStatus(ticketId, 'paid', prize || 0);
+      const updateResult = await dbUpdateReceiptStatus(ticketId, 'paid', prize || 0);
+      if (updateResult?.success && updateResult.rowsAffected > 0) {
+        console.log(`[PAY] ✓ Ticket #${ticketId} marqué comme payé (${updateResult.rowsAffected} ligne(s) affectée(s))`);
+      } else {
+        console.warn(`[PAY] ⚠️ Ticket #${ticketId} non trouvé ou non mis à jour (${updateResult?.reason || 'unknown'})`);
+      }
     } catch (err) {
       console.error('[DB] Erreur lors de la création du paiement :', err);
     }

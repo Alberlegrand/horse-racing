@@ -14,6 +14,7 @@ import createInitRouter from "./routes/init.js";
 import createAuthRouter, { verifyToken, requireRole } from "./routes/auth.js";
 import createReceiptsRouter from "./routes/receipts.js";
 import createMyBetsRouter from "./routes/my_bets.js";
+import diagnosticRouter from "./routes/diagnostic.js";
 import keepaliveRouter from "./routes/keepalive.js";
 import moneyRouter from "./routes/money.js";
 import statsRouter from "./routes/stats.js";
@@ -485,6 +486,9 @@ app.post("/api/v1/receipts/", verifyToken, (req, res, next) => {
 app.use("/api/v1/receipts/", createReceiptsRouter(broadcast));
 
 app.use("/api/v1/my-bets/", verifyToken, createMyBetsRouter(broadcast));
+
+// ✅ NOUVEAU: Route de diagnostic pour vérifier les incohérences de tickets
+app.use("/api/v1/diagnostic/", verifyToken, diagnosticRouter);
 
 app.use("/api/v1/money/", verifyToken, requireRole('cashier', 'admin'), moneyRouter);
 

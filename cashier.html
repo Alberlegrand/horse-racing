@@ -345,6 +345,15 @@
         }
 
         function handleCashierWebSocketMessage(data) {
+            // ✅ NOUVEAU: Gérer les mises à jour de statuts de receipts immédiatement
+            if (data.event === 'receipt_status_updated' || data.event === 'receipts_status_updated') {
+                console.log('🎫 [CASHIER] Mise à jour des statuts de tickets - Round:', data.roundId);
+                // Mise à jour immédiate du dashboard cashier
+                if (typeof refreshCashierDashboard === 'function') {
+                    refreshCashierDashboard(); // Pas de délai - mise à jour immédiate
+                }
+                return;
+            }
             // ✅ NOUVEAU: Recharger le solde si transaction détectée via WebSocket
             if (data.event === 'payout' || data.event === 'payment' || data.event === 'transaction') {
                 console.log('💳 Transaction détectée, mise à jour du solde...');

@@ -166,6 +166,191 @@ class App {
         };
 
         /* -------------------------
+           Fonction pour formater un ticket depuis les données WebSocket
+        ------------------------- */
+        const formatTicketForTable = (t) => {
+            const roundId = t.roundId || t.round_id || '-';
+            const createdTime = t.date || t.created_time || t.created_at || Date.now();
+            
+            // Calculer totalAmount depuis les bets si non fourni
+            let totalAmount = t.totalAmount || t.total_amount || 0;
+            if (!totalAmount && Array.isArray(t.bets)) {
+                // Convertir de système à publique si nécessaire
+                totalAmount = t.bets.reduce((sum, b) => {
+                    const valueSystem = Number(b.value || 0);
+                    // Si Currency est disponible, utiliser systemToPublic, sinon diviser par 100
+                    if (typeof Currency !== 'undefined' && typeof Currency.systemToPublic === 'function') {
+                        const valuePublic = Currency.systemToPublic(valueSystem);
+                        return sum + (typeof valuePublic === 'object' && valuePublic.toNumber ? valuePublic.toNumber() : Number(valuePublic));
+                    }
+                    return sum + (valueSystem / 100);
+                }, 0);
+            }
+            
+            const total = totalAmount.toFixed(2);
+            const isMultibet = Array.isArray(t.bets) && t.bets.length > 1;
+            // For single bets, show the participant coeff; for multibets, show a compact label
+            const coeffLabel = isMultibet ? `Multibet (${t.bets.length})` : (t.bets && t.bets[0] && t.bets[0].participant ? `x${Number(t.bets[0].participant.coeff).toFixed(2)}` : (t.avgCoeff ? `x${Number(t.avgCoeff).toFixed(2)}` : '-'));
+            const hasPrize = t.prize && t.prize > 0;
+            // Permettre l'annulation tant que le statut est "pending" ET que les paris ne sont pas verrouillés
+            const canCancel = t.status === 'pending' && !this.bettingLocked && !this.isRaceRunning;
+            
+            return {
+                roundId,
+                createdTime,
+                total,
+                isMultibet,
+                coeffLabel,
+                hasPrize,
+                canCancel,
+                id: t.id || t.receiptId || t.receipt_id,
+                status: t.status || 'pending',
+                prize: t.prize || 0,
+                paidAt: t.paidAt || t.paid_at || null
+            };
+        };
+
+        /* -------------------------
+           Fonction pour créer une ligne de ticket dans le tableau
+        ------------------------- */
+        const createTicketRow = (ticketData) => {
+            const t = formatTicketForTable(ticketData);
+            const tr = document.createElement('tr');
+            tr.className = 'hover:bg-slate-700/50';
+            tr.setAttribute('data-receipt-id', t.id);
+            tr.innerHTML = `
+                <td class="p-2 text-sm font-medium">#${t.id || '—'}</td>
+                <td class="p-2 text-slate-400 text-xs">${new Date(t.createdTime).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</td>
+                <td class="p-2 text-sm text-slate-300">#${t.roundId}</td>
+                <td class="p-2 text-sm font-semibold text-green-300">${t.total} HTG</td>
+                <td class="p-2 text-sm text-slate-300">${t.coeffLabel}</td>
+                <td class="p-2">${this.formatStatus(t.status)}</td>
+                <td class="p-2">
+                    <div class="flex gap-1 flex-wrap">
+                        <button data-action="print" data-id="${t.id || ''}" 
+                            class="px-2 py-1 bg-blue-600 hover:bg-blue-700 text-xs rounded text-white" 
+                            title="Imprimer">🖨️</button>
+                        ${t.canCancel
+                            ? `<button data-action="void" data-id="${t.id || ''}" 
+                                class="px-2 py-1 bg-red-600 hover:bg-red-700 text-xs rounded text-white" 
+                                title="Annuler">❌</button>`
+                            : ''}
+                        ${t.status === 'won'
+                            ? `<button data-action="pay" data-id="${t.id || ''}" 
+                                class="px-2 py-1 bg-green-600 hover:bg-green-700 text-xs rounded text-white" 
+                                title="Payer le ticket">💵</button>`
+                            : ''}
+                        ${t.status === 'paid'
+                            ? `<span class="px-2 py-1 bg-blue-500/30 text-blue-300 text-xs rounded" 
+                                title="Payé le ${t.paidAt ? new Date(t.paidAt).toLocaleString('fr-FR') : 'N/A'}">✓ Payé</span>`
+                            : ''}
+                        <button data-action="rebet" data-id="${t.id || ''}" 
+                            class="px-2 py-1 bg-purple-600 hover:bg-purple-700 text-xs rounded text-white" 
+                            title="Rejouer ce ticket">🔄</button>
+                    </div>
+                </td>
+            `;
+            return tr;
+        };
+
+        /* -------------------------
+           Fonction pour ajouter un ticket directement au tableau (WebSocket)
+        ------------------------- */
+        const addTicketToTable = (ticketData) => {
+            const table = el('ticketsTable');
+            if (!table) {
+                console.warn('⚠️ #ticketsTable introuvable, refresh complet nécessaire');
+                refreshTickets();
+                return;
+            }
+
+            // Vérifier si le ticket existe déjà
+            const existingRow = table.querySelector(`tr[data-receipt-id="${ticketData.id || ticketData.receiptId}"]`);
+            if (existingRow) {
+                console.log(`⚠️ Ticket #${ticketData.id || ticketData.receiptId} déjà présent, mise à jour...`);
+                // Mettre à jour la ligne existante
+                const newRow = createTicketRow(ticketData);
+                existingRow.replaceWith(newRow);
+                return;
+            }
+
+            // Si le tableau est vide ou contient "Aucun ticket", le vider d'abord
+            if (table.innerHTML.includes('Aucun ticket')) {
+                table.innerHTML = '';
+            }
+
+            // Ajouter le nouveau ticket en haut du tableau (le plus récent en premier)
+            const newRow = createTicketRow(ticketData);
+            table.insertBefore(newRow, table.firstChild);
+
+            // Limiter à 50 tickets affichés (garder les plus récents)
+            const rows = table.querySelectorAll('tr[data-receipt-id]');
+            if (rows.length > 50) {
+                rows[rows.length - 1].remove();
+            }
+
+            // ✅ Mettre à jour les stats immédiatement
+            updateStatsFromTicket(ticketData);
+        };
+
+        /* -------------------------
+           Fonction pour supprimer un ticket directement du tableau (WebSocket)
+        ------------------------- */
+        const removeTicketFromTable = (ticketId) => {
+            const table = el('ticketsTable');
+            if (!table) return;
+
+            const row = table.querySelector(`tr[data-receipt-id="${ticketId}"]`);
+            if (row) {
+                row.remove();
+                
+                // Si le tableau est vide, afficher "Aucun ticket"
+                if (table.querySelectorAll('tr[data-receipt-id]').length === 0) {
+                    table.innerHTML = `<tr><td colspan="7" class="p-4 text-slate-400">Aucun ticket</td></tr>`;
+                }
+                
+                // ✅ Mettre à jour les stats
+                refreshTickets(); // Refresh pour recalculer les stats correctement
+            }
+        };
+
+        /* -------------------------
+           Fonction pour mettre à jour les stats depuis un ticket ajouté
+        ------------------------- */
+        const updateStatsFromTicket = (ticketData) => {
+            // Calculer le totalAmount depuis les bets
+            let ticketTotal = ticketData.totalAmount || ticketData.total_amount || 0;
+            if (!ticketTotal && Array.isArray(ticketData.bets)) {
+                ticketTotal = ticketData.bets.reduce((sum, b) => {
+                    const valueSystem = Number(b.value || 0);
+                    if (typeof Currency !== 'undefined' && typeof Currency.systemToPublic === 'function') {
+                        const valuePublic = Currency.systemToPublic(valueSystem);
+                        return sum + (typeof valuePublic === 'object' && valuePublic.toNumber ? valuePublic.toNumber() : Number(valuePublic));
+                    }
+                    return sum + (valueSystem / 100);
+                }, 0);
+            }
+
+            // Mettre à jour le total des mises
+            const totalBetsAmountEl = el('totalBetsAmount');
+            if (totalBetsAmountEl) {
+                const currentTotal = parseFloat(totalBetsAmountEl.textContent.replace(' HTG', '').replace(/\s/g, '')) || 0;
+                const newTotal = (currentTotal + ticketTotal).toFixed(2);
+                totalBetsAmountEl.textContent = `${newTotal} HTG`;
+            }
+
+            // Mettre à jour le nombre de tickets actifs
+            const activeTicketsCountEl = el('activeTicketsCount');
+            if (activeTicketsCountEl) {
+                const table = el('ticketsTable');
+                if (table) {
+                    const activeCount = table.querySelectorAll('tr[data-receipt-id]').length;
+                    activeTicketsCountEl.textContent = activeCount;
+                }
+            }
+        };
+
+        /* -------------------------
            Mise à jour du tableau
         ------------------------- */
         const updateTicketsTable = (tickets) => {
@@ -180,50 +365,7 @@ class App {
             }
 
             tickets.forEach(t => {
-                const roundId = t.roundId || '-';
-                const createdTime = t.date || t.created_time || t.created_at || Date.now();
-                const total = (t.totalAmount || 0).toFixed(2);
-                const isMultibet = Array.isArray(t.bets) && t.bets.length > 1;
-                // For single bets, show the participant coeff; for multibets, show a compact label
-                const coeffLabel = isMultibet ? `Multibet (${t.bets.length})` : (t.bets && t.bets[0] && t.bets[0].participant ? `x${Number(t.bets[0].participant.coeff).toFixed(2)}` : (t.avgCoeff ? `x${Number(t.avgCoeff).toFixed(2)}` : '-'));
-                const hasPrize = t.prize && t.prize > 0;
-                // Permettre l'annulation tant que le statut est "pending"
-                const canCancel = t.status === 'pending';
-                
-                const tr = document.createElement('tr');
-                tr.className = 'hover:bg-slate-700/50';
-                tr.innerHTML = `
-                    <td class="p-2 text-sm font-medium">#${t.id || '—'}</td>
-                    <td class="p-2 text-slate-400 text-xs">${new Date(createdTime).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</td>
-                    <td class="p-2 text-sm text-slate-300">#${roundId}</td>
-                    <td class="p-2 text-sm font-semibold text-green-300">${total} HTG</td>
-                    <td class="p-2 text-sm text-slate-300">${coeffLabel}</td>
-                    <td class="p-2">${this.formatStatus(t.status || 'pending')}</td>
-                    <td class="p-2">
-                        <div class="flex gap-1 flex-wrap">
-                            <button data-action="print" data-id="${t.id || ''}" 
-                                class="px-2 py-1 bg-blue-600 hover:bg-blue-700 text-xs rounded text-white" 
-                                title="Imprimer">🖨️</button>
-                            ${canCancel
-                                ? `<button data-action="void" data-id="${t.id || ''}" 
-                                    class="px-2 py-1 bg-red-600 hover:bg-red-700 text-xs rounded text-white" 
-                                    title="Annuler">❌</button>`
-                                : ''}
-                            ${t.status === 'won'
-                                ? `<button data-action="pay" data-id="${t.id || ''}" 
-                                    class="px-2 py-1 bg-green-600 hover:bg-green-700 text-xs rounded text-white" 
-                                    title="Payer le ticket">💵</button>`
-                                : ''}
-                            ${t.status === 'paid'
-                                ? `<span class="px-2 py-1 bg-blue-500/30 text-blue-300 text-xs rounded" 
-                                    title="Payé le ${t.paidAt ? new Date(t.paidAt).toLocaleString('fr-FR') : 'N/A'}">✓ Payé</span>`
-                                : ''}
-                            <button data-action="rebet" data-id="${t.id || ''}" 
-                                class="px-2 py-1 bg-purple-600 hover:bg-purple-700 text-xs rounded text-white" 
-                                title="Rejouer ce ticket">🔄</button>
-                        </div>
-                    </td>
-                `;
+                const tr = createTicketRow(t);
                 table.appendChild(tr);
             });
         }
@@ -833,6 +975,8 @@ class App {
         // Stocker les fonctions pour utilisation par WebSocket
         this.dashboardRefreshTickets = refreshTickets;
         this.dashboardUpdateStats = updateStats;
+        this.dashboardAddTicketToTable = addTicketToTable; // ✅ NOUVEAU: Ajouter directement un ticket
+        this.dashboardRemoveTicketFromTable = removeTicketFromTable; // ✅ NOUVEAU: Supprimer directement un ticket
         this.dashboardDemarrerTimer = demarrerTimer;
         this.dashboardArreterTimer = arreterTimer;
         this.dashboardMettreAJourProgressBar = mettreAJourProgressBar;
@@ -897,6 +1041,145 @@ class App {
     const prevPageBtn = document.getElementById('prevPage');
     const nextPageBtn = document.getElementById('nextPage');
         
+        /* -------------------------
+           Fonction pour créer une ligne de ticket pour my-bets
+        ------------------------- */
+        const createMyBetsTicketRow = (ticket) => {
+            const isMultibet = Array.isArray(ticket.bets) && ticket.bets.length > 1;
+            const canCancel = ticket.status === 'pending' && !this.bettingLocked && !this.isRaceRunning;
+            const isInCurrentRound = ticket.roundId === this.currentRoundId;
+            
+            return `
+                <tr class="hover:bg-slate-700/50" data-receipt-id="${ticket.id}">
+                    <td class="p-2">${ticket.id}</td>
+                    <td class="p-2">${new Date(ticket.date).toLocaleString('fr-FR')}</td>
+                    <td class="p-2">${ticket.roundId}</td>
+                    <td class="p-2">
+                        ${isMultibet ? `
+                            <div class="text-sm font-medium">Multibet (${ticket.bets.length} paris)</div>
+                            <div class="text-xs text-slate-400 mt-1">Total: ${ticket.totalAmount.toFixed(2)} HTG</div>
+                        ` : ticket.bets.map(bet => `
+                            <div class="text-sm mb-1">
+                                <span title="Participant">#${bet.participant?.number || bet.number} ${bet.participant?.name || ''}</span>
+                                <span class="text-slate-400"> - </span>
+                                <span title="Mise">${(parseFloat(bet.value) || 0).toFixed(2)} HTG</span>
+                                <span class="text-slate-400">×</span>
+                                <span title="Cote">${bet.participant?.coeff || 0}x</span>
+                                <span class="text-slate-400">=</span>
+                                <span title="Gain potentiel">${((parseFloat(bet.value) || 0) * (bet.participant?.coeff || 0)).toFixed(2)} HTG</span>
+                            </div>
+                        `).join('')}
+                    </td>
+                    <td class="p-2">${isMultibet ? `Multibet (${ticket.bets.length})` : `${(ticket.avgCoeff || 0).toFixed(2)}x`}</td>
+                    <td class="p-2">${isMultibet ? '-' : `${(ticket.potentialWinnings || 0).toFixed(2)} HTG`}</td>
+                    <td class="p-2">${this.formatStatus(ticket.status)}</td>
+                    <td class="p-2">
+                        <div class="flex items-center gap-2">
+                            <button onclick="window.printTicket && window.printTicket(${ticket.id})" 
+                                class="p-1 hover:bg-slate-600 rounded" title="Imprimer">🖨️</button>
+                            ${ticket.status === 'won' ? 
+                                `<button onclick="payTicket(${ticket.id}, this)" 
+                                         class="p-1 hover:bg-slate-600 rounded" title="Payer">💰</button>` : ''}
+                            ${canCancel && isInCurrentRound ? 
+                                `<button onclick="cancelTicket(${ticket.id}, this)" 
+                                         class="p-1 hover:bg-slate-600 rounded" title="Annuler">❌</button>` : ''}
+                        </div>
+                    </td>
+                </tr>
+            `;
+        };
+
+        /* -------------------------
+           Fonction pour ajouter un ticket directement au tableau my-bets (WebSocket)
+        ------------------------- */
+        const addTicketToMyBetsTable = (ticketData) => {
+            if (!ticketsTableBody) {
+                console.warn('⚠️ ticketsTableBody introuvable, refresh complet nécessaire');
+                fetchMyBets(currentPage);
+                return;
+            }
+
+            // Vérifier si le ticket appartient à l'utilisateur connecté
+            // Note: On suppose que le serveur filtre déjà par user_id dans le broadcast
+            // Mais on peut aussi vérifier ici si nécessaire
+
+            // Vérifier si le ticket existe déjà
+            const existingRow = ticketsTableBody.querySelector(`tr[data-receipt-id="${ticketData.id || ticketData.receiptId}"]`);
+            if (existingRow) {
+                console.log(`⚠️ Ticket #${ticketData.id || ticketData.receiptId} déjà présent dans my-bets, mise à jour...`);
+                // Mettre à jour la ligne existante
+                const newRowHtml = createMyBetsTicketRow(ticketData);
+                existingRow.outerHTML = newRowHtml;
+                return;
+            }
+
+            // Si le tableau est vide ou contient "Aucun ticket", le vider d'abord
+            if (ticketsTableBody.innerHTML.includes('Aucun ticket') || ticketsTableBody.innerHTML.includes('Chargement')) {
+                ticketsTableBody.innerHTML = '';
+            }
+
+            // Formater le ticket pour my-bets
+            const formattedTicket = {
+                id: ticketData.id || ticketData.receiptId,
+                date: ticketData.date || ticketData.created_time || new Date().toISOString(),
+                roundId: ticketData.roundId,
+                bets: ticketData.bets || [],
+                totalAmount: ticketData.totalAmount || 0,
+                status: ticketData.status || 'pending',
+                prize: ticketData.prize || 0,
+                isMultibet: Array.isArray(ticketData.bets) && ticketData.bets.length > 1,
+                avgCoeff: ticketData.bets && ticketData.bets.length === 1 ? (ticketData.bets[0].participant?.coeff || 0) : 0,
+                potentialWinnings: ticketData.bets && ticketData.bets.length === 1 ? 
+                    ((ticketData.bets[0].value || 0) * (ticketData.bets[0].participant?.coeff || 0)) : 0,
+                isInCurrentRound: ticketData.roundId === this.currentRoundId
+            };
+
+            // Ajouter le nouveau ticket en haut du tableau (le plus récent en premier)
+            const newRowHtml = createMyBetsTicketRow(formattedTicket);
+            ticketsTableBody.insertAdjacentHTML('afterbegin', newRowHtml);
+
+            // Limiter à 100 tickets affichés
+            const rows = ticketsTableBody.querySelectorAll('tr[data-receipt-id]');
+            if (rows.length > 100) {
+                rows[rows.length - 1].remove();
+            }
+
+            // ✅ Mettre à jour les stats
+            updateMyBetsStatsFromTicket(formattedTicket);
+        };
+
+        /* -------------------------
+           Fonction pour supprimer un ticket directement du tableau my-bets (WebSocket)
+        ------------------------- */
+        const removeTicketFromMyBetsTable = (ticketId) => {
+            if (!ticketsTableBody) return;
+
+            const row = ticketsTableBody.querySelector(`tr[data-receipt-id="${ticketId}"]`);
+            if (row) {
+                row.remove();
+                
+                // Si le tableau est vide, afficher "Aucun ticket"
+                if (ticketsTableBody.querySelectorAll('tr[data-receipt-id]').length === 0) {
+                    ticketsTableBody.innerHTML = `<tr><td colspan="8" class="p-4 text-center text-slate-400">Aucun ticket trouvé</td></tr>`;
+                }
+                
+                // ✅ Mettre à jour les stats
+                fetchMyBets(currentPage); // Refresh pour recalculer les stats correctement
+            }
+        };
+
+        /* -------------------------
+           Fonction pour mettre à jour les stats my-bets depuis un ticket ajouté
+        ------------------------- */
+        const updateMyBetsStatsFromTicket = (ticketData) => {
+            // Mettre à jour le total des mises
+            if (totalBetAmountEl) {
+                const currentTotal = parseFloat(totalBetAmountEl.textContent.replace(' HTG', '').replace(/\s/g, '')) || 0;
+                const newTotal = (currentTotal + (ticketData.totalAmount || 0)).toFixed(2);
+                totalBetAmountEl.textContent = `${newTotal} HTG`;
+            }
+        };
+
         // Fonction de mise à jour de la table des tickets
         const updateTicketsTable = (tickets) => {
             if (!ticketsTableBody) return;
@@ -910,50 +1193,7 @@ class App {
                 return;
             }
 
-            ticketsTableBody.innerHTML = tickets.map(ticket => `
-                <tr class="hover:bg-slate-700/50">
-                    <td class="p-2">${ticket.id}</td>
-                    <td class="p-2">${new Date(ticket.date).toLocaleString('fr-FR')}</td>
-                    <td class="p-2">${ticket.roundId}</td>
-                    <td class="p-2">
-                        ${ticket.isMultibet ? `
-                            <div class="text-sm font-medium">Multibet (${ticket.bets.length} paris)</div>
-                            <div class="text-xs text-slate-400 mt-1">Total: ${ticket.totalAmount.toFixed(2)} HTG</div>
-                        ` : ticket.bets.map(bet => `
-                            <div class="text-sm mb-1">
-                                <span title="Participant">#${bet.participant.number} ${bet.participant.name}</span>
-                                <span class="text-slate-400"> - </span>
-                                <span title="Mise">${(parseFloat(bet.value)/100).toFixed(2)} HTG</span>
-                                <span class="text-slate-400">×</span>
-                                <span title="Cote">${bet.participant.coeff}x</span>
-                                <span class="text-slate-400">=</span>
-                                <span title="Gain potentiel">${((parseFloat(bet.value)/100) * bet.participant.coeff).toFixed(2)} HTG</span>
-                            </div>
-                        `).join('')}
-                    </td>
-                    <td class="p-2">${ticket.isMultibet ? `Multibet (${ticket.bets.length})` : `${ticket.avgCoeff.toFixed(2)}x`}</td>
-                    <td class="p-2">${ticket.isMultibet ? '-' : `${ticket.potentialWinnings.toFixed(2)} HTG`}</td>
-                    <td class="p-2">${this.formatStatus(ticket.status)}</td>
-                    <td class="p-2">
-                        <div class="flex items-center gap-2">
-                <button onclick="window.printTicket && window.printTicket(${ticket.id})" 
-                    class="p-1 hover:bg-slate-600 rounded" title="Imprimer">
-                                🖨️
-                            </button>
-                            ${ticket.status === 'won' ? 
-                                `<button onclick="payTicket(${ticket.id}, this)" 
-                                         class="p-1 hover:bg-slate-600 rounded" title="Payer">
-                                    💰
-                                </button>` : ''}
-                            ${ticket.isInCurrentRound ? 
-                                `<button onclick="cancelTicket(${ticket.id}, this)" 
-                                         class="p-1 hover:bg-slate-600 rounded" title="Annuler">
-                                    ❌
-                                </button>` : ''}
-                        </div>
-                    </td>
-                </tr>
-            `).join('');
+            ticketsTableBody.innerHTML = tickets.map(ticket => createMyBetsTicketRow(ticket)).join('');
         };
 
         // Fonction de récupération des tickets
@@ -1292,8 +1532,10 @@ class App {
             };
         }
 
-        // Stocker la fonction pour WebSocket
+        // Stocker les fonctions pour WebSocket
         this.myBetsFetchMyBets = fetchMyBets;
+        this.myBetsAddTicketToTable = addTicketToMyBetsTable; // ✅ NOUVEAU: Ajouter directement un ticket
+        this.myBetsRemoveTicketFromTable = removeTicketFromMyBetsTable; // ✅ NOUVEAU: Supprimer directement un ticket
 
         // Chargement initial
         fetchMyBets(1);
@@ -1533,6 +1775,9 @@ class App {
             }
         });
 
+        // ✅ Exposer refreshCashierDashboard pour les handlers WebSocket
+        this.refreshCashierDashboard = refreshCashierDashboard;
+        
         // initial load + periodic refresh
         refreshCashierDashboard();
         if (state.refreshInterval) clearInterval(state.refreshInterval);
@@ -2304,12 +2549,15 @@ class App {
                     const currentRoundEl = document.getElementById('currentRound');
                     if (currentRoundEl) currentRoundEl.textContent = data.roundId;
                 }
-                // Rafraîchir immédiatement pour voir les résultats
+                // ✅ Mise à jour IMMÉDIATE - les statuts sont déjà mis à jour via receipt_status_updated
                 if (this.currentPage === 'dashboard' && this.dashboardRefreshTickets) {
-                    setTimeout(() => this.dashboardRefreshTickets(), 800); // Délai pour laisser le serveur finaliser les calculs
+                    this.dashboardRefreshTickets(); // Pas de setTimeout - mise à jour immédiate
                 }
                 if (this.currentPage === 'my-bets' && this.myBetsFetchMyBets) {
-                    setTimeout(() => this.myBetsFetchMyBets(1), 800);
+                    this.myBetsFetchMyBets(1); // Pas de setTimeout - mise à jour immédiate
+                }
+                if (this.currentPage === 'account' && this.refreshCashierDashboard) {
+                    this.refreshCashierDashboard(); // Mise à jour cashier immédiate
                 }
                 // Notification avec plus d'infos
                 const winnerInfo = data.winner ? `${data.winner.name} (N°${data.winner.number})` : 'N/A';
@@ -2317,10 +2565,135 @@ class App {
                 this.showToast(`🏆 Round #${data.roundId || 'N/A'} terminé ! Gagnant: ${winnerInfo} | Total gains: ${totalPrize.toFixed(2)} HTG`, 'success');
                 break;
 
-            case 'ticket_update':
+            case 'receipt_status_updated':
+            case 'receipts_status_updated':
+                // ✅ NOUVEAU: Mise à jour immédiate des statuts de receipts après fin de round
+                console.log('🎫 Mise à jour des statuts de tickets - Round:', data.roundId, 'Événement:', data.event);
+                
+                // Mettre à jour le round si nécessaire
+                if (data.roundId) {
+                    const currentRoundEl = document.getElementById('currentRound');
+                    if (currentRoundEl) currentRoundEl.textContent = data.roundId;
+                }
+                
+                // ✅ Mise à jour IMMÉDIATE sans délai pour synchronisation temps réel
+                if (this.currentPage === 'dashboard' && this.dashboardRefreshTickets) {
+                    this.dashboardRefreshTickets(); // Pas de setTimeout - mise à jour immédiate
+                }
+                if (this.currentPage === 'my-bets' && this.myBetsFetchMyBets) {
+                    this.myBetsFetchMyBets(1); // Pas de setTimeout - mise à jour immédiate
+                }
+                if (this.currentPage === 'account' && this.refreshCashierDashboard) {
+                    this.refreshCashierDashboard(); // Mise à jour cashier immédiate
+                }
+                
+                // Notification pour les tickets gagnants
+                if (data.event === 'receipt_status_updated' && data.status === 'won') {
+                    const prizeAmount = data.prize ? Number(data.prize).toFixed(2) : '0.00';
+                    this.showToast(`🏆 Ticket #${data.receiptId} a gagné ! (${prizeAmount} HTG) - Round #${data.roundId || 'N/A'}`, 'success');
+                }
+                break;
+                
             case 'receipt_added':
+                // ✅ OPTIMISATION: Ajouter directement le ticket au tableau sans appel API
+                console.log('🎫 Nouveau ticket ajouté - Round:', data.roundId, 'Ticket ID:', data.receiptId);
+                
+                // Mettre à jour le round si nécessaire
+                if (data.roundId) {
+                    const currentRoundEl = document.getElementById('currentRound');
+                    if (currentRoundEl) currentRoundEl.textContent = data.roundId;
+                }
+                
+                // Formater le ticket depuis les données WebSocket (format unifié)
+                const ticketData = {
+                    id: data.receiptId || data.receipt?.id,
+                    receiptId: data.receiptId || data.receipt?.id,
+                    roundId: data.roundId,
+                    status: data.status || 'pending',
+                    prize: data.prize || 0,
+                    bets: data.bets || data.receipt?.bets || [],
+                    totalAmount: data.totalAmount || (data.receipt?.bets ? data.receipt.bets.reduce((sum, b) => sum + (Number(b.value) || 0), 0) / 100 : 0),
+                    created_time: data.created_time || data.receipt?.created_time || new Date().toISOString(),
+                    date: data.date || data.created_time || data.receipt?.created_time || new Date().toISOString(),
+                    user_id: data.receipt?.user_id || data.user_id || null
+                };
+                
+                // ✅ Mise à jour DIRECTE du DOM pour le dashboard
+                if (this.currentPage === 'dashboard') {
+                    if (this.dashboardAddTicketToTable) {
+                        this.dashboardAddTicketToTable(ticketData);
+                    } else {
+                        // Fallback: refresh complet si la fonction n'est pas disponible
+                        if (this.dashboardRefreshTickets) {
+                            this.dashboardRefreshTickets();
+                        }
+                    }
+                }
+                
+                // ✅ Mise à jour DIRECTE du DOM pour my-bets
+                if (this.currentPage === 'my-bets') {
+                    // Vérifier si le ticket appartient à l'utilisateur connecté
+                    // Note: Le serveur devrait déjà filtrer, mais on peut aussi vérifier côté client
+                    if (this.myBetsAddTicketToTable) {
+                        this.myBetsAddTicketToTable(ticketData);
+                    } else {
+                        // Fallback: refresh complet
+                        if (this.myBetsFetchMyBets) {
+                            this.myBetsFetchMyBets(1);
+                        }
+                    }
+                }
+                
+                // ✅ Pour account, refresh complet
+                if (this.currentPage === 'account' && this.refreshCashierDashboard) {
+                    this.refreshCashierDashboard();
+                }
+                
+                // Notification
+                this.showToast(`✅ Ticket #${data.receiptId || 'N/A'} créé`, 'success');
+                break;
+
             case 'receipt_deleted':
             case 'receipt_cancelled':
+                // ✅ OPTIMISATION: Supprimer directement le ticket du tableau sans appel API
+                console.log('🎫 Ticket supprimé - Round:', data.roundId, 'Ticket ID:', data.receiptId);
+                
+                // ✅ Mise à jour DIRECTE du DOM pour le dashboard
+                if (this.currentPage === 'dashboard') {
+                    if (this.dashboardRemoveTicketFromTable) {
+                        this.dashboardRemoveTicketFromTable(data.receiptId);
+                    } else {
+                        // Fallback: refresh complet si la fonction n'est pas disponible
+                        if (this.dashboardRefreshTickets) {
+                            this.dashboardRefreshTickets();
+                        }
+                    }
+                }
+                
+                // ✅ Mise à jour DIRECTE du DOM pour my-bets
+                if (this.currentPage === 'my-bets') {
+                    if (this.myBetsRemoveTicketFromTable) {
+                        this.myBetsRemoveTicketFromTable(data.receiptId);
+                    } else {
+                        // Fallback: refresh complet
+                        if (this.myBetsFetchMyBets) {
+                            this.myBetsFetchMyBets(1);
+                        }
+                    }
+                }
+                
+                // ✅ Pour account, refresh complet
+                if (this.currentPage === 'account' && this.refreshCashierDashboard) {
+                    this.refreshCashierDashboard();
+                }
+                
+                // Notification
+                if (data.event === 'receipt_cancelled') {
+                    this.showToast(`❌ Ticket #${data.receiptId} annulé - Round #${data.roundId || 'N/A'}`, 'info');
+                }
+                break;
+
+            case 'ticket_update':
             case 'receipt_paid':
                 console.log('🎫 Mise à jour des tickets - Round:', data.roundId, 'Événement:', data.event);
                 // Mettre à jour le round si nécessaire
@@ -2328,20 +2701,20 @@ class App {
                     const currentRoundEl = document.getElementById('currentRound');
                     if (currentRoundEl) currentRoundEl.textContent = data.roundId;
                 }
-                // Rafraîchir les données immédiatement
+                // ✅ Mise à jour IMMÉDIATE sans délai pour synchronisation temps réel
                 if (this.currentPage === 'dashboard' && this.dashboardRefreshTickets) {
-                    setTimeout(() => this.dashboardRefreshTickets(), 200);
+                    this.dashboardRefreshTickets(); // Refresh complet pour les mises à jour de statut
                 }
                 if (this.currentPage === 'my-bets' && this.myBetsFetchMyBets) {
-                    setTimeout(() => this.myBetsFetchMyBets(1), 200);
+                    this.myBetsFetchMyBets(1); // Pas de setTimeout - mise à jour immédiate
+                }
+                if (this.currentPage === 'account' && this.refreshCashierDashboard) {
+                    this.refreshCashierDashboard(); // Mise à jour cashier immédiate
                 }
                 // Notifications spéciales
                 if (data.event === 'receipt_paid') {
                     const prizeAmount = data.prize ? Number(data.prize).toFixed(2) : 'N/A';
                     this.showToast(`💰 Ticket #${data.receiptId} payé (${prizeAmount} HTG) - Round #${data.roundId || 'N/A'}`, 'success');
-                }
-                if (data.event === 'receipt_cancelled') {
-                    this.showToast(`❌ Ticket #${data.receiptId} annulé - Round #${data.roundId || 'N/A'}`, 'info');
                 }
                 break;
 

@@ -279,22 +279,207 @@ export default function createRoundsRouter(broadcast) {
         gameState.raceEndTime = Date.now();
         
         // ✅ Mettre à jour les statuts des tickets en DB
-        for (const receipt of receipts) {
+        // ✅ CORRECTION CRITIQUE: Chercher les tickets depuis la DB au lieu de gameState
+        // Cela garantit qu'on utilise les vrais IDs (même si l'ID a été régénéré lors de la création)
+        
+        // ✅ ÉTAPE 1: Récupérer tous les tickets de ce round depuis la DB
+        let receiptsFromDb = [];
+        try {
+            const dbResult = await pool.query(
+                `SELECT receipt_id, round_id, user_id, total_amount, status, prize, created_at
+                 FROM receipts 
+                 WHERE round_id = $1`,
+                [finishedRoundId]
+            );
+            receiptsFromDb = dbResult.rows || [];
+            console.log(`[RACE-RESULTS] 📊 ${receiptsFromDb.length} ticket(s) trouvé(s) en DB pour round ${finishedRoundId}`);
+        } catch (dbErr) {
+            console.error(`[RACE-RESULTS] ❌ Erreur récupération tickets depuis DB:`, dbErr.message);
+        }
+        
+        // ✅ ÉTAPE 2: Mapper les tickets de gameState avec ceux de la DB
+        // ✅ AMÉLIORATION: Matching amélioré avec fallback par receipt_id
+        const receiptsToUpdate = receipts.map(receipt => {
+            // Calculer total_amount depuis les bets pour matching
+            const receiptTotalAmount = (receipt.bets || []).reduce((sum, b) => sum + (Number(b.value) || 0), 0);
+            
+            // Tentative 1: Match par user_id + total_amount (plus fiable que ID car l'ID peut avoir changé)
+            let dbReceipt = receiptsFromDb.find(db => {
+                // Match par user_id et total_amount (tolérance 0.01 pour arrondis)
+                const userMatch = (db.user_id === receipt.user_id) || (!db.user_id && !receipt.user_id);
+                const amountMatch = Math.abs(Number(db.total_amount) - receiptTotalAmount) < 0.01;
+                return userMatch && amountMatch;
+            });
+            
+            // ✅ NOUVEAU: Tentative 2: Fallback par receipt_id si disponible et matching échoué
+            if (!dbReceipt && receipt.id) {
+                dbReceipt = receiptsFromDb.find(db => Number(db.receipt_id) === Number(receipt.id));
+                if (dbReceipt) {
+                    console.log(`[RACE-RESULTS] 🔄 Matching par receipt_id pour ticket #${receipt.id} (matching user_id+amount échoué)`);
+                }
+            }
+            
+            return {
+                receipt: receipt, // Ticket depuis gameState (avec bets, prize calculé, etc.)
+                dbReceipt: dbReceipt, // Ticket depuis DB (avec vrai ID)
+                dbId: dbReceipt ? dbReceipt.receipt_id : receipt.id // Utiliser ID DB si disponible
+            };
+        });
+        
+        // ✅ ÉTAPE 3: Mettre à jour les statuts avec les vrais IDs de la DB
+        let updatedCount = 0;
+        let failedCount = 0;
+        const updatedReceipts = []; // ✅ NOUVEAU: Stocker les receipts mis à jour pour broadcast
+        
+        for (const { receipt, dbReceipt, dbId } of receiptsToUpdate) {
+            if (!dbReceipt) {
+                console.warn(`[RACE-RESULTS] ⚠️ Ticket non trouvé en DB pour receipt.id=${receipt.id} (user_id=${receipt.user_id}, total=${receipt.bets?.reduce((s,b)=>s+(Number(b.value)||0),0) || 0}), skip`);
+                failedCount++;
+                continue;
+            }
+            
             try {
                 const newStatus = receipt.prize > 0 ? 'won' : 'lost';
+                const oldStatus = receipt.status || 'pending';
                 receipt.status = newStatus;
                 
-                // Mettre à jour en DB
-                await updateReceiptStatus(receipt.id, newStatus, receipt.prize || 0);
-                console.log(`[DB] ✓ Ticket #${receipt.id}: status=${newStatus}, prize=${receipt.prize}`);
+                // ✅ Utiliser le vrai ID de la DB (même si différent de receipt.id)
+                const updateResult = await updateReceiptStatus(dbId, newStatus, receipt.prize || 0);
                 
-                // Mettre à jour le cache Redis
+                if (updateResult?.success && updateResult.rowsAffected > 0) {
+                    console.log(`[DB] ✓ Ticket #${dbId}: status=${oldStatus}→${newStatus}, prize=${receipt.prize} (${updateResult.rowsAffected} ligne(s) affectée(s))`);
+                    updatedCount++;
+                    
+                    // ✅ NOUVEAU: Synchroniser l'ID dans gameState si différent
+                    if (receipt.id !== dbId) {
+                        receipt.id = dbId;
+                        console.log(`[DB] 🔄 ID synchronisé dans gameState: ${receipt.id} → ${dbId}`);
+                    }
+                    
+                    // ✅ NOUVEAU: Stocker le receipt mis à jour pour broadcast immédiat
+                    updatedReceipts.push({
+                        receiptId: dbId,
+                        roundId: finishedRoundId,
+                        status: newStatus,
+                        prize: receipt.prize || 0,
+                        receipt: JSON.parse(JSON.stringify(receipt)) // Copie complète pour les clients
+                    });
+                } else {
+                    console.error(`[DB] ✗ Ticket #${dbId}: Échec mise à jour (${updateResult?.reason || 'unknown'})`);
+                    failedCount++;
+                }
+                
+                // Mettre à jour le cache Redis (même si DB a échoué)
                 if (finishedRoundId) {
-                    await updateTicketInRoundCache(finishedRoundId, receipt.id, newStatus, receipt.prize || 0);
+                    await updateTicketInRoundCache(finishedRoundId, dbId, newStatus, receipt.prize || 0);
                 }
             } catch (err) {
-                console.error(`[DB] ✗ Erreur ticket #${receipt.id}:`, err.message);
+                console.error(`[DB] ✗ Erreur ticket #${dbId}:`, err.message);
+                failedCount++;
             }
+        }
+        
+        console.log(`[RACE-RESULTS] 📊 Résumé mise à jour: ${updatedCount} réussie(s), ${failedCount} échouée(s) sur ${receipts.length} ticket(s)`);
+        
+        // ✅ NOUVEAU: Mettre à jour les tickets avec round_id = null qui appartiennent à ce round
+        // Ces tickets ont été créés avant que le round soit persisté en DB
+        try {
+            const roundInfo = await pool.query(
+                `SELECT started_at, finished_at FROM rounds WHERE round_id = $1`,
+                [finishedRoundId]
+            );
+            
+            if (roundInfo.rows.length > 0 && roundInfo.rows[0].started_at) {
+                const roundStartTime = roundInfo.rows[0].started_at;
+                const roundEndTime = roundInfo.rows[0].finished_at || new Date();
+                
+                const nullRoundReceipts = await pool.query(
+                    `SELECT receipt_id, user_id, total_amount, status, prize, created_at
+                     FROM receipts 
+                     WHERE round_id IS NULL
+                     AND created_at >= $1
+                     AND created_at <= $2`,
+                    [roundStartTime, roundEndTime]
+                );
+                
+                if (nullRoundReceipts.rows.length > 0) {
+                    console.log(`[RACE-RESULTS] 📊 ${nullRoundReceipts.rows.length} ticket(s) avec round_id=NULL trouvé(s), mise à jour...`);
+                    
+                    let nullRoundUpdated = 0;
+                    for (const nullReceipt of nullRoundReceipts.rows) {
+                        // Trouver le ticket correspondant dans gameState
+                        const matchingReceipt = receipts.find(r => {
+                            const rTotal = (r.bets || []).reduce((sum, b) => sum + (Number(b.value) || 0), 0);
+                            const userMatch = (nullReceipt.user_id === r.user_id) || (!nullReceipt.user_id && !r.user_id);
+                            const amountMatch = Math.abs(Number(nullReceipt.total_amount) - rTotal) < 0.01;
+                            return userMatch && amountMatch;
+                        });
+                        
+                        if (matchingReceipt) {
+                            const newStatus = matchingReceipt.prize > 0 ? 'won' : 'lost';
+                            
+                            // Mettre à jour le statut et le prize
+                            const updateResult = await updateReceiptStatus(nullReceipt.receipt_id, newStatus, matchingReceipt.prize || 0);
+                            
+                            if (updateResult?.success) {
+                                // Mettre à jour le round_id
+                                await pool.query(
+                                    `UPDATE receipts SET round_id = $1 WHERE receipt_id = $2`,
+                                    [finishedRoundId, nullReceipt.receipt_id]
+                                );
+                                
+                                console.log(`[RACE-RESULTS] ✅ Ticket #${nullReceipt.receipt_id} mis à jour: round_id=NULL → ${finishedRoundId}, status=${newStatus}`);
+                                nullRoundUpdated++;
+                                
+                                // Ajouter au broadcast
+                                updatedReceipts.push({
+                                    receiptId: nullReceipt.receipt_id,
+                                    roundId: finishedRoundId,
+                                    status: newStatus,
+                                    prize: matchingReceipt.prize || 0,
+                                    receipt: JSON.parse(JSON.stringify(matchingReceipt))
+                                });
+                            }
+                        }
+                    }
+                    
+                    if (nullRoundUpdated > 0) {
+                        console.log(`[RACE-RESULTS] ✅ ${nullRoundUpdated} ticket(s) avec round_id=NULL mis à jour`);
+                    }
+                }
+            }
+        } catch (nullRoundErr) {
+            console.error(`[RACE-RESULTS] ❌ Erreur mise à jour tickets round_id=NULL:`, nullRoundErr.message);
+        }
+        
+        // ✅ NOUVEAU: Broadcaster immédiatement chaque receipt mis à jour pour synchronisation temps réel
+        if (updatedReceipts.length > 0 && broadcast) {
+            console.log(`[RACE-RESULTS] 📡 Broadcasting ${updatedReceipts.length} receipt(s) mis à jour via WebSocket...`);
+            
+            // Option 1: Broadcaster tous les receipts en un seul message (plus efficace)
+            broadcast({
+                event: "receipts_status_updated",
+                roundId: finishedRoundId,
+                receipts: updatedReceipts,
+                totalUpdated: updatedReceipts.length,
+                timestamp: Date.now()
+            });
+            
+            // Option 2: Broadcaster individuellement chaque receipt (pour compatibilité avec handlers existants)
+            // Cela permet aux clients de réagir immédiatement à chaque mise à jour
+            for (const updatedReceipt of updatedReceipts) {
+                broadcast({
+                    event: "receipt_status_updated",
+                    receiptId: updatedReceipt.receiptId,
+                    roundId: updatedReceipt.roundId,
+                    status: updatedReceipt.status,
+                    prize: updatedReceipt.prize,
+                    receipt: updatedReceipt.receipt,
+                    timestamp: Date.now()
+                });
+            }
+            
+            console.log(`[RACE-RESULTS] ✅ ${updatedReceipts.length} receipt(s) broadcasté(s) via WebSocket`);
         }
 
         // ✅ RETOURNER LES RÉSULTATS (PROBLÈME #12)

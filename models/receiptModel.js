@@ -106,9 +106,28 @@ export async function getReceiptsByIdBatch(receipt_ids) {
 
 // Mettre à jour le statut et le gain d'un ticket
 export async function updateReceiptStatus(receipt_id, status, prize = null) {
+  // ✅ NOUVEAU: Vérifier que le ticket existe d'abord
+  const checkRes = await pool.query(
+    `SELECT receipt_id FROM receipts WHERE receipt_id = $1`,
+    [receipt_id]
+  );
+  
+  if (!checkRes.rows || checkRes.rows.length === 0) {
+    console.warn(`[UPDATE-RECEIPT] ⚠️ Ticket #${receipt_id} non trouvé en DB, skip update`);
+    return { success: false, rowsAffected: 0, reason: 'not_found' };
+  }
+  
   const query = prize !== null
     ? `UPDATE receipts SET status = $1, prize = $2, updated_at = CURRENT_TIMESTAMP WHERE receipt_id = $3`
     : `UPDATE receipts SET status = $1, updated_at = CURRENT_TIMESTAMP WHERE receipt_id = $2`;
   const params = prize !== null ? [status, prize, receipt_id] : [status, receipt_id];
-  await pool.query(query, params);
+  
+  const res = await pool.query(query, params);
+  
+  // ✅ NOUVEAU: Retourner le nombre de lignes affectées
+  return { 
+    success: true, 
+    rowsAffected: res.rowCount || 0,
+    receipt_id 
+  };
 }

@@ -1129,9 +1129,23 @@ export default function createReceiptsRouter(broadcast) {
           for (let attempt = 1; attempt <= MAX_INSERT_ATTEMPTS; attempt++) {
             try {
               dbReceipt = await dbCreateReceipt({ round_id: dbRoundId, user_id: receipt.user_id || null, total_amount: totalAmount, status: isRaceFinished ? (receipt.prize > 0 ? 'won' : 'lost') : 'pending', prize: receipt.prize || 0, receipt_id: receipt.id });
-              // If DB returned a canonical id, update in-memory receipt
+              // ✅ CORRECTION: Synchroniser l'ID dans gameState si l'ID a changé
               if (dbReceipt && (dbReceipt.receipt_id || dbReceipt.receipt_id === 0)) {
+                const oldId = receipt.id;
                 receipt.id = dbReceipt.receipt_id || receipt.id;
+                
+                // ✅ NOUVEAU: Si l'ID a changé, mettre à jour la référence dans gameState
+                if (oldId !== receipt.id) {
+                  console.log(`[DB] ⚠️ ID régénéré: ${oldId} → ${receipt.id}, synchronisation gameState...`);
+                  // Trouver et mettre à jour la référence dans gameState
+                  const receiptIndex = gameState.currentRound.receipts.findIndex(r => r.id === oldId);
+                  if (receiptIndex !== -1) {
+                    gameState.currentRound.receipts[receiptIndex].id = receipt.id;
+                    console.log(`[DB] ✓ Référence gameState synchronisée avec nouvel ID ${receipt.id}`);
+                  } else {
+                    console.warn(`[DB] ⚠️ Référence non trouvée dans gameState pour ID ${oldId}`);
+                  }
+                }
               }
               console.log(`[DB] ✓ Receipt ${receipt.id} créé en DB (attempt ${attempt})`);
               break; // success
@@ -1216,16 +1230,45 @@ export default function createReceiptsRouter(broadcast) {
         }
       })();
 
-      // Broadcast WebSocket pour notifier les clients avec toutes les infos
+      // ✅ Broadcast WebSocket pour notifier les clients avec toutes les infos
+      // ✅ OPTIMISATION: Inclure toutes les données formatées pour mise à jour directe du DOM
       if (broadcast) {
+        // Calculer totalAmount en valeur publique pour le frontend
+        const totalAmountPublic = (receipt.bets || []).reduce((sum, b) => {
+          const valueSystem = Number(b.value || 0);
+          return sum + (valueSystem / 100); // Conversion système -> publique
+        }, 0);
+
+        // Formater les bets pour le frontend
+        const formattedBets = (receipt.bets || []).map(bet => ({
+          number: bet.number || bet.participant?.number,
+          value: (Number(bet.value || 0) / 100).toFixed(2), // Valeur publique
+          participant: bet.participant || {
+            number: bet.number,
+            name: bet.participant?.name || '',
+            coeff: bet.participant?.coeff || 0
+          }
+        }));
+
         broadcast({
           event: "receipt_added",
           receipt: JSON.parse(JSON.stringify(receipt)),
           receiptId: receipt.id,
           roundId: gameState.currentRound.id,
+          status: receipt.status || (isRaceFinished ? (receipt.prize > 0 ? 'won' : 'lost') : 'pending'),
+          prize: receipt.prize || 0,
+          // ✅ NOUVEAU: Données formatées pour mise à jour directe du DOM
+          totalAmount: totalAmountPublic, // Valeur publique pour affichage
+          bets: formattedBets, // Bets formatés avec valeurs publiques
+          created_time: receipt.created_time || new Date().toISOString(),
+          date: receipt.created_time || new Date().toISOString(),
+          user_id: receipt.user_id || null,
+          // Stats du round
           totalReceipts: gameState.currentRound.receipts.length,
           currentRound: JSON.parse(JSON.stringify(gameState.currentRound)),
-          totalPrize: gameState.currentRound.totalPrize || 0
+          totalPrize: gameState.currentRound.totalPrize || 0,
+          isRaceRunning: gameState.isRaceRunning,
+          timestamp: Date.now()
         });
       }
       
