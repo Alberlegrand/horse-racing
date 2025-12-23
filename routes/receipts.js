@@ -30,15 +30,60 @@ export default function createReceiptsRouter(broadcast) {
       const receiptId = parseInt(req.query.id, 10);
       
       // Chercher dans le round actuel
-      let receipt = gameState.currentRound.receipts.find(r => r.id === receiptId);
+      let receipt = gameState.currentRound.receipts.find(r => r.id === receiptId || r.receipt_id === receiptId);
       let round = gameState.currentRound;
+      
+      // ✅ CORRECTION: S'assurer que le receipt a bien tous ses bets
+      if (receipt && (!receipt.bets || receipt.bets.length === 0)) {
+        console.warn(`[PRINT] ⚠️ Receipt trouvé dans gameState mais sans bets, récupération depuis DB...`);
+        try {
+          const bets = await getBetsByReceipt(receiptId);
+          if (bets && bets.length > 0) {
+            receipt.bets = bets.map(bet => ({
+              ...bet,
+              participant: {
+                number: bet.participant_number,
+                name: bet.participant_name,
+                coeff: bet.coefficient
+              },
+              number: bet.participant_number,
+              value: bet.value || 0
+            }));
+            console.log(`[PRINT] ✅ ${receipt.bets.length} pari(s) récupéré(s) depuis la DB pour receipt gameState`);
+          }
+        } catch (betErr) {
+          console.warn(`[PRINT] ⚠️ Erreur récupération bets depuis DB:`, betErr.message);
+        }
+      }
       
       // Si pas trouvé, chercher dans l'historique
       if (!receipt) {
         for (const historicalRound of gameState.gameHistory) {
-          receipt = (historicalRound.receipts || []).find(r => r.id === receiptId);
+          receipt = (historicalRound.receipts || []).find(r => r.id === receiptId || r.receipt_id === receiptId);
           if (receipt) {
             round = historicalRound;
+            // ✅ CORRECTION: Vérifier que le receipt historique a bien tous ses bets
+            if (!receipt.bets || receipt.bets.length === 0) {
+              console.warn(`[PRINT] ⚠️ Receipt historique sans bets, récupération depuis DB...`);
+              try {
+                const bets = await getBetsByReceipt(receiptId);
+                if (bets && bets.length > 0) {
+                  receipt.bets = bets.map(bet => ({
+                    ...bet,
+                    participant: {
+                      number: bet.participant_number,
+                      name: bet.participant_name,
+                      coeff: bet.coefficient
+                    },
+                    number: bet.participant_number,
+                    value: bet.value || 0
+                  }));
+                  console.log(`[PRINT] ✅ ${receipt.bets.length} pari(s) récupéré(s) depuis la DB pour receipt historique`);
+                }
+              } catch (betErr) {
+                console.warn(`[PRINT] ⚠️ Erreur récupération bets depuis DB:`, betErr.message);
+              }
+            }
             break;
           }
         }
@@ -51,8 +96,13 @@ export default function createReceiptsRouter(broadcast) {
           receipt = await getReceiptById(receiptId);
           if (receipt) {
             console.log(`[PRINT] ✅ Ticket #${receiptId} trouvé en base de données`);
-            // Récupérer les paris du ticket
+            // ✅ CORRECTION: Mapper receipt_id vers id pour compatibilité
+            if (!receipt.id && receipt.receipt_id) {
+              receipt.id = receipt.receipt_id;
+            }
+            // ✅ CORRECTION: Récupérer TOUS les paris du ticket depuis la DB
             let bets = await getBetsByReceipt(receiptId);
+            console.log(`[PRINT] 📊 ${bets.length} pari(s) trouvé(s) pour le ticket #${receiptId}`);
             // Transformer les bets en format compatible avec la mémoire
             bets = bets.map(bet => ({
               ...bet,
@@ -61,7 +111,8 @@ export default function createReceiptsRouter(broadcast) {
                 name: bet.participant_name,
                 coeff: bet.coefficient
               },
-              number: bet.participant_number  // Compatibility fallback
+              number: bet.participant_number,  // Compatibility fallback
+              value: bet.value || 0  // ✅ S'assurer que value est présent
             }));
             receipt.bets = bets || [];
             // Essayer de trouver le round correspondant
@@ -82,10 +133,43 @@ export default function createReceiptsRouter(broadcast) {
         }
       }
 
+      // ✅ CORRECTION: S'assurer que l'ID est toujours présent (même si receipt vient de gameState)
+      if (receipt && !receipt.id) {
+        receipt.id = receipt.receipt_id || receiptId;
+      }
+
       console.log(`🧾 Impression du ticket #${receiptId}:`, receipt);
+      console.log(`🧾 Nombre de paris: ${receipt?.bets?.length || 0}`);
 
       if (!receipt) {
         return res.status(404).send("<h1>Ticket non trouvé</h1>");
+      }
+
+      // ✅ CORRECTION: Vérifier que les bets sont présents
+      if (!receipt.bets || receipt.bets.length === 0) {
+        console.warn(`[PRINT] ⚠️ Aucun pari trouvé pour le ticket #${receiptId}, tentative de récupération depuis la DB...`);
+        try {
+          const bets = await getBetsByReceipt(receiptId);
+          if (bets && bets.length > 0) {
+            receipt.bets = bets.map(bet => ({
+              ...bet,
+              participant: {
+                number: bet.participant_number,
+                name: bet.participant_name,
+                coeff: bet.coefficient
+              },
+              number: bet.participant_number,
+              value: bet.value || 0
+            }));
+            console.log(`[PRINT] ✅ ${receipt.bets.length} pari(s) récupéré(s) depuis la DB`);
+          } else {
+            console.error(`[PRINT] ❌ Aucun pari trouvé en DB pour le ticket #${receiptId}`);
+            return res.status(404).send("<h1>Ticket sans paris - impossible d'imprimer</h1>");
+          }
+        } catch (betErr) {
+          console.error(`[PRINT] ❌ Erreur récupération bets:`, betErr.message);
+          return res.status(500).send("<h1>Erreur lors de la récupération des paris</h1>");
+        }
       }
 
       const createdTime =
@@ -96,14 +180,31 @@ export default function createReceiptsRouter(broadcast) {
       let totalMise = 0;
       let totalGainPotentiel = 0;
 
-      // Génération des lignes de paris avec meilleure organisation
-      const betsHTML = receipt.bets.map((bet, index) => {
+      // ✅ CORRECTION: Génération des lignes de paris avec meilleure organisation
+      // S'assurer que tous les bets sont bien formatés et affichés
+      const betsArray = Array.isArray(receipt.bets) ? receipt.bets : [];
+      console.log(`[PRINT] 📋 Génération HTML pour ${betsArray.length} pari(s)`);
+      
+      const betsHTML = betsArray.map((bet, index) => {
+        // ✅ CORRECTION: Gérer différents formats de bet (depuis DB ou gameState)
         const participant = bet.participant || {};
-        const name = escapeHtml(participant.name || `N°${participant.number || "?"}`);
-        const number = participant.number || bet.number || "?";
-        const coeff = parseFloat(participant.coeff || 0);
-        // Les valeurs bet.value sont en système, convertir en publique pour l'affichage
+        const name = escapeHtml(
+          participant.name || 
+          bet.participant_name || 
+          `N°${participant.number || bet.participant_number || bet.number || "?"}`
+        );
+        const number = participant.number || bet.participant_number || bet.number || "?";
+        const coeff = parseFloat(
+          participant.coeff || 
+          bet.coefficient || 
+          bet.coeff || 
+          0
+        );
+        // ✅ CORRECTION: Les valeurs bet.value sont en système, convertir en publique pour l'affichage
         const miseSystem = parseFloat(bet.value || 0);
+        if (miseSystem <= 0) {
+          console.warn(`[PRINT] ⚠️ Pari ${index + 1} a une mise invalide: ${bet.value}`);
+        }
         const mise = systemToPublic(miseSystem);
         const gainPot = systemToPublic(miseSystem * coeff);
         totalMise += mise;
@@ -132,6 +233,12 @@ export default function createReceiptsRouter(broadcast) {
             </div>
           </div>`;
       }).join('');
+      
+      // ✅ CORRECTION: Vérifier qu'au moins un pari est affiché
+      if (!betsHTML || betsHTML.trim() === '') {
+        console.error(`[PRINT] ❌ Aucun pari à afficher pour le ticket #${receiptId}`);
+        return res.status(500).send("<h1>Erreur: Aucun pari trouvé pour ce ticket</h1>");
+      }
 
       // === Gabarit du reçu HTML (Standardisé et optimisé pour POS) ===
       const receiptHTML = `
@@ -349,11 +456,11 @@ export default function createReceiptsRouter(broadcast) {
             <div class="header-info">
               <div class="header-line">
                 <span class="header-label">Ticket:</span>
-                <span class="header-value">#${receipt.id}</span>
+                <span class="header-value">#${receipt.id || receipt.receipt_id || receiptId}</span>
               </div>
               <div class="header-line">
                 <span class="header-label">Tour:</span>
-                <span class="header-value">#${gameState.currentRound.id}</span>
+                <span class="header-value">#${round?.id || receipt.round_id || gameState.currentRound?.id || 'N/A'}</span>
               </div>
               <div class="header-line">
                 <span class="header-label">Date:</span>

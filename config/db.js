@@ -50,54 +50,159 @@ const poolConfig = {
         ca: fs.readFileSync(process.env.SSL_CERTIFICATE).toString(),
       }
     : false, // Désactiver SSL si pas de certificat
+  // ✅ NOUVEAU: Configuration du pool pour résilience
+  max: 20, // Nombre maximum de connexions dans le pool
+  min: 2, // Nombre minimum de connexions maintenues
+  idleTimeoutMillis: 30000, // Fermer les connexions inactives après 30s
+  connectionTimeoutMillis: 10000, // Timeout de connexion de 10s
+  // ✅ NOUVEAU: Retry automatique pour les connexions perdues
+  allowExitOnIdle: false, // Ne pas fermer le pool automatiquement
 };
 
 export const pool = new Pool(poolConfig);
 
-export const testConnection = async () => {
+// ✅ NOUVEAU: Gestionnaire d'erreurs pour le pool de connexions
+pool.on('error', (err, client) => {
+  console.error('❌ [DB-POOL] Erreur inattendue sur le client PostgreSQL:', err.message);
+  console.error('   Stack:', err.stack);
+  // Ne pas faire crash le serveur - juste logger l'erreur
+  // Le pool gérera automatiquement la reconnexion
+});
+
+pool.on('connect', (client) => {
+  console.log('✅ [DB-POOL] Nouvelle connexion PostgreSQL établie');
+});
+
+pool.on('acquire', (client) => {
+  // Connexion acquise du pool
+});
+
+pool.on('remove', (client) => {
+  console.log('⚠️ [DB-POOL] Connexion PostgreSQL retirée du pool');
+});
+
+// ✅ NOUVEAU: Fonction de retry avec backoff exponentiel
+const retryWithBackoff = async (fn, maxRetries = 5, initialDelay = 1000) => {
+  let lastError;
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastError = err;
+      const delay = initialDelay * Math.pow(2, attempt);
+      console.warn(`⚠️ [DB-RETRY] Tentative ${attempt + 1}/${maxRetries} échouée, retry dans ${delay}ms...`);
+      await new Promise(resolve => setTimeout(resolve, delay));
+    }
+  }
+  throw lastError;
+};
+
+// ✅ NOUVEAU: Test de connexion avec retry automatique
+export const testConnection = async (maxRetries = 5) => {
   try {
-    await pool.query("SELECT NOW()");
-    console.log("✅ Connexion PostgreSQL établie");
+    await retryWithBackoff(async () => {
+      const result = await pool.query("SELECT NOW()");
+      console.log("✅ Connexion PostgreSQL établie");
+      return result;
+    }, maxRetries);
     return true;
   } catch (err) {
-    console.error("❌ Erreur de connexion PostgreSQL:", err.message);
+    console.error("❌ Erreur de connexion PostgreSQL après", maxRetries, "tentatives:", err.message);
+    console.error("   Le serveur continuera de fonctionner mais certaines fonctionnalités DB seront indisponibles");
     return false;
   }
 };
 
+// ✅ NOUVEAU: Fonction wrapper pour les requêtes DB avec gestion d'erreur gracieuse
+export const safeQuery = async (queryText, params = [], options = {}) => {
+  const { maxRetries = 3, retryDelay = 1000, fallback = null } = options;
+  
+  try {
+    return await retryWithBackoff(async () => {
+      return await pool.query(queryText, params);
+    }, maxRetries, retryDelay);
+  } catch (err) {
+    console.error(`❌ [DB-QUERY] Erreur lors de l'exécution de la requête:`, err.message);
+    console.error(`   Query: ${queryText.substring(0, 100)}...`);
+    
+    // Si un fallback est fourni, le retourner au lieu de faire crash
+    if (fallback !== null) {
+      console.warn(`⚠️ [DB-QUERY] Utilisation du fallback pour la requête`);
+      return fallback;
+    }
+    
+    // Sinon, propager l'erreur mais ne pas faire crash le serveur
+    throw err;
+  }
+};
+
 export const initializeDatabase = async () => {
-  if (!(await testConnection())) return;
+  const connectionOk = await testConnection();
+  if (!connectionOk) {
+    console.warn("⚠️ [DB-INIT] Connexion DB non disponible, initialisation reportée");
+    console.warn("   Le serveur continuera de fonctionner mais certaines fonctionnalités seront limitées");
+    return false;
+  }
 
   try {
     // Drop and recreate tables only in development
     // In production, use proper migrations instead
     if (process.env.NODE_ENV !== 'production') {
-      await dropTablesIfExist();
+      try {
+        await dropTablesIfExist();
+      } catch (dropErr) {
+        console.warn("⚠️ [DB-INIT] Erreur lors de la suppression des tables (non bloquant):", dropErr.message);
+      }
     }
     
-    await createTables();
-    console.log("✅ Initialisation de la base de données réussie");
+    try {
+      await createTables();
+      console.log("✅ Initialisation de la base de données réussie");
+    } catch (createErr) {
+      console.error("❌ [DB-INIT] Erreur lors de la création des tables:", createErr.message);
+      // Ne pas faire crash - peut-être que les tables existent déjà
+      console.warn("   Tentative de continuer avec les tables existantes...");
+    }
     
-    // Verify participants were seeded
-    const verifyRes = await pool.query("SELECT COUNT(*) as cnt FROM participants");
-    const participantCount = parseInt(verifyRes.rows[0]?.cnt || 0, 10);
-    console.log(`🔍 Vérification: ${participantCount} participants en base`);
-    
-    if (participantCount > 0) {
-      const listRes = await pool.query("SELECT participant_id, number, name FROM participants ORDER BY number");
-      console.log("📋 Participants disponibles:");
-      listRes.rows.forEach(p => {
-        console.log(`   #${p.number}: ${p.name} (ID: ${p.participant_id})`);
+    // Verify participants were seeded (avec gestion d'erreur)
+    try {
+      const verifyRes = await safeQuery("SELECT COUNT(*) as cnt FROM participants", [], {
+        fallback: { rows: [{ cnt: '0' }] }
       });
+      const participantCount = parseInt(verifyRes.rows[0]?.cnt || 0, 10);
+      console.log(`🔍 Vérification: ${participantCount} participants en base`);
+      
+      if (participantCount > 0) {
+        const listRes = await safeQuery("SELECT participant_id, number, name FROM participants ORDER BY number", [], {
+          fallback: { rows: [] }
+        });
+        console.log("📋 Participants disponibles:");
+        listRes.rows.forEach(p => {
+          console.log(`   #${p.number}: ${p.name} (ID: ${p.participant_id})`);
+        });
+      }
+    } catch (verifyErr) {
+      console.warn("⚠️ [DB-INIT] Erreur lors de la vérification des participants (non bloquant):", verifyErr.message);
     }
+    
+    return true;
   } catch (err) {
-    console.error("❌ Erreur lors de l'initialisation:", err);
-    throw err;
+    console.error("❌ [DB-INIT] Erreur lors de l'initialisation:", err.message);
+    console.warn("   Le serveur continuera de fonctionner mais certaines fonctionnalités DB seront indisponibles");
+    // Ne pas faire crash le serveur - retourner false au lieu de throw
+    return false;
   }
 };
 
 const dropTablesIfExist = async () => {
-  const client = await pool.connect();
+  let client;
+  try {
+    client = await pool.connect();
+  } catch (connectErr) {
+    console.error("❌ [DB-DROP] Impossible d'acquérir une connexion:", connectErr.message);
+    throw connectErr;
+  }
+  
   try {
     console.log("🗑️ Suppression des anciennes tables...");
     await client.query("BEGIN");
@@ -127,16 +232,32 @@ const dropTablesIfExist = async () => {
     await client.query("COMMIT");
     console.log("🗑️ Anciennes tables supprimées");
   } catch (err) {
-    await client.query("ROLLBACK");
-    console.error("❌ Erreur lors de la suppression des tables:", err);
-    throw err;  // Re-throw to propagate the error
+    try {
+      await client.query("ROLLBACK");
+    } catch (rollbackErr) {
+      console.warn("⚠️ [DB-DROP] Erreur lors du rollback:", rollbackErr.message);
+    }
+    console.error("❌ [DB-DROP] Erreur lors de la suppression des tables:", err.message);
+    throw err;
   } finally {
-    client.release();
+    if (client) {
+      try {
+        client.release();
+      } catch (releaseErr) {
+        console.warn("⚠️ [DB-DROP] Erreur lors de la libération du client:", releaseErr.message);
+      }
+    }
   }
 };
 
 const createTables = async () => {
-  const client = await pool.connect();
+  let client;
+  try {
+    client = await pool.connect();
+  } catch (connectErr) {
+    console.error("❌ [DB-CREATE] Impossible d'acquérir une connexion:", connectErr.message);
+    throw connectErr;
+  }
 
   try {
     console.log("📋 Création des tables...");
@@ -659,20 +780,54 @@ const createTables = async () => {
     await client.query("COMMIT");
     console.log("✅ Toutes les tables créées avec succès");
   } catch (err) {
-    await client.query("ROLLBACK");
-    console.error("❌ Erreur lors de la création des tables:", err);
+    try {
+      await client.query("ROLLBACK");
+    } catch (rollbackErr) {
+      console.warn("⚠️ [DB-CREATE] Erreur lors du rollback:", rollbackErr.message);
+    }
+    console.error("❌ [DB-CREATE] Erreur lors de la création des tables:", err.message);
     throw err;
   } finally {
-    client.release();
+    if (client) {
+      try {
+        client.release();
+      } catch (releaseErr) {
+        console.warn("⚠️ [DB-CREATE] Erreur lors de la libération du client:", releaseErr.message);
+      }
+    }
   }
 };
 
-// Fermer la connexion à la sortie du processus
+// ✅ CORRECTION: Fermer la connexion à la sortie du processus avec gestion d'erreur
 process.on("exit", async () => {
   try {
     await pool.end();
     console.log("🔌 Pool PostgreSQL fermé");
   } catch (err) {
-    console.error("Erreur lors de la fermeture du pool:", err);
+    console.error("❌ [DB-SHUTDOWN] Erreur lors de la fermeture du pool:", err.message);
+    // Ne pas faire crash le processus lors de la fermeture
   }
+});
+
+// ✅ NOUVEAU: Gestion gracieuse des signaux de terminaison
+process.on("SIGINT", async () => {
+  console.log("\n⚠️ [DB-SHUTDOWN] Signal SIGINT reçu, fermeture gracieuse du pool...");
+  try {
+    await pool.end();
+    console.log("✅ [DB-SHUTDOWN] Pool PostgreSQL fermé gracieusement");
+  } catch (err) {
+    console.error("❌ [DB-SHUTDOWN] Erreur lors de la fermeture:", err.message);
+  }
+  process.exit(0);
+});
+
+process.on("SIGTERM", async () => {
+  console.log("\n⚠️ [DB-SHUTDOWN] Signal SIGTERM reçu, fermeture gracieuse du pool...");
+  try {
+    await pool.end();
+    console.log("✅ [DB-SHUTDOWN] Pool PostgreSQL fermé gracieusement");
+  } catch (err) {
+    console.error("❌ [DB-SHUTDOWN] Erreur lors de la fermeture:", err.message);
+  }
+  process.exit(0);
 });

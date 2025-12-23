@@ -100,15 +100,32 @@ if (NODE_ENV === 'development') {
   console.log('✅ [STARTUP] Caches supprimés\n');
 }
 
-// Initialiser la base de données au démarrage
-await initializeDatabase();
+// ✅ CORRECTION: Initialiser la base de données au démarrage avec gestion d'erreur gracieuse
+try {
+  const dbInitialized = await initializeDatabase();
+  if (!dbInitialized) {
+    console.warn("⚠️ [STARTUP] Base de données non initialisée, le serveur continuera avec des fonctionnalités limitées");
+  }
+} catch (dbInitErr) {
+  console.error("❌ [STARTUP] Erreur lors de l'initialisation de la base de données:", dbInitErr.message);
+  console.warn("   Le serveur continuera de fonctionner mais certaines fonctionnalités DB seront indisponibles");
+}
 
-// ✅ Initialiser le manager de numéro de round depuis la BD
-await initRoundNumberManager();
+// ✅ CORRECTION: Initialiser le manager de numéro de round depuis la BD avec gestion d'erreur
+try {
+  await initRoundNumberManager();
+} catch (roundNumErr) {
+  console.warn("⚠️ [STARTUP] Erreur lors de l'initialisation du round number manager:", roundNumErr.message);
+  console.warn("   Le système utilisera des IDs générés localement");
+}
 
-// ✅ NOUVEAU: Initialiser le manager de round ID depuis la BD
-// Cela charge le dernier round_id utilisé et assure la continuité après redémarrage
-await initRoundIdManager();
+// ✅ CORRECTION: Initialiser le manager de round ID depuis la BD avec gestion d'erreur
+try {
+  await initRoundIdManager();
+} catch (roundIdErr) {
+  console.warn("⚠️ [STARTUP] Erreur lors de l'initialisation du round ID manager:", roundIdErr.message);
+  console.warn("   Le système utilisera des IDs générés localement");
+}
 
 // ✅ IMPORTANT: Restaurer l'état du jeu depuis Redis si serveur crash antérieur
 const restored = await restoreGameStateFromRedis();

@@ -20,28 +20,8 @@ router.get("/", cacheResponse(30), async (req, res) => {
       return res.status(401).json({ error: 'Authentification requise' });
     }
     
-    // ✅ CORRECTION: Utiliser le compte de caisse du caissier connecté
-    // Pour les caissiers, utiliser le compte de caisse au lieu des stats globales
-    if (req.user?.role === 'cashier') {
-      try {
-        const account = await accountModel.getAccountByUserId(userId);
-        if (account) {
-          const balance = Number(account.balance) || 0;
-          console.log(`💰 Money (Cashier ${userId}): balance=${balance} HTG depuis compte de caisse`);
-          return res.json(wrap({ 
-            money: balance, 
-            totalReceived: 0, 
-            totalPayouts: 0,
-            source: 'cashier_account'
-          }));
-        }
-      } catch (accountErr) {
-        console.warn(`⚠️ Erreur récupération compte caissier:`, accountErr.message);
-        // Fallback sur stats si compte non trouvé
-      }
-    }
-    
-    // OPTIMISATION: Utiliser la query cache filtrée par user_id
+    // ✅ CORRECTION: Calculer les stats depuis les tickets de l'utilisateur
+    // Cela fonctionne pour tous les utilisateurs (caissiers et autres)
     const stats = await getSalesStats(userId);
     
     const totalReceivedSystem = Number(stats.total_received) || 0;
@@ -49,7 +29,44 @@ router.get("/", cacheResponse(30), async (req, res) => {
     
     const totalReceived = systemToPublic(totalReceivedSystem);
     const totalPayouts = systemToPublic(totalPayoutsSystem);
-    const cashBalance = totalReceived - totalPayouts;
+    
+    // ✅ CORRECTION: Pour les caissiers, utiliser le solde du compte de caisse si disponible
+    // Sinon, calculer depuis les tickets (totalReceived - totalPayouts)
+    let cashBalance;
+    if (req.user?.role === 'cashier') {
+      try {
+        const account = await accountModel.getAccountByUserId(userId);
+        if (account && account.current_balance !== null && account.current_balance !== undefined) {
+          cashBalance = Number(account.current_balance) || 0;
+          // ✅ CORRECTION: Si le compte existe mais a un solde de 0 et qu'il y a des recettes,
+          // utiliser le calcul depuis les tickets comme valeur plus précise
+          const calculatedBalance = totalReceived - totalPayouts;
+          if (cashBalance === 0 && calculatedBalance > 0) {
+            console.log(`💰 Money (Cashier ${userId}): Compte existe mais solde=0, utilisation du calcul depuis tickets: ${calculatedBalance} HTG`);
+            cashBalance = calculatedBalance;
+          } else {
+            console.log(`💰 Money (Cashier ${userId}): balance=${cashBalance} HTG depuis compte de caisse, received=${totalReceived}, payouts=${totalPayouts}`);
+          }
+          return res.json(wrap({ 
+            money: cashBalance, 
+            totalReceived, 
+            totalPayouts,
+            source: account.current_balance > 0 ? 'cashier_account' : 'calculated_from_tickets'
+          }));
+        } else {
+          // Compte n'existe pas ou solde null, utiliser calcul depuis tickets
+          cashBalance = totalReceived - totalPayouts;
+          console.log(`💰 Money (Cashier ${userId}): Compte non trouvé ou solde null, utilisation du calcul depuis tickets: ${cashBalance} HTG`);
+        }
+      } catch (accountErr) {
+        console.warn(`⚠️ Erreur récupération compte caissier:`, accountErr.message);
+        // Fallback sur calcul depuis tickets si compte non trouvé
+        cashBalance = totalReceived - totalPayouts;
+      }
+    } else {
+      // Pour les non-caissiers, calculer depuis les tickets
+      cashBalance = totalReceived - totalPayouts;
+    }
 
     console.log(`💰 Money (User ${userId}): received=${totalReceived}, payouts=${totalPayouts}, balance=${cashBalance}`);
     return res.json(wrap({ money: cashBalance, totalReceived, totalPayouts }));
@@ -69,31 +86,7 @@ router.post("/", async (req, res) => {
       return res.status(401).json({ error: 'Authentification requise' });
     }
     
-    // ✅ CORRECTION: Utiliser le compte de caisse du caissier connecté
-    if (req.user?.role === 'cashier') {
-      try {
-        const account = await accountModel.getAccountByUserId(userId);
-        if (account) {
-          const balance = Number(account.balance) || 0;
-          console.log(`💰 Money (POST, Cashier ${userId}): balance=${balance} HTG depuis compte de caisse`);
-          
-          // Invalider le cache pour ce user
-          await invalidateCachePattern(`sales_stats:user:${userId}`);
-          await cacheDelPattern(`http:*/api/v1/money*`);
-          
-          return res.json(wrap({ 
-            money: balance, 
-            totalReceived: 0, 
-            totalPayouts: 0,
-            source: 'cashier_account'
-          }));
-        }
-      } catch (accountErr) {
-        console.warn(`⚠️ Erreur récupération compte caissier:`, accountErr.message);
-      }
-    }
-    
-    // OPTIMISATION: Utiliser la query cache filtrée par user_id
+    // ✅ CORRECTION: Calculer les stats depuis les tickets de l'utilisateur
     const stats = await getSalesStats(userId);
     
     const totalReceivedSystem = Number(stats.total_received) || 0;
@@ -101,7 +94,35 @@ router.post("/", async (req, res) => {
     
     const totalReceived = systemToPublic(totalReceivedSystem);
     const totalPayouts = systemToPublic(totalPayoutsSystem);
-    const cashBalance = totalReceived - totalPayouts;
+    
+    // ✅ CORRECTION: Pour les caissiers, utiliser le solde du compte de caisse si disponible
+    let cashBalance;
+    if (req.user?.role === 'cashier') {
+      try {
+        const account = await accountModel.getAccountByUserId(userId);
+        if (account && account.current_balance !== null && account.current_balance !== undefined) {
+          cashBalance = Number(account.current_balance) || 0;
+          // ✅ CORRECTION: Si le compte existe mais a un solde de 0 et qu'il y a des recettes,
+          // utiliser le calcul depuis les tickets comme valeur plus précise
+          const calculatedBalance = totalReceived - totalPayouts;
+          if (cashBalance === 0 && calculatedBalance > 0) {
+            console.log(`💰 Money (POST, Cashier ${userId}): Compte existe mais solde=0, utilisation du calcul depuis tickets: ${calculatedBalance} HTG`);
+            cashBalance = calculatedBalance;
+          } else {
+            console.log(`💰 Money (POST, Cashier ${userId}): balance=${cashBalance} HTG depuis compte de caisse, received=${totalReceived}, payouts=${totalPayouts}`);
+          }
+        } else {
+          // Compte n'existe pas ou solde null, utiliser calcul depuis tickets
+          cashBalance = totalReceived - totalPayouts;
+          console.log(`💰 Money (POST, Cashier ${userId}): Compte non trouvé ou solde null, utilisation du calcul depuis tickets: ${cashBalance} HTG`);
+        }
+      } catch (accountErr) {
+        console.warn(`⚠️ Erreur récupération compte caissier:`, accountErr.message);
+        cashBalance = totalReceived - totalPayouts;
+      }
+    } else {
+      cashBalance = totalReceived - totalPayouts;
+    }
 
     console.log(`💰 Money (POST, User ${userId}): received=${totalReceived}, payouts=${totalPayouts}, balance=${cashBalance}`);
     

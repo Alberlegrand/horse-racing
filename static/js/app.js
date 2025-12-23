@@ -1574,6 +1574,8 @@ class App {
 
         async function refreshCashierDashboard() {
             try {
+                console.log('🔄 [CASHIER-DASHBOARD] Rafraîchissement des données...');
+                
                 // 🚀 OPTIMISATION: Parallel API calls (Promise.all) instead of sequential
                 const [moneyRes, myBetsRes] = await Promise.all([
                     fetch('/api/v1/money/', { credentials: 'include' }),
@@ -1581,37 +1583,129 @@ class App {
                 ]);
 
                 // Check responses
-                if (!moneyRes.ok) throw new Error(`Money API HTTP ${moneyRes.status}`);
-                if (!myBetsRes.ok) throw new Error(`My-bets API HTTP ${myBetsRes.status}`);
+                if (!moneyRes.ok) {
+                    const errorText = await moneyRes.text();
+                    console.error(`❌ [CASHIER-DASHBOARD] Money API HTTP ${moneyRes.status}:`, errorText);
+                    throw new Error(`Money API HTTP ${moneyRes.status}`);
+                }
+                if (!myBetsRes.ok) {
+                    const errorText = await myBetsRes.text();
+                    console.error(`❌ [CASHIER-DASHBOARD] My-bets API HTTP ${myBetsRes.status}:`, errorText);
+                    throw new Error(`My-bets API HTTP ${myBetsRes.status}`);
+                }
 
                 const moneyJson = await moneyRes.json();
                 const myBetsJson = await myBetsRes.json();
+
+                console.log('💰 [CASHIER-DASHBOARD] Money data:', moneyJson);
+                console.log('🎫 [CASHIER-DASHBOARD] My-bets data:', myBetsJson);
 
                 const moneyData = moneyJson.data || {};
                 state.currentBalance = Number(moneyData.money || 0);
                 state.totalReceipts = Number(moneyData.totalReceived || 0);
                 state.totalPayouts = Number(moneyData.totalPayouts || 0);
+                
+                console.log(`💰 [CASHIER-DASHBOARD] Balance: ${state.currentBalance}, Received: ${state.totalReceipts}, Payouts: ${state.totalPayouts}`);
 
                 const el = id => document.getElementById(id);
-                if (el('currentBalance')) el('currentBalance').textContent = state.currentBalance.toFixed(2) + ' HTG';
-                if (el('totalReceipts')) el('totalReceipts').textContent = state.totalReceipts.toFixed(2) + ' HTG';
-                if (el('totalPayouts')) el('totalPayouts').textContent = state.totalPayouts.toFixed(2) + ' HTG';
-                if (el('netBalance')) el('netBalance').textContent = (state.totalReceipts - state.totalPayouts).toFixed(2) + ' HTG';
-                if (el('systemBalance')) el('systemBalance').textContent = state.currentBalance.toFixed(2) + ' HTG';
+                
+                // ✅ CORRECTION: Mise à jour avec logs pour débogage
+                const currentBalanceEl = el('currentBalance');
+                const totalReceiptsEl = el('totalReceipts');
+                const totalPayoutsEl = el('totalPayouts');
+                const netBalanceEl = el('netBalance');
+                const systemBalanceEl = el('systemBalance');
+                
+                if (currentBalanceEl) {
+                    currentBalanceEl.textContent = state.currentBalance.toFixed(2) + ' HTG';
+                    console.log(`✅ [CASHIER-DASHBOARD] currentBalance mis à jour: ${state.currentBalance.toFixed(2)} HTG`);
+                } else {
+                    console.warn('⚠️ [CASHIER-DASHBOARD] Élément currentBalance non trouvé');
+                }
+                
+                if (totalReceiptsEl) {
+                    totalReceiptsEl.textContent = state.totalReceipts.toFixed(2) + ' HTG';
+                    console.log(`✅ [CASHIER-DASHBOARD] totalReceipts mis à jour: ${state.totalReceipts.toFixed(2)} HTG`);
+                } else {
+                    console.warn('⚠️ [CASHIER-DASHBOARD] Élément totalReceipts non trouvé');
+                }
+                
+                if (totalPayoutsEl) {
+                    totalPayoutsEl.textContent = state.totalPayouts.toFixed(2) + ' HTG';
+                    console.log(`✅ [CASHIER-DASHBOARD] totalPayouts mis à jour: ${state.totalPayouts.toFixed(2)} HTG`);
+                } else {
+                    console.warn('⚠️ [CASHIER-DASHBOARD] Élément totalPayouts non trouvé');
+                }
+                
+                const netBalance = state.totalReceipts - state.totalPayouts;
+                if (netBalanceEl) {
+                    netBalanceEl.textContent = netBalance.toFixed(2) + ' HTG';
+                    console.log(`✅ [CASHIER-DASHBOARD] netBalance mis à jour: ${netBalance.toFixed(2)} HTG`);
+                } else {
+                    console.warn('⚠️ [CASHIER-DASHBOARD] Élément netBalance non trouvé');
+                }
+                
+                if (systemBalanceEl) {
+                    systemBalanceEl.textContent = state.currentBalance.toFixed(2) + ' HTG';
+                    console.log(`✅ [CASHIER-DASHBOARD] systemBalance mis à jour: ${state.currentBalance.toFixed(2)} HTG`);
+                } else {
+                    console.warn('⚠️ [CASHIER-DASHBOARD] Élément systemBalance non trouvé');
+                }
 
                 // tickets
                 const myBetsData = myBetsJson.data || {};
                 const tickets = myBetsData.tickets || [];
+                
+                console.log(`🎫 [CASHIER-DASHBOARD] ${tickets.length} ticket(s) récupéré(s)`);
 
                 const activeTickets = tickets.filter(t => t.status === 'pending');
                 const wonTickets = tickets.filter(t => t.status === 'won');
                 const paidTickets = tickets.filter(t => t.status === 'paid');
+                
+                console.log(`🎫 [CASHIER-DASHBOARD] Tickets: ${activeTickets.length} actifs, ${wonTickets.length} gagnants, ${paidTickets.length} payés`);
 
-                if (el('activeTicketsCount')) el('activeTicketsCount').textContent = activeTickets.length;
-                if (el('wonTicketsCount')) el('wonTicketsCount').textContent = wonTickets.length;
-                if (el('wonTicketsAmount')) el('wonTicketsAmount').textContent = wonTickets.reduce((s, t) => s + (Number(t.prize) || 0), 0).toFixed(2) + ' HTG';
-                if (el('paidTicketsCount')) el('paidTicketsCount').textContent = paidTickets.length;
-                if (el('paidTicketsAmount')) el('paidTicketsAmount').textContent = paidTickets.reduce((s, t) => s + (Number(t.prize) || 0), 0).toFixed(2) + ' HTG';
+                const activeTicketsCountEl = el('activeTicketsCount');
+                const wonTicketsCountEl = el('wonTicketsCount');
+                const wonTicketsAmountEl = el('wonTicketsAmount');
+                const paidTicketsCountEl = el('paidTicketsCount');
+                const paidTicketsAmountEl = el('paidTicketsAmount');
+                
+                if (activeTicketsCountEl) {
+                    activeTicketsCountEl.textContent = activeTickets.length;
+                    console.log(`✅ [CASHIER-DASHBOARD] activeTicketsCount mis à jour: ${activeTickets.length}`);
+                } else {
+                    console.warn('⚠️ [CASHIER-DASHBOARD] Élément activeTicketsCount non trouvé');
+                }
+                
+                if (wonTicketsCountEl) {
+                    wonTicketsCountEl.textContent = wonTickets.length;
+                    console.log(`✅ [CASHIER-DASHBOARD] wonTicketsCount mis à jour: ${wonTickets.length}`);
+                } else {
+                    console.warn('⚠️ [CASHIER-DASHBOARD] Élément wonTicketsCount non trouvé');
+                }
+                
+                const wonTicketsAmount = wonTickets.reduce((s, t) => s + (Number(t.prize) || 0), 0);
+                if (wonTicketsAmountEl) {
+                    wonTicketsAmountEl.textContent = wonTicketsAmount.toFixed(2) + ' HTG';
+                    console.log(`✅ [CASHIER-DASHBOARD] wonTicketsAmount mis à jour: ${wonTicketsAmount.toFixed(2)} HTG`);
+                } else {
+                    console.warn('⚠️ [CASHIER-DASHBOARD] Élément wonTicketsAmount non trouvé');
+                }
+                
+                if (paidTicketsCountEl) {
+                    paidTicketsCountEl.textContent = paidTickets.length;
+                    console.log(`✅ [CASHIER-DASHBOARD] paidTicketsCount mis à jour: ${paidTickets.length}`);
+                } else {
+                    console.warn('⚠️ [CASHIER-DASHBOARD] Élément paidTicketsCount non trouvé');
+                }
+                
+                const paidTicketsAmount = paidTickets.reduce((s, t) => s + (Number(t.prize) || 0), 0);
+                if (paidTicketsAmountEl) {
+                    paidTicketsAmountEl.textContent = paidTicketsAmount.toFixed(2) + ' HTG';
+                    console.log(`✅ [CASHIER-DASHBOARD] paidTicketsAmount mis à jour: ${paidTicketsAmount.toFixed(2)} HTG`);
+                } else {
+                    console.warn('⚠️ [CASHIER-DASHBOARD] Élément paidTicketsAmount non trouvé');
+                }
 
                 // history
                 const historyEl = document.getElementById('cashierOperationsHistory');
@@ -1710,19 +1804,14 @@ class App {
             }
         }
 
-        function connectWebSocket() {
-            try { state.ws = new WebSocket('ws://localhost:8081/connection/websocket'); }
-            catch (e) { console.error('WS connection failed:', e); scheduleReconnect(); return; }
-            state.ws.addEventListener('open', () => { console.log('📡 WebSocket caisse connecté'); fetchCurrentRound(); });
-            state.ws.addEventListener('message', (msg) => { try { const data = JSON.parse(msg.data); handleWsEvent(data); } catch (err) { console.warn('WS: invalid message', err, msg.data); } });
-            state.ws.addEventListener('close', (ev) => { console.warn('⚠️ WebSocket closed', ev.code, ev.reason); scheduleReconnect(); });
-            state.ws.addEventListener('error', (err) => { console.error('WebSocket error', err); state.ws.close(); });
-        }
-
-        function scheduleReconnect() {
-            if (state.wsReconnectTimer) return;
-            state.wsReconnectTimer = setTimeout(() => { state.wsReconnectTimer = null; connectWebSocket(); }, 3000);
-        }
+        // ✅ CORRECTION: Ne pas créer une connexion WebSocket séparée
+        // Utiliser la connexion WebSocket principale de app.js qui est déjà gérée
+        // La fonction connectWebSocket locale est supprimée car elle causait des erreurs
+        // avec une URL hardcodée incorrecte (ws://localhost:8081)
+        
+        // ✅ CORRECTION: Utiliser la connexion WebSocket principale si disponible
+        // Les événements WebSocket sont déjà gérés par this.handleWebSocketMessage()
+        // qui appelle refreshCashierDashboard() pour les événements pertinents
 
         // event listeners UI
         const refreshBtn = document.getElementById('refreshCashierBtn');
@@ -1781,8 +1870,18 @@ class App {
         refreshCashierDashboard();
         // ✅ OPTIMISATION: Supprimé setInterval - refresh via WebSocket events uniquement
         // Les événements receipt_added, receipt_paid, money_update déclenchent déjà refreshCashierDashboard
-        // start websocket
-        connectWebSocket();
+        
+        // ✅ CORRECTION: Ne pas créer de connexion WebSocket séparée
+        // La connexion WebSocket principale de app.js est déjà gérée par connectWebSocket()
+        // et les événements sont traités par handleWebSocketMessage() qui appelle refreshCashierDashboard()
+        
+        // ✅ CORRECTION: S'assurer que la connexion WebSocket principale est active
+        if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+            // Si la connexion principale n'est pas active, la démarrer
+            if (typeof this.connectWebSocket === 'function') {
+                this.connectWebSocket();
+            }
+        }
     }
 
     setupGlobalEventListeners() {
@@ -2605,9 +2704,14 @@ class App {
                 
                 // ✅ MET À JOUR LE GAMEMANAGER AVEC LES DONNÉES DU WEBSOCKET
                 // Cela garantit que le movie screen aura les données correctes
-                if (data.currentRound) {
-                    client._context.getGameManager().updateGameFromWebSocket(data.currentRound);
-                    console.log('✅ GameManager mis à jour avec race_start data');
+                // ✅ CORRECTION: Vérifier que client existe avant de l'utiliser
+                if (data.currentRound && typeof window !== 'undefined' && window.client && window.client._context && window.client._context.getGameManager) {
+                    try {
+                        window.client._context.getGameManager().updateGameFromWebSocket(data.currentRound);
+                        console.log('✅ GameManager mis à jour avec race_start data');
+                    } catch (err) {
+                        console.warn('⚠️ Erreur mise à jour GameManager:', err.message);
+                    }
                 }
                 
                 // Mettre à jour l'état de la course
@@ -2647,9 +2751,14 @@ class App {
                 
                 // ✅ CORRECTION: MET À JOUR LE GAMEMANAGER AVEC LES DONNÉES FINALES DU ROUND
                 // Cela garantit que le finish screen affichera les données correctes
-                if (data.currentRound) {
-                    client._context.getGameManager().updateGameFromWebSocket(data.currentRound);
-                    console.log('✅ GameManager mis à jour avec race_end data (winner inclus)');
+                // ✅ CORRECTION: Vérifier que client existe avant de l'utiliser
+                if (data.currentRound && typeof window !== 'undefined' && window.client && window.client._context && window.client._context.getGameManager) {
+                    try {
+                        window.client._context.getGameManager().updateGameFromWebSocket(data.currentRound);
+                        console.log('✅ GameManager mis à jour avec race_end data (winner inclus)');
+                    } catch (err) {
+                        console.warn('⚠️ Erreur mise à jour GameManager:', err.message);
+                    }
                 }
                 
                 // Note: betFrameOverlay reste visible jusqu'à new_round (géré par main.js)
@@ -2694,7 +2803,7 @@ class App {
                 if (this.currentPage === 'my-bets' && this.myBetsFetchMyBets) {
                     this.myBetsFetchMyBets(1); // Pas de setTimeout - mise à jour immédiate
                 }
-                if (this.currentPage === 'account' && this.refreshCashierDashboard) {
+                if ((this.currentPage === 'account' || this.currentPage === 'cashier-account') && this.refreshCashierDashboard) {
                     this.refreshCashierDashboard(); // Mise à jour cashier immédiate
                 }
                 
@@ -2819,7 +2928,7 @@ class App {
                 if (this.currentPage === 'my-bets' && this.myBetsFetchMyBets) {
                     this.myBetsFetchMyBets(1); // Pas de setTimeout - mise à jour immédiate
                 }
-                if (this.currentPage === 'account' && this.refreshCashierDashboard) {
+                if ((this.currentPage === 'account' || this.currentPage === 'cashier-account') && this.refreshCashierDashboard) {
                     this.refreshCashierDashboard(); // Mise à jour cashier immédiate
                 }
                 // Notifications spéciales
