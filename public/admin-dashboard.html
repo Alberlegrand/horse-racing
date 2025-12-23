@@ -658,9 +658,20 @@
 
   <script>
     // ===== CONFIGURATION =====
-    const API_BASE = 'http://localhost:8080';
+    // Utiliser l'URL du serveur actuel (fonctionne en dev et production)
+    const API_BASE = window.location.origin;
     let authToken = localStorage.getItem('authToken');
     let confirmAction = null;
+    
+    // Configuration pour la production
+    const CONFIG = {
+      apiBase: API_BASE,
+      reconnectTimeout: 30000, // 30 secondes
+      healthCheckInterval: 5000, // 5 secondes
+      logRefreshInterval: 2000, // 2 secondes
+      statsRefreshInterval: 30000, // 30 secondes
+      environment: window.location.hostname === 'localhost' ? 'development' : 'production'
+    };
 
     // ===== INIT =====
     document.addEventListener('DOMContentLoaded', () => {
@@ -669,18 +680,21 @@
         return;
       }
 
+      console.log(`[ADMIN DASHBOARD] Initialisé en mode: ${CONFIG.environment}`);
+      console.log(`[ADMIN DASHBOARD] API Base: ${CONFIG.apiBase}`);
+
       loadUserInfo();
       loadServerStatus();
       loadDatabaseStats();
       
-      // Actualiser le statut toutes les 5 secondes
-      setInterval(loadServerStatus, 5000);
+      // Actualiser le statut avec le CONFIG
+      setInterval(loadServerStatus, CONFIG.healthCheckInterval);
       
-      // Actualiser les stats BD chaque 30 secondes
-      setInterval(loadDatabaseStats, 30000);
+      // Actualiser les stats BD avec le CONFIG
+      setInterval(loadDatabaseStats, CONFIG.statsRefreshInterval);
       
-      // Actualiser les logs toutes les 2 secondes
-      setInterval(loadLogs, 2000);
+      // Actualiser les logs avec le CONFIG
+      setInterval(loadLogs, CONFIG.logRefreshInterval);
 
       addLog('✅ Connexion au panneau d\'administration', 'success');
     });
@@ -701,19 +715,33 @@
     }
 
     // ===== SERVER STATUS =====
+    let connectionErrorCount = 0;
+    let lastSuccessfulConnection = Date.now();
+    
     async function loadServerStatus() {
       try {
         const response = await fetch(`${API_BASE}/api/v1/admin/health`, {
-          headers: { 'Authorization': `Bearer ${authToken}` }
+          headers: { 'Authorization': `Bearer ${authToken}` },
+          signal: AbortSignal.timeout(5000) // Timeout 5s
         });
         const data = await response.json();
 
         if (!response.ok) {
+          connectionErrorCount++;
           addLog('❌ Erreur accès API admin: ' + (data.error || response.status), 'error');
           updateStatus('statusBadge', false);
           document.getElementById('statusText').textContent = '❌ Erreur API';
+          
+          // Si trop d'erreurs, afficher alerte
+          if (connectionErrorCount > 5) {
+            showAlert('⚠️ Problème de connexion au serveur', 'warning');
+          }
           return;
         }
+
+        // Réinitialiser le compteur d'erreurs
+        connectionErrorCount = 0;
+        lastSuccessfulConnection = Date.now();
 
         updateStatus('statusBadge', data.status === 'ok');
         document.getElementById('statusText').textContent = data.status === 'ok' ? '✅ En Ligne' : '⚠️ Dégradé';
@@ -744,9 +772,15 @@
         document.getElementById('successRate').textContent = (data.stats?.successRate || 0).toFixed(1) + '%';
 
       } catch (e) {
+        connectionErrorCount++;
         addLog('❌ Erreur chargement statut: ' + e.message, 'error');
         updateStatus('statusBadge', false);
         document.getElementById('statusText').textContent = '❌ Erreur de Connexion';
+        
+        // Si trop d'erreurs, afficher alerte
+        if (connectionErrorCount > 5) {
+          showAlert('⚠️ Impossible de se connecter au serveur', 'danger');
+        }
       }
     }
 
@@ -1074,7 +1108,14 @@
     }
 
     function logout() {
+      // Nettoyer les données de session
       localStorage.removeItem('authToken');
+      sessionStorage.clear();
+      
+      // Log de déconnexion
+      console.log('[ADMIN DASHBOARD] Déconnexion utilisateur');
+      
+      // Rediriger vers login
       window.location.href = '/login.html';
     }
 

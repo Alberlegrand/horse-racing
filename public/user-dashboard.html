@@ -1,0 +1,483 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Tableau de bord — Horse Racing</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* Custom scrollbar */
+    ::-webkit-scrollbar {
+      display: none;
+    }
+
+    /* Animation keyframes */
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(10px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    @keyframes pulse {
+      0% { transform: scale(1); }
+      50% { transform: scale(1.05); }
+      100% { transform: scale(1); }
+    }
+
+    @keyframes float {
+      0%, 100% { transform: translateY(0px); }
+      50% { transform: translateY(-5px); }
+    }
+  </style>
+</head>
+<body class="text-slate-100 overflow-hidden">
+  <!-- Header compact -->
+  <header class="flex-none bg-slate-900/90 backdrop-blur-sm border-b border-slate-800/50">
+    <div class="max-w-7xl mx-auto px-4 py-3">
+      <div class="flex items-center justify-between">
+        <!-- Logo compact -->
+        <div class="flex items-center space-x-2">
+          <div class="flex items-center justify-center w-8 h-8 rounded-lg bg-gradient-to-br from-emerald-500 to-emerald-700">
+            <i class="fas fa-horse text-white text-sm"></i>
+          </div>
+          <div>
+            <h1 class="text-base font-bold">Horse Racing</h1>
+            <p class="text-xs text-slate-400 -mt-0.5">Dashboard</p>
+          </div>
+        </div>
+
+        <!-- User info compact -->
+        <div class="flex items-center space-x-3">
+          <div class="text-right hidden sm:block">
+            <div id="userDisplay" class="text-sm font-medium text-slate-200 truncate max-w-[120px]">Chargement...</div>
+            <div id="userRole" class="text-xs text-emerald-400 truncate max-w-[120px]"></div>
+          </div>
+          
+          <!-- Environment badge -->
+          <span id="environmentBadge" class="px-2 py-1 rounded text-xs font-medium bg-slate-800/50 border border-slate-700 text-slate-400">
+            ...
+          </span>
+          
+          <!-- Logout button compact -->
+          <button id="logoutBtn" class="flex items-center justify-center w-8 h-8 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-400 hover:text-red-300 border border-red-500/20 hover:border-red-500/40 transition-all duration-200" title="Déconnexion">
+            <i class="fas fa-sign-out-alt text-sm"></i>
+          </button>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main content - fills remaining space -->
+  <main class="flex-1 flex flex-col items-center justify-center p-4 overflow-hidden">
+    <!-- Welcome header compact -->
+    <div class="text-center mb-4 sm:mb-6">
+      <h2 class="text-xl sm:text-2xl font-bold mb-1 text-slate-100">Tableau de bord</h2>
+      <p class="text-sm text-slate-400">Sélectionnez une section pour continuer</p>
+    </div>
+
+    <!-- Error message container -->
+    <div id="errorContainer" class="w-full max-w-md mb-4"></div>
+
+    <!-- Cards grid compact -->
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6 w-full max-w-3xl px-4">
+      <!-- Screen Card -->
+      <div 
+        id="screenCard"
+        class="group relative overflow-hidden rounded-xl p-4 sm:p-5 bg-gradient-to-br from-slate-800/70 to-slate-900/70 border border-slate-700/50 cursor-pointer transition-all duration-300 hover:border-emerald-500/50 shadow-lg hover:shadow-xl hover:shadow-emerald-900/20 flex flex-col items-center text-center h-full min-h-[180px] sm:min-h-[200px]"
+        onclick="openScreen()"
+        role="button"
+        tabindex="0"
+        onkeypress="handleKeyPress(event, openScreen)"
+      >
+        <!-- Background effect -->
+        <div class="absolute inset-0 bg-gradient-to-br from-emerald-500/5 via-transparent to-emerald-900/5 opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
+        
+        <!-- Icon -->
+        <div class="relative mb-3">
+          <div class="flex items-center justify-center w-12 h-12 sm:w-14 sm:h-14 rounded-xl bg-gradient-to-br from-emerald-500 to-emerald-700 shadow-lg group-hover:scale-110 transition-transform duration-300 animate-float">
+            <i class="fas fa-tv text-lg sm:text-xl text-white"></i>
+          </div>
+        </div>
+        
+        <!-- Content -->
+        <h3 class="text-base sm:text-lg font-bold mb-1 text-white group-hover:text-emerald-300 transition-colors duration-300">
+          Écran
+        </h3>
+        <p class="text-xs sm:text-sm text-slate-300 mb-2 flex-1">
+          Diffusion TV en direct
+        </p>
+        
+        <!-- Button -->
+        <div class="mt-2 px-4 py-1.5 bg-gradient-to-r from-emerald-600 to-emerald-700 rounded-lg text-xs sm:text-sm font-semibold text-white group-hover:from-emerald-500 group-hover:to-emerald-600 transition-all duration-300">
+          Ouvrir <i class="fas fa-arrow-up-right ml-1 text-xs"></i>
+        </div>
+        
+        <!-- Shortcut hint -->
+        <div class="mt-2 pt-2 border-t border-slate-700/50 w-full">
+          <div class="flex items-center justify-center text-xs text-slate-400">
+            <kbd class="px-1.5 py-0.5 bg-slate-700 rounded text-xs font-mono mr-1">Alt+S</kbd>
+            Raccourci clavier
+          </div>
+        </div>
+      </div>
+
+      <!-- Cashier Card -->
+      <div 
+        id="cashierCard"
+        class="group relative overflow-hidden rounded-xl p-4 sm:p-5 bg-gradient-to-br from-slate-800/70 to-slate-900/70 border border-slate-700/50 cursor-pointer transition-all duration-300 hover:border-emerald-500/50 shadow-lg hover:shadow-xl hover:shadow-emerald-900/20 flex flex-col items-center text-center h-full min-h-[180px] sm:min-h-[200px]"
+        onclick="openCashier()"
+        role="button"
+        tabindex="0"
+        onkeypress="handleKeyPress(event, openCashier)"
+      >
+        <!-- Background effect -->
+        <div class="absolute inset-0 bg-gradient-to-br from-emerald-500/5 via-transparent to-emerald-900/5 opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
+        
+        <!-- Icon -->
+        <div class="relative mb-3">
+          <div class="flex items-center justify-center w-12 h-12 sm:w-14 sm:h-14 rounded-xl bg-gradient-to-br from-emerald-500 to-emerald-700 shadow-lg group-hover:scale-110 transition-transform duration-300 animate-float">
+            <i class="fas fa-cash-register text-lg sm:text-xl text-white"></i>
+          </div>
+        </div>
+        
+        <!-- Content -->
+        <h3 class="text-base sm:text-lg font-bold mb-1 text-white group-hover:text-emerald-300 transition-colors duration-300">
+          Caissier
+        </h3>
+        <p class="text-xs sm:text-sm text-slate-300 mb-2 flex-1">
+          Gestion des mises
+        </p>
+        
+        <!-- Button -->
+        <div class="mt-2 px-4 py-1.5 bg-gradient-to-r from-emerald-600 to-emerald-700 rounded-lg text-xs sm:text-sm font-semibold text-white group-hover:from-emerald-500 group-hover:to-emerald-600 transition-all duration-300">
+          Ouvrir <i class="fas fa-arrow-up-right ml-1 text-xs"></i>
+        </div>
+        
+        <!-- Shortcut hint -->
+        <div class="mt-2 pt-2 border-t border-slate-700/50 w-full">
+          <div class="flex items-center justify-center text-xs text-slate-400">
+            <kbd class="px-1.5 py-0.5 bg-slate-700 rounded text-xs font-mono mr-1">Alt+C</kbd>
+            Raccourci clavier
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Info section compact -->
+    <div class="mt-4 sm:mt-6 text-center w-full max-w-2xl px-4">
+      <div class="inline-flex items-center px-4 py-2 rounded-lg bg-slate-800/30 border border-slate-700/50">
+        <i class="fas fa-info-circle text-emerald-400 mr-2 text-sm"></i>
+        <p class="text-xs sm:text-sm text-slate-300">
+          Chaque section s'ouvre dans une nouvelle fenêtre optimisée
+        </p>
+      </div>
+    </div>
+
+    <!-- Mobile user info -->
+    <div id="mobileUserInfo" class="mt-4 sm:hidden">
+      <div class="inline-flex items-center px-3 py-1.5 rounded-full bg-slate-800/50 border border-slate-700">
+        <i class="fas fa-user-circle text-emerald-400 mr-1.5 text-sm"></i>
+        <span id="mobileUserDisplay" class="text-xs text-slate-300">Chargement...</span>
+      </div>
+    </div>
+  </main>
+
+  <!-- Footer ultra compact -->
+  <footer class="flex-none py-2 border-t border-slate-800/50">
+    <div class="max-w-7xl mx-auto px-4">
+      <div class="flex items-center justify-between text-xs text-slate-500">
+        <div class="flex items-center">
+          <i class="fas fa-racing-helmet text-emerald-500 mr-1.5 text-xs"></i>
+          <span>Système Horse Racing v2.1</span>
+        </div>
+        <div class="text-xs text-slate-500">
+          <span id="timeDisplay" class="font-mono">00:00</span>
+        </div>
+      </div>
+    </div>
+  </footer>
+
+  <script>
+    // Configuration
+    const API_BASE = window.location.origin;
+    const CONFIG = {
+      apiBase: API_BASE,
+      environment: window.location.hostname === 'localhost' ? 'DEV' : 'PROD'
+    };
+
+    // Show error message
+    function showError(message) {
+      const container = document.getElementById('errorContainer');
+      container.innerHTML = `
+        <div class="animate-fadeIn p-3 rounded-lg bg-gradient-to-r from-red-500/10 to-red-600/10 border border-red-500/30">
+          <div class="flex items-center">
+            <i class="fas fa-exclamation-triangle text-red-400 mr-2 text-sm"></i>
+            <p class="text-sm text-red-300 flex-1">${message}</p>
+            <button onclick="this.parentElement.parentElement.remove()" class="text-red-400 hover:text-red-300 ml-2">
+              <i class="fas fa-times text-xs"></i>
+            </button>
+          </div>
+        </div>
+      `;
+    }
+
+    // Show success message
+    function showSuccess(message) {
+      const container = document.getElementById('errorContainer');
+      container.innerHTML = `
+        <div class="animate-fadeIn p-3 rounded-lg bg-gradient-to-r from-emerald-500/10 to-emerald-600/10 border border-emerald-500/30">
+          <div class="flex items-center">
+            <i class="fas fa-check-circle text-emerald-400 mr-2 text-sm"></i>
+            <p class="text-sm text-emerald-300 flex-1">${message}</p>
+            <button onclick="this.parentElement.parentElement.remove()" class="text-emerald-400 hover:text-emerald-300 ml-2">
+              <i class="fas fa-times text-xs"></i>
+            </button>
+          </div>
+        </div>
+      `;
+      
+      setTimeout(() => {
+        if (container.firstChild) {
+          container.firstChild.remove();
+        }
+      }, 3000);
+    }
+
+    // Handle keyboard navigation
+    function handleKeyPress(event, callback) {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        callback();
+      }
+    }
+
+    // Update time display
+    function updateTime() {
+      const now = new Date();
+      const timeString = now.toLocaleTimeString('fr-FR', { 
+        hour: '2-digit', 
+        minute: '2-digit',
+        hour12: false 
+      });
+      document.getElementById('timeDisplay').textContent = timeString;
+    }
+
+    // Get user info from localStorage or API
+    function initDashboard() {
+      const userDisplay = document.getElementById('userDisplay');
+      const mobileUserDisplay = document.getElementById('mobileUserDisplay');
+      const userRoleBadge = document.getElementById('userRole');
+      const environmentBadge = document.getElementById('environmentBadge');
+      
+      // Update environment badge
+      environmentBadge.textContent = CONFIG.environment;
+      environmentBadge.className = `px-2 py-1 rounded text-xs font-medium ${CONFIG.environment === 'PROD' ? 'bg-emerald-500/10 border border-emerald-500/30 text-emerald-400' : 'bg-amber-500/10 border border-amber-500/30 text-amber-400'}`;
+      
+      // Start time display
+      updateTime();
+      setInterval(updateTime, 60000);
+      
+      // Check if user is authenticated
+      const token = localStorage.getItem('authToken');
+      if (!token) {
+        window.location.href = '/login.html';
+        return;
+      }
+
+      // Try to get user info from localStorage
+      const userInfo = localStorage.getItem('userInfo');
+      if (userInfo) {
+        try {
+          const user = JSON.parse(userInfo);
+          const displayName = user.username || 'Utilisateur';
+          const shortName = displayName.length > 12 ? displayName.substring(0, 10) + '...' : displayName;
+          
+          userDisplay.textContent = shortName;
+          mobileUserDisplay.textContent = shortName;
+          
+          // Show role badge if available
+          if (user.role) {
+            const roleName = user.role.charAt(0).toUpperCase() + user.role.slice(1);
+            const shortRole = roleName.length > 12 ? roleName.substring(0, 10) + '...' : roleName;
+            userRoleBadge.innerHTML = `${shortRole}`;
+            userRoleBadge.style.display = 'block';
+          }
+        } catch (e) {
+          console.error('Error parsing user info:', e);
+          userDisplay.textContent = 'Utilisateur';
+          mobileUserDisplay.textContent = 'Utilisateur';
+        }
+      } else {
+        userDisplay.textContent = 'Utilisateur';
+        mobileUserDisplay.textContent = 'Utilisateur';
+      }
+
+      // Adjust layout based on screen size
+      adjustLayout();
+      
+      console.log(`[DASHBOARD] Initialisé: ${CONFIG.environment}`);
+    }
+
+    // Adjust layout for different screen sizes
+    function adjustLayout() {
+      const screenHeight = window.innerHeight;
+      const mainElement = document.querySelector('main');
+      
+      // Calculate optimal spacing
+      if (screenHeight < 600) {
+        // Very small screens
+        document.querySelector('header').classList.add('py-2');
+        mainElement.classList.add('p-2');
+        document.querySelectorAll('.min-h-\\[180px\\]').forEach(el => {
+          el.classList.remove('min-h-[180px]');
+          el.classList.add('min-h-[150px]');
+        });
+      } else if (screenHeight < 700) {
+        // Small screens
+        document.querySelector('header').classList.add('py-2.5');
+        mainElement.classList.add('p-3');
+      }
+    }
+
+    // Open screen in new window
+    function openScreen() {
+      try {
+        const width = Math.min(1920, window.screen.width);
+        const height = Math.min(1080, window.screen.height);
+        const left = (window.screen.width - width) / 2;
+        const top = (window.screen.height - height) / 2;
+        
+        const screenWindow = window.open(
+          `${CONFIG.apiBase}/screen`,
+          'screen_broadcast',
+          `width=${width},height=${height},left=${left},top=${top},resizable=yes,scrollbars=no,status=no,menubar=no,toolbar=no`
+        );
+        
+        if (!screenWindow) {
+          showError('Vérifiez le bloqueur de pop-ups');
+        } else {
+          showSuccess('Écran ouvert');
+        }
+      } catch (error) {
+        showError('Erreur: ' + error.message);
+      }
+    }
+
+    // Open cashier in new window
+    function openCashier() {
+      try {
+        const width = Math.min(1400, window.screen.width);
+        const height = Math.min(900, window.screen.height);
+        const left = (window.screen.width - width) / 2;
+        const top = (window.screen.height - height) / 2;
+        
+        const cashierWindow = window.open(
+          `${CONFIG.apiBase}/cashier`,
+          'cashier_interface',
+          `width=${width},height=${height},left=${left},top=${top},resizable=yes,scrollbars=yes,status=no,menubar=no,toolbar=no`
+        );
+        
+        if (!cashierWindow) {
+          showError('Vérifiez le bloqueur de pop-ups');
+        } else {
+          showSuccess('Caissier ouvert');
+        }
+      } catch (error) {
+        showError('Erreur: ' + error.message);
+      }
+    }
+
+    // Logout handler
+    document.getElementById('logoutBtn').addEventListener('click', async () => {
+      if (confirm('Se déconnecter ?')) {
+        try {
+          await fetch(`${CONFIG.apiBase}/api/v1/auth/logout`, { 
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${localStorage.getItem('authToken')}`
+            }
+          }).catch(() => {});
+          
+          localStorage.removeItem('authToken');
+          localStorage.removeItem('userInfo');
+          
+          showSuccess('Déconnexion...');
+          
+          setTimeout(() => {
+            window.location.href = '/login.html';
+          }, 800);
+        } catch (err) {
+          console.error('Logout error:', err);
+          window.location.href = '/login.html';
+        }
+      }
+    });
+
+    // Keyboard shortcuts
+    document.addEventListener('keydown', (e) => {
+      if (e.altKey && e.key.toLowerCase() === 's') {
+        e.preventDefault();
+        openScreen();
+      }
+      if (e.altKey && e.key.toLowerCase() === 'c') {
+        e.preventDefault();
+        openCashier();
+      }
+    });
+
+    // Card click effects
+    document.querySelectorAll('[id$="Card"]').forEach(card => {
+      card.addEventListener('click', function() {
+        this.style.animation = 'pulse 0.3s ease';
+        setTimeout(() => {
+          this.style.animation = '';
+        }, 300);
+      });
+    });
+
+    // Adjust layout on resize
+    window.addEventListener('resize', adjustLayout);
+
+    // Initialize dashboard
+    document.addEventListener('DOMContentLoaded', () => {
+      initDashboard();
+      // Initial time update
+      updateTime();
+    });
+
+    // Prevent any scrolling
+    document.body.addEventListener('wheel', (e) => {
+      if (e.target === document.body || e.target === document.documentElement) {
+        e.preventDefault();
+      }
+    }, { passive: false });
+
+    // Prevent touch scrolling
+    document.body.addEventListener('touchmove', (e) => {
+      if (e.target === document.body || e.target === document.documentElement) {
+        e.preventDefault();
+      }
+    }, { passive: false });
+  </script>
+</body>
+</html>

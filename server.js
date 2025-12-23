@@ -5,6 +5,7 @@ import cookieParser from "cookie-parser";
 import jwt from "jsonwebtoken";
 import path from "path";
 import { fileURLToPath } from "url";
+import helmet from "helmet";
 
 // Imports de nos modules
 import { gameState, startNewRound, wrap, restoreGameStateFromRedis } from "./game.js";
@@ -113,12 +114,37 @@ if (restored) {
 // =================================================================
 // ===           CONFIGURATION DU MIDDLEWARE                     ===
 // =================================================================
-app.use(cors({
-  origin: true,
+
+// 🔒 Sécurité: Headers HTTP de sécurité avec Helmet
+app.use(helmet({
+  contentSecurityPolicy: false, // Désactiver pour permettre les scripts inline si nécessaire
+  crossOriginEmbedderPolicy: false,
+  hsts: {
+    maxAge: 31536000, // 1 an
+    includeSubDomains: true,
+    preload: true
+  }
+}));
+
+// CORS configuration pour production
+const corsOptions = {
+  origin: (origin, callback) => {
+    // En production, accepter les origins spécifiques
+    const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(',') || ['http://localhost:8080', 'http://localhost:3000'];
+    
+    if (!origin || allowedOrigins.includes(origin) || NODE_ENV === 'development') {
+      callback(null, true);
+    } else {
+      console.warn(`[SECURITY] CORS blocked origin: ${origin}`);
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
   credentials: true, // Allow cookies
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']
-}));
+};
+
+app.use(cors(corsOptions));
 app.use(cookieParser());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -472,6 +498,19 @@ app.use("/api/v1/system/", systemRouter);
 app.use("/api/v1/stats/", statsRouter);
 
 // ✅ NOUVEAU: Routes d'administration (dashboard, contrôle serveur)
+// Ajouter un middleware de logging spécifique pour l'admin
+app.use("/api/v1/admin/", (req, res, next) => {
+  const timestamp = new Date().toISOString();
+  const method = req.method;
+  const path = req.path;
+  const user = req.user?.username || 'unknown';
+  const ip = req.ip || req.connection.remoteAddress;
+  
+  console.log(`[ADMIN] [${timestamp}] ${method} ${path} - User: ${user} - IP: ${ip}`);
+  
+  next();
+});
+
 app.use("/api/v1/admin/", adminRouter);
 
 // ✅ NOUVEAU: Audit middleware (enregistre automatiquement les actions)
