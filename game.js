@@ -149,29 +149,70 @@ export async function createNewRound(options = {}) {
         gameState.currentRound = newRound;
         console.log(`[ROUND-CREATE] ✅ Nouveau round #${newRoundId} en mémoire`);
 
-        // 4️⃣ PERSISTER EN BASE DE DONNÉES
+        // 4️⃣ PERSISTER EN BASE DE DONNÉES (TRANSACTION ATOMIQUE)
         try {
-            const roundNum = await getNextRoundNumber();
-            const insertRes = await pool.query(
-                `INSERT INTO rounds (round_id, round_number, status, created_at) 
-                 VALUES ($1, $2, 'waiting', CURRENT_TIMESTAMP) 
-                 ON CONFLICT (round_id) DO UPDATE SET updated_at = CURRENT_TIMESTAMP
-                 RETURNING round_id`,
-                [newRoundId, roundNum]
-            );
-            gameState.currentRound.persisted = true;
-            console.log(`[ROUND-CREATE] ✅ Round #${roundNum} (ID: ${newRoundId}) persisté en DB`);
+            const client = await pool.connect();
+            try {
+                await client.query('BEGIN');
+                
+                const roundNum = await getNextRoundNumber();
+                const insertRes = await client.query(
+                    `INSERT INTO rounds (round_id, round_number, status, created_at) 
+                     VALUES ($1, $2, 'waiting', CURRENT_TIMESTAMP) 
+                     ON CONFLICT (round_id) DO NOTHING
+                     RETURNING round_id`,
+                    [newRoundId, roundNum]
+                );
+                
+                // ✅ VÉRIFICATION: S'assurer que l'insertion a réussi
+                if (!insertRes.rows || !insertRes.rows[0]) {
+                    // Vérifier si le round existe déjà
+                    const existingRes = await client.query(
+                        `SELECT round_id, status FROM rounds WHERE round_id = $1`,
+                        [newRoundId]
+                    );
+                    if (existingRes.rows && existingRes.rows[0]) {
+                        const existingRound = existingRes.rows[0];
+                        console.warn(`[ROUND-CREATE] ⚠️ Round ${newRoundId} existe déjà avec status=${existingRound.status}`);
+                        // Si le round existe déjà, considérer comme persisté
+                        gameState.currentRound.persisted = true;
+                        await client.query('COMMIT');
+                        return newRoundId;
+                    } else {
+                        throw new Error(`Round ${newRoundId} insertion failed: no rows returned`);
+                    }
+                }
+                
+                await client.query('COMMIT');
+                gameState.currentRound.persisted = true;
+                console.log(`[ROUND-CREATE] ✅ Round #${roundNum} (ID: ${newRoundId}) persisté en DB`);
+            } catch (err) {
+                await client.query('ROLLBACK');
+                throw err;
+            } finally {
+                client.release();
+            }
         } catch (err) {
             console.error('[ROUND-CREATE] ❌ Erreur persistence DB:', err.message);
             gameState.currentRound.persisted = false;
+            // ✅ CRITIQUE: Ne pas initialiser Redis si la DB échoue
+            // ⚠️ Ne pas propager l'erreur pour permettre le broadcast et la configuration du timer
+            // Le round reste en mémoire mais non persisté, ce qui sera détecté lors de la création de tickets
+            console.warn('[ROUND-CREATE] ⚠️ Round créé en mémoire mais non persisté en DB - les tickets devront attendre');
         }
 
-        // 5️⃣ INITIALISER CACHE REDIS
-        try {
-            await dbStrategy.initRoundCache(newRoundId, gameState.currentRound);
-            console.log(`[ROUND-CREATE] ✅ Cache Redis initialisé pour round #${newRoundId}`);
-        } catch (err) {
-            console.error('[ROUND-CREATE] ❌ Erreur initialisation cache:', err.message);
+        // 5️⃣ INITIALISER CACHE REDIS (seulement si DB a réussi)
+        // ✅ CRITIQUE: Ne pas initialiser Redis si la DB a échoué
+        if (gameState.currentRound.persisted) {
+            try {
+                await dbStrategy.initRoundCache(newRoundId, gameState.currentRound);
+                console.log(`[ROUND-CREATE] ✅ Cache Redis initialisé pour round #${newRoundId}`);
+            } catch (err) {
+                console.error('[ROUND-CREATE] ❌ Erreur initialisation cache:', err.message);
+                // Ne pas bloquer si Redis échoue, mais logger l'erreur
+            }
+        } else {
+            console.warn(`[ROUND-CREATE] ⚠️ Redis non initialisé car round non persisté en DB`);
         }
 
         // 6️⃣ CONFIGURER LE TIMER POUR LE NOUVEAU ROUND

@@ -5,7 +5,7 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 const NODE_ENV = process.env.NODE_ENV || 'development';
-const REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379';
+const REDIS_URL = process.env.REDIS_URL || "rediss://:localhost:6379";
 const REDIS_TIMEOUT_MS = parseInt(process.env.REDIS_TIMEOUT_MS || '5000');
 const MAX_RECONNECT_ATTEMPTS = parseInt(process.env.REDIS_RECONNECT_MAX_ATTEMPTS || '5');
 
@@ -38,6 +38,8 @@ const MAX_DEV_RECONNECT_ATTEMPTS = 20;
 
 // ✅ Fonction de configuration d'URL Redis sécurisée avec différenciation dev/prod
 function getRedisConfig() {
+  const isSSL = REDIS_URL.startsWith('rediss://');
+  
   const config = {
     url: REDIS_URL,
     socket: {
@@ -90,6 +92,27 @@ function getRedisConfig() {
       }
     }
   };
+  
+  // ✅ CRITIQUE: Configuration SSL/TLS pour Redis Cloud (rediss://)
+  // node-redis v4 détecte automatiquement SSL depuis l'URL rediss://
+  // Mais il faut configurer les options TLS correctement pour Redis Cloud
+  if (isSSL) {
+    // ✅ Extraire le hostname pour SNI
+    const hostnameMatch = REDIS_URL.match(/@([^:]+)/);
+    const hostname = hostnameMatch ? hostnameMatch[1] : undefined;
+    
+    // ✅ Configuration TLS pour Redis Cloud
+    // node-redis v4 utilise socket.tls comme objet de configuration TLS
+    config.socket.tls = {
+      rejectUnauthorized: false, // ✅ Accepter les certificats auto-signés de Redis Cloud
+      servername: hostname, // ✅ SNI (Server Name Indication) pour Redis Cloud
+      // ✅ Options supplémentaires pour compatibilité Redis Cloud
+      minVersion: 'TLSv1.2',
+      maxVersion: 'TLSv1.3'
+    };
+    
+    console.log(`🔒 [REDIS] Configuration SSL/TLS activée pour Redis Cloud (hostname: ${hostname || 'N/A'})`);
+  }
   
   // ✅ PRODUCTION: Configuration supplémentaire pour la stabilité
   if (isProduction) {

@@ -1080,13 +1080,16 @@ export default function createReceiptsRouter(broadcast) {
 
       console.log("✅ Ticket ajouté ID :", receipt.id, `(cache: ${cacheResult ? 'OK' : 'FALLBACK'})`);
       (async () => {
-        // Attendre que le round soit créé en DB (avec retry)
-        const waitForRound = async (roundId, maxRetries = 50, delayMs = 100) => {
+        // ✅ AMÉLIORATION: Vérifier que le round est persisté AVANT de créer le ticket
+        const ensureRoundPersisted = async (roundId, maxRetries = 20, delayMs = 100) => {
           for (let i = 0; i < maxRetries; i++) {
             try {
-              const res = await pool.query("SELECT round_id FROM rounds WHERE round_id = $1 LIMIT 1", [roundId]);
+              const res = await pool.query(
+                "SELECT round_id, status FROM rounds WHERE round_id = $1 LIMIT 1",
+                [roundId]
+              );
               if (res.rows && res.rows[0]) {
-                console.log(`[DB] ✓ Round ${roundId} trouvé en DB après ${i * delayMs}ms`);
+                console.log(`[DB] ✓ Round ${roundId} trouvé en DB après ${i * delayMs}ms (status: ${res.rows[0].status})`);
                 return true;
               }
             } catch (err) {
@@ -1096,9 +1099,12 @@ export default function createReceiptsRouter(broadcast) {
               await new Promise(resolve => setTimeout(resolve, delayMs));
             }
           }
-          console.warn(`[DB] ⚠️ Round ${roundId} non trouvé après ${maxRetries * delayMs}ms`);
+          console.error(`[DB] ❌ Round ${roundId} non trouvé après ${maxRetries * delayMs}ms`);
           return false;
         };
+        
+        // ✅ Utiliser la nouvelle fonction avec nom plus explicite
+        const waitForRound = ensureRoundPersisted;
 
         // Vérifier que le round existe avant de persister le receipt
         const roundExists = await waitForRound(gameState.currentRound.id);
