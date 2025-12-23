@@ -730,9 +730,17 @@ httpServer.listen(PORT, async () => {
   // - Synchronisation toutes les 100ms pendant une course (pour timeInRace précis)
   // Cela permet aux clients de rester synchronisés même s'ils dérivent
   
-  // Timer pour synchronisation du timer d'attente (game_screen)
-  setInterval(() => {
+  // Timer pour synchronisation du timer d'attente (game_screen) + Auto-start de la course
+  setInterval(async () => {
     const now = Date.now();
+    
+    // ✅ LANCER AUTOMATIQUEMENT LA COURSE quand le timer expire
+    if (gameState.nextRoundStartTime && gameState.nextRoundStartTime <= now && !gameState.isRaceRunning) {
+      console.log(`🚀 [AUTO-START] Le timer a expiré! Lancement automatique de la course...`);
+      await startNewRound(broadcast, false);
+    }
+    
+    // Synchroniser le timer d'attente pour les clients
     if (gameState.nextRoundStartTime && gameState.nextRoundStartTime > now && !gameState.isRaceRunning) {
       const timeLeft = gameState.nextRoundStartTime - now;
       
