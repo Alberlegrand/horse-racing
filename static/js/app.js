@@ -109,12 +109,30 @@ class App {
 
         switch (pageId) {
             case 'dashboard':
+                // ✅ CORRECTION: Réinitialiser le cache lors de la navigation vers dashboard
+                if (this.dashboardRefreshTickets) {
+                    // Forcer le rafraîchissement si la fonction existe déjà
+                    setTimeout(() => {
+                        if (this.dashboardRefreshTickets) {
+                            this.dashboardRefreshTickets(true);
+                        }
+                    }, 100);
+                }
                 this.initDashboard();
                 break;
             case 'course-chevaux':
                 this.initCourseChevaux();
                 break;
             case 'my-bets':
+                // ✅ CORRECTION: Forcer le rafraîchissement lors de la navigation vers my-bets
+                // Si myBetsFetchMyBets existe déjà, forcer le rafraîchissement
+                if (this.myBetsFetchMyBets) {
+                    setTimeout(() => {
+                        if (this.myBetsFetchMyBets) {
+                            this.myBetsFetchMyBets(1);
+                        }
+                    }, 100);
+                }
                 this.initMyBets();
                 break;
             case 'betting':
@@ -678,9 +696,12 @@ class App {
         
         const refreshTickets = async (force = false) => {
             try {
-                // ✅ OPTIMISATION: Utiliser le cache si récent (évite requêtes répétées)
+                // ✅ CORRECTION: Toujours rafraîchir lors du chargement initial de la page (force = true)
+                // Le cache ne doit pas empêcher l'affichage des tickets lors de la navigation
                 const now = Date.now();
-                if (!force && ticketsCache.data && (now - ticketsCache.timestamp) < ticketsCache.ttl) {
+                const isInitialLoad = !ticketsCache.data || (now - ticketsCache.timestamp) > 5000; // Cache expiré après 5s
+                
+                if (!force && !isInitialLoad && ticketsCache.data && (now - ticketsCache.timestamp) < ticketsCache.ttl) {
                     const { tickets, stats, round } = ticketsCache.data;
                     updateTicketsTable(tickets);
                     if (round) updateStats(round, stats);
@@ -688,51 +709,77 @@ class App {
                     return;
                 }
                 
-                // ✅ OPTIMISATION: Un seul fetch (my-bets contient déjà les stats)
-                const res = await fetch('/api/v1/my-bets/?limit=50&page=1', { credentials: 'include' });
-                if (!res.ok) throw new Error(`HTTP ${res.status}`);
-                const data = await res.json();
-                const myBetsData = data?.data || {};
+                // ✅ CORRECTION: Le dashboard doit afficher SEULEMENT les tickets de l'utilisateur
+                // Utiliser /api/v1/my-bets/ comme source unique pour garantir l'isolation des données
                 
-                const tickets = myBetsData.tickets || [];
-                const stats = myBetsData.stats || {};
-                
-                // ✅ CORRECTION: Récupérer le round ID depuis les tickets ou le serveur
+                let tickets = [];
                 let roundId = this.currentRoundId;
-                // Si pas de round ID en mémoire, prendre depuis le premier ticket
-                if (!roundId && tickets.length > 0) {
-                    roundId = tickets[0]?.roundId || null;
-                    if (roundId) {
-                        this.currentRoundId = roundId; // Mettre à jour pour la prochaine fois
-                    }
-                }
-                // Si toujours pas de round ID, essayer de récupérer depuis l'API
-                if (!roundId) {
-                    try {
-                        const roundRes = await fetch('/api/v1/rounds/', { 
-                            method: 'POST',
-                            credentials: 'include',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ action: 'get' })
-                        });
-                        if (roundRes.ok) {
-                            const roundData = await roundRes.json();
-                            roundId = roundData?.data?.id || null;
-                            if (roundId) this.currentRoundId = roundId;
+                let round = null;
+                let stats = {};
+                
+                // ✅ Source unique: Récupérer les tickets de l'utilisateur depuis my-bets
+                try {
+                    const res = await fetch('/api/v1/my-bets/?limit=100&page=1', { 
+                        credentials: 'include',
+                        cache: force ? 'no-cache' : 'default'
+                    });
+                    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                    const data = await res.json();
+                    const myBetsData = data?.data || {};
+                    
+                    tickets = myBetsData.tickets || [];
+                    stats = myBetsData.stats || {};
+                    
+                    console.debug(`✅ [DASHBOARD] ${tickets.length} ticket(s) de l'utilisateur récupéré(s)`);
+                    
+                    // Récupérer le round ID depuis les tickets ou le serveur
+                    if (!roundId && tickets.length > 0) {
+                        roundId = tickets[0]?.roundId || null;
+                        if (roundId) {
+                            this.currentRoundId = roundId;
                         }
-                    } catch (err) {
-                        console.debug('Erreur récupération round ID:', err);
                     }
+                    
+                    // Si toujours pas de round ID, récupérer depuis l'API rounds pour l'affichage
+                    if (!roundId) {
+                        try {
+                            const roundRes = await fetch('/api/v1/rounds/', { 
+                                method: 'POST',
+                                credentials: 'include',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ action: 'get' }),
+                                cache: 'default'
+                            });
+                            if (roundRes.ok) {
+                                const roundData = await roundRes.json();
+                                roundId = roundData?.data?.id || null;
+                                if (roundId) {
+                                    this.currentRoundId = roundId;
+                                    round = { id: roundId, receipts: tickets.filter(t => t.roundId === roundId) };
+                                }
+                            }
+                        } catch (roundErr) {
+                            console.debug('⚠️ [DASHBOARD] Erreur récupération round ID (non bloquant):', roundErr.message);
+                        }
+                    } else {
+                        // Créer l'objet round avec les tickets filtrés par round ID
+                        round = { id: roundId, receipts: tickets.filter(t => t.roundId === roundId) };
+                    }
+                } catch (err) {
+                    console.error('❌ [DASHBOARD] Erreur récupération tickets utilisateur:', err);
+                    throw err;
                 }
                 
-                const round = roundId ? { id: roundId, receipts: tickets.filter(t => t.roundId === roundId) } : null;
-                
-                // Mettre à jour le cache
+                // ✅ CORRECTION: Mettre à jour le cache avec les données complètes
                 ticketsCache = { data: { tickets, stats, round }, timestamp: now, ttl: 2000 };
                 
+                // ✅ CORRECTION: Toujours mettre à jour le tableau, même si tickets est vide
+                // Cela garantit que les tickets sont toujours affichés correctement
                 updateTicketsTable(tickets);
                 if (round) updateStats(round, stats);
                 if (this.updateBettingButtonsState) this.updateBettingButtonsState();
+                
+                console.debug(`✅ [DASHBOARD] Tickets mis à jour: ${tickets.length} ticket(s) affiché(s)`);
             } catch (err) {
                 console.error('Erreur refreshTickets:', err);
                 this.showToast('Erreur de connexion à l\'API.', 'error');
@@ -983,8 +1030,8 @@ class App {
             }
         };
         
-        // Rafraîchir immédiatement
-        refreshTickets();
+        // ✅ CORRECTION: Rafraîchir immédiatement avec force=true pour éviter le cache lors de la navigation
+        refreshTickets(true);
         
         // Initialiser le round ID
         initRoundId();
@@ -1214,7 +1261,11 @@ class App {
                     filters.append('searchId', searchIdInput.value);
                 }
 
-                const response = await fetch(`${API_URL}?${filters.toString()}`);
+                // ✅ CORRECTION: Ajouter cache: 'no-cache' pour éviter le cache navigateur lors de la navigation
+                const response = await fetch(`${API_URL}?${filters.toString()}`, {
+                    cache: 'no-cache',
+                    credentials: 'include'
+                });
                 if (!response.ok) throw new Error('Erreur lors de la récupération des tickets');
 
                 const payload = await response.json();
@@ -1536,8 +1587,11 @@ class App {
         this.myBetsAddTicketToTable = addTicketToMyBetsTable; // ✅ NOUVEAU: Ajouter directement un ticket
         this.myBetsRemoveTicketFromTable = removeTicketFromMyBetsTable; // ✅ NOUVEAU: Supprimer directement un ticket
 
-        // Chargement initial
-        fetchMyBets(1);
+        // ✅ CORRECTION: Chargement initial avec cache-busting pour forcer le rafraîchissement
+        // Utiliser requestAnimationFrame pour s'assurer que le DOM est prêt
+        requestAnimationFrame(() => {
+            fetchMyBets(1);
+        });
 
         console.log('✅ Mes Paris initialisé avec WebSocket en temps réel');
     }
@@ -1813,55 +1867,90 @@ class App {
         // Les événements WebSocket sont déjà gérés par this.handleWebSocketMessage()
         // qui appelle refreshCashierDashboard() pour les événements pertinents
 
+        // ✅ NOUVEAU: Charger l'historique des gagnants
+        async function loadWinnersHistory() {
+            try {
+                const res = await fetch('/api/v1/winners/recent?limit=10');
+                if (!res.ok) {
+                    throw new Error(`HTTP ${res.status}`);
+                }
+                const json = await res.json();
+                const winners = json.data?.winners || [];
+                
+                const winnersContainer = document.getElementById('winnersHistory');
+                if (!winnersContainer) return;
+
+                if (winners.length === 0) {
+                    winnersContainer.innerHTML = '<div class="p-3 text-center text-slate-400 text-sm">Aucun gagnant enregistré</div>';
+                    return;
+                }
+
+                // Formater la date
+                function formatDate(dateString) {
+                    if (!dateString) return 'N/A';
+                    const date = new Date(dateString);
+                    return date.toLocaleDateString('fr-FR', { 
+                        day: '2-digit', 
+                        month: '2-digit', 
+                        year: 'numeric',
+                        hour: '2-digit',
+                        minute: '2-digit'
+                    });
+                }
+
+                winnersContainer.innerHTML = winners.map((winner, index) => {
+                    const prize = parseFloat(winner.prize || 0).toFixed(2);
+                    return `
+                        <div class="bg-slate-800/50 rounded-lg p-3 border border-slate-600/50 hover:border-slate-500 transition-colors">
+                            <div class="flex items-center justify-between">
+                                <div class="flex items-center gap-3">
+                                    <div class="w-10 h-10 rounded-full bg-gradient-to-br from-yellow-500/20 to-yellow-600/20 flex items-center justify-center border border-yellow-500/30">
+                                        <span class="text-yellow-400 font-bold text-sm">#${index + 1}</span>
+                                    </div>
+                                    <div>
+                                        <div class="font-semibold text-white">
+                                            <span class="text-yellow-400">№${winner.number}</span> ${winner.name || 'N/A'}
+                                        </div>
+                                        <div class="text-xs text-slate-400">
+                                            Round #${winner.id || 'N/A'} • ${formatDate(winner.created_at)}
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="text-right">
+                                    <div class="text-lg font-bold text-green-400">${prize} HTG</div>
+                                    <div class="text-xs text-slate-500">Gain total</div>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+
+                console.log(`✅ [WINNERS-HISTORY] ${winners.length} gagnants chargés`);
+            } catch (err) {
+                console.error('❌ [WINNERS-HISTORY] Erreur lors du chargement:', err);
+                const winnersContainer = document.getElementById('winnersHistory');
+                if (winnersContainer) {
+                    winnersContainer.innerHTML = '<div class="p-3 text-center text-red-400 text-sm">Erreur lors du chargement des gagnants</div>';
+                }
+            }
+        }
+
+        // Charger l'historique au démarrage
+        loadWinnersHistory();
+
         // event listeners UI
         const refreshBtn = document.getElementById('refreshCashierBtn');
-        if (refreshBtn) refreshBtn.addEventListener('click', refreshCashierDashboard);
+        if (refreshBtn) refreshBtn.addEventListener('click', () => {
+            refreshCashierDashboard();
+            loadWinnersHistory(); // Recharger aussi l'historique des gagnants
+        });
         const validateBtn = document.getElementById('validateBalanceBtn');
         if (validateBtn) validateBtn.addEventListener('click', () => { alert('✓ Réconciliation validée. Nouvelle caisse: ' + (document.getElementById('physicalBalance')?.value || '0') + ' HTG'); document.getElementById('physicalBalance').value = ''; refreshCashierDashboard(); });
         const physical = document.getElementById('physicalBalance'); if (physical) physical.addEventListener('input', () => { const v = parseFloat(physical.value)||0; const discrepancy = v - state.currentBalance; const alertEl = document.getElementById('discrepancyAlert'); if (Math.abs(discrepancy) > 0.01) { document.getElementById('discrepancyAmount').textContent = (discrepancy>0?'+':'')+discrepancy.toFixed(2)+' HTG'; alertEl.classList.remove('hidden'); } else { alertEl.classList.add('hidden'); } });
 
-        // Handlers pour opérations caisse
-        const openDrawerBtn = document.getElementById('openDrawerBtn');
-        if (openDrawerBtn) openDrawerBtn.addEventListener('click', () => { 
-            alert('🔓 Tiroir ouvert - Montant disponible: ' + state.currentBalance.toFixed(2) + ' HTG'); 
-        });
-        
-        const closeDrawerBtn = document.getElementById('closeDrawerBtn');
-        if (closeDrawerBtn) closeDrawerBtn.addEventListener('click', () => { 
-            alert('🔒 Caisse fermée - Solde: ' + state.currentBalance.toFixed(2) + ' HTG'); 
-        });
-
-        const depositBtn = document.getElementById('depositBtn');
-        if (depositBtn) depositBtn.addEventListener('click', () => {
-            const amount = prompt('💰 Montant du dépôt en banque (HTG):', state.currentBalance.toFixed(2));
-            if (amount && !isNaN(parseFloat(amount)) && parseFloat(amount) > 0) {
-                fetch('/api/v1/money/payout', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ amount: parseFloat(amount), reason: 'Dépôt en banque' })
-                }).then(r => r.json())
-                  .then(data => {
-                    alert(`✅ Dépôt de ${amount} HTG enregistré`);
-                    refreshCashierDashboard();
-                  }).catch(err => alert('❌ Erreur: ' + err.message));
-            }
-        });
-
-        const withdrawalBtn = document.getElementById('withdrawalBtn');
-        if (withdrawalBtn) withdrawalBtn.addEventListener('click', () => {
-            const amount = prompt('💸 Montant du retrait (HTG):', (state.currentBalance / 2).toFixed(2));
-            if (amount && !isNaN(parseFloat(amount)) && parseFloat(amount) > 0) {
-                fetch('/api/v1/money/payout', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ amount: parseFloat(amount), reason: 'Retrait/Remise' })
-                }).then(r => r.json())
-                  .then(data => {
-                    alert(`✅ Retrait de ${amount} HTG enregistré`);
-                    refreshCashierDashboard();
-                  }).catch(err => alert('❌ Erreur: ' + err.message));
-            }
-        });
+        // ✅ SUPPRIMÉ: Handlers pour opérations caisse (section remplacée par historique des gagnants)
+        // Les boutons "Ouvrir le tiroir", "Fermer la caisse", "Dépôt en banque", "Retrait/Remise" 
+        // ont été remplacés par l'historique des gagnants des 10 dernières courses dans account.html
 
         // ✅ Exposer refreshCashierDashboard pour les handlers WebSocket
         this.refreshCashierDashboard = refreshCashierDashboard;

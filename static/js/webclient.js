@@ -103,6 +103,16 @@ WebClient.prototype._activateKeepAlive = function (keepAliveUrl, keepAliveTick, 
 
 // ✅ Nouvelle fonction: Effectuer un check keepalive avec retry
 WebClient.prototype._performKeepAliveCheck = function (keepAliveUrl, keepAliveTick, keepAliveTimeout) {
+    // ✅ CORRECTION: Initialiser _keepAliveState s'il n'existe pas
+    if (!this._keepAliveState) {
+        this._keepAliveState = {
+            consecutiveFailures: 0,
+            maxRetries: 2,
+            lastSuccessTime: Date.now(),
+            serverHealthStatus: 'healthy'
+        };
+    }
+    
     const maxRetries = this._keepAliveState.maxRetries;
     let attempt = 0;
 
@@ -148,6 +158,15 @@ WebClient.prototype._performKeepAliveCheck = function (keepAliveUrl, keepAliveTi
             }, this),
             
             error: $.proxy(function (xhr, status, error) {
+                // ✅ CORRECTION: Vérifier que _keepAliveState existe avant de l'utiliser
+                if (!this._keepAliveState) {
+                    this._keepAliveState = {
+                        consecutiveFailures: 0,
+                        maxRetries: 2,
+                        lastSuccessTime: Date.now(),
+                        serverHealthStatus: 'healthy'
+                    };
+                }
                 this._keepAliveState.consecutiveFailures++;
                 
                 // Log les erreurs
@@ -165,11 +184,12 @@ WebClient.prototype._performKeepAliveCheck = function (keepAliveUrl, keepAliveTi
                     console.error('[keepalive] All ' + (maxRetries + 1) + ' attempts failed. Server may be unreachable.');
                     
                     // Marquer comme problématique mais ne pas déconnecter immédiatement
-                    if (this._keepAliveState.consecutiveFailures > 5) {
+                    if (this._keepAliveState && this._keepAliveState.consecutiveFailures > 5) {
                         console.error('[keepalive] Too many consecutive failures. Triggering reload.');
                         // Attendre 5s avant de recharger (laisser une chance à la connexion)
+                        const self = this; // ✅ CORRECTION: Sauvegarder la référence à this
                         setTimeout(function() {
-                            if (this._keepAliveState.consecutiveFailures > 5) {
+                            if (self._keepAliveState && self._keepAliveState.consecutiveFailures > 5) {
                                 window.location.reload();
                             }
                         }, 5000);

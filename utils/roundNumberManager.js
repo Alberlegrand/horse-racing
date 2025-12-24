@@ -70,7 +70,8 @@ let currentRoundId = 10000000;
  * ✅ THREAD-SAFE: Utilise la séquence PostgreSQL rounds_round_id_seq
  * ✅ PERSISTENT: Survit aux redémarrages du serveur
  * ✅ UNIQUE: Jamais de doublon grâce à la séquence PostgreSQL
- * @returns {number} The next unique round ID (8-digit starting from 10000000)
+ * ✅ FORMAT: Retourne toujours une chaîne de 8 chiffres avec zéro-padding (ex: "00000000")
+ * @returns {string} The next unique round ID formaté sur 8 chiffres (ex: "00000000", "00000001", ...)
  */
 export async function getNextRoundId() {
     try {
@@ -79,8 +80,12 @@ export async function getNextRoundId() {
         );
         const nextId = result.rows[0].next_id;
         currentRoundId = nextId; // ✅ Synchroniser le compteur mémoire
-        console.log(`[ROUND-ID] Next round ID from DB: ${nextId}`);
-        return nextId;
+        
+        // ✅ FORMAT: Toujours 8 chiffres avec zéro-padding, même si le nombre dépasse 99999999
+        // Utiliser modulo 100000000 pour garder dans la plage 0-99999999
+        const formattedId = String(nextId % 100000000).padStart(8, '0');
+        console.log(`[ROUND-ID] Next round ID from DB: ${nextId} -> formaté: ${formattedId}`);
+        return formattedId;
     } catch (err) {
         console.error('[ROUND-ID] Error fetching from DB sequence:', err.message);
         // ✅ AMÉLIORATION: Essayer de récupérer le MAX depuis la DB avant fallback
@@ -89,14 +94,18 @@ export async function getNextRoundId() {
                 `SELECT MAX(round_id) as max_id FROM rounds`
             );
             const maxId = maxResult.rows[0].max_id || 10000000;
-            currentRoundId = maxId + 1;
-            console.warn(`[ROUND-ID] Fallback avec MAX de DB: ${currentRoundId} (séquence indisponible)`);
-            return currentRoundId;
+            // Convertir maxId en nombre si c'est une chaîne
+            const maxIdNum = typeof maxId === 'string' ? parseInt(maxId, 10) : maxId;
+            currentRoundId = maxIdNum + 1;
+            const formattedId = String(currentRoundId % 100000000).padStart(8, '0');
+            console.warn(`[ROUND-ID] Fallback avec MAX de DB: ${currentRoundId} -> formaté: ${formattedId} (séquence indisponible)`);
+            return formattedId;
         } catch (fallbackErr) {
             // Dernier recours: incrémenter depuis mémoire
             currentRoundId++;
-            console.warn(`[ROUND-ID] Fallback à mémoire: ${currentRoundId} (DB indisponible)`);
-            return currentRoundId;
+            const formattedId = String(currentRoundId % 100000000).padStart(8, '0');
+            console.warn(`[ROUND-ID] Fallback à mémoire: ${currentRoundId} -> formaté: ${formattedId} (DB indisponible)`);
+            return formattedId;
         }
     }
 }
@@ -112,24 +121,34 @@ export async function initRoundIdManager() {
         const result = await pool.query(
             `SELECT MAX(round_id) as max_id FROM rounds`
         );
-        const maxId = result.rows[0].max_id || 10000000;
+        let maxId = result.rows[0].max_id || 10000000;
+        
+        // ✅ Convertir en nombre si c'est une chaîne (pour compatibilité)
+        if (typeof maxId === 'string') {
+            maxId = parseInt(maxId, 10) || 10000000;
+        }
         
         // 2. ✅ CRITIQUE: Synchroniser la séquence PostgreSQL
         // Si maxId = 10000005, la séquence doit être à 10000006 (prochaine valeur)
-        const nextId = maxId >= 10000000 ? maxId + 1 : 10000000;
+        // Utiliser modulo pour éviter les dépassements
+        const nextId = maxId >= 10000000 ? (maxId + 1) % 100000000 : 10000000;
         try {
             await pool.query(
                 `SELECT setval('rounds_round_id_seq', $1, false)`,
                 [nextId]
             );
-            console.log(`[ROUND-ID] ✅ Séquence synchronisée: ${nextId} (MAX en DB: ${maxId})`);
+            const formattedMaxId = String(maxId % 100000000).padStart(8, '0');
+            const formattedNextId = String(nextId).padStart(8, '0');
+            console.log(`[ROUND-ID] ✅ Séquence synchronisée: ${formattedNextId} (MAX en DB: ${formattedMaxId})`);
         } catch (seqErr) {
             console.warn(`[ROUND-ID] ⚠️ Impossible de synchroniser la séquence: ${seqErr.message}`);
             // Continuer même si la synchronisation échoue
         }
         
         currentRoundId = maxId;
-        console.log(`[ROUND-ID] Initialized from DB: ${currentRoundId}, next ID will be: ${nextId}`);
+        const formattedCurrentId = String(currentRoundId % 100000000).padStart(8, '0');
+        const formattedNextId = String(nextId).padStart(8, '0');
+        console.log(`[ROUND-ID] Initialized from DB: ${formattedCurrentId}, next ID will be: ${formattedNextId}`);
     } catch (err) {
         console.error('[ROUND-ID] Error initializing from DB:', err.message);
         currentRoundId = 10000000;
@@ -145,7 +164,30 @@ export function resetRoundId() {
 
 /**
  * Get current round ID without incrementing
+ * @returns {string} Le round ID actuel formaté sur 8 chiffres
  */
 export function getCurrentRoundId() {
-    return currentRoundId;
+    return String(currentRoundId % 100000000).padStart(8, '0');
+}
+
+/**
+ * Convertit un round_id formaté (string) en nombre pour les requêtes de base de données
+ * @param {string|number} roundId - Le round ID (peut être string formaté ou number)
+ * @returns {number} Le round ID converti en nombre pour la DB
+ */
+export function roundIdToDbFormat(roundId) {
+    if (typeof roundId === 'string') {
+        return parseInt(roundId, 10);
+    }
+    return roundId;
+}
+
+/**
+ * Formate un round_id (number ou string) en chaîne de 8 chiffres avec zéro-padding
+ * @param {string|number} roundId - Le round ID à formater
+ * @returns {string} Le round ID formaté sur 8 chiffres (ex: "00000000")
+ */
+export function formatRoundId(roundId) {
+    const numId = typeof roundId === 'string' ? parseInt(roundId, 10) : roundId;
+    return String(numId % 100000000).padStart(8, '0');
 }

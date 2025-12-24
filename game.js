@@ -3,7 +3,7 @@
 // Importer ChaCha20 RNG - cryptographiquement sécurisé pour les jeux d'argent
 import { chacha20Random, chacha20RandomInt, chacha20Shuffle, initChaCha20 } from './chacha20.js';
 import { pool } from './config/db.js';
-import { getNextRoundNumber, getNextRoundId, initRoundIdManager } from './utils/roundNumberManager.js';
+import { getNextRoundNumber, getNextRoundId, initRoundIdManager, formatRoundId } from './utils/roundNumberManager.js';
 import { cacheSet, cacheGet, cacheDelPattern } from './config/redis.js';
 import dbStrategy from './config/db-strategy.js';
 import { ROUND_WAIT_DURATION_MS } from './config/app.config.js';
@@ -148,6 +148,7 @@ export async function createNewRound(options = {}) {
 
         gameState.currentRound = newRound;
         console.log(`[ROUND-CREATE] ✅ Nouveau round #${newRoundId} en mémoire`);
+        console.log(`[ROUND-CREATE] 🔍 Debug: round.id type=${typeof newRoundId}, value="${newRoundId}", truthy=${!!newRoundId}`);
 
         // 4️⃣ PERSISTER EN BASE DE DONNÉES (TRANSACTION ATOMIQUE)
         console.log(`[ROUND-CREATE] 🔄 Début persistance round ${newRoundId} en DB...`);
@@ -158,12 +159,15 @@ export async function createNewRound(options = {}) {
                 console.log(`[ROUND-CREATE] 🔄 Transaction BEGIN pour round ${newRoundId}`);
                 
                 const roundNum = await getNextRoundNumber();
+                // ✅ CONVERSION: Convertir le round_id formaté (string) en nombre pour l'insertion DB
+                // Le round_id est stocké comme BIGINT en DB mais formaté comme string dans le code
+                const roundIdForDb = typeof newRoundId === 'string' ? parseInt(newRoundId, 10) : newRoundId;
                 const insertRes = await client.query(
                     `INSERT INTO rounds (round_id, round_number, status, created_at) 
                      VALUES ($1, $2, 'waiting', CURRENT_TIMESTAMP) 
                      ON CONFLICT (round_id) DO NOTHING
                      RETURNING round_id`,
-                    [newRoundId, roundNum]
+                    [roundIdForDb, roundNum]
                 );
                 
                 // ✅ VÉRIFICATION: S'assurer que l'insertion a réussi
@@ -173,7 +177,7 @@ export async function createNewRound(options = {}) {
                     // Vérifier si le round existe déjà (dans la même transaction)
                     const existingRes = await client.query(
                         `SELECT round_id, status FROM rounds WHERE round_id = $1`,
-                        [newRoundId]
+                        [roundIdForDb]
                     );
                     if (existingRes.rows && existingRes.rows[0]) {
                         const existingRound = existingRes.rows[0];
@@ -185,7 +189,7 @@ export async function createNewRound(options = {}) {
                         await new Promise(resolve => setTimeout(resolve, 100)); // Délai pour la visibilité du commit
                         const verifyRes = await pool.query(
                             `SELECT round_id FROM rounds WHERE round_id = $1`,
-                            [newRoundId]
+                            [roundIdForDb]
                         );
                         if (!verifyRes.rows || !verifyRes.rows[0]) {
                             console.error(`[ROUND-CREATE] ❌ Round ${newRoundId} non visible après commit!`);
@@ -215,7 +219,7 @@ export async function createNewRound(options = {}) {
                     try {
                         const verifyRes = await pool.query(
                             `SELECT round_id, status FROM rounds WHERE round_id = $1`,
-                            [newRoundId]
+                            [roundIdForDb]
                         );
                         if (verifyRes.rows && verifyRes.rows[0]) {
                             console.log(`[ROUND-CREATE] ✅ Round ${newRoundId} vérifié et visible en DB (attempt ${verifyAttempt + 1}, status: ${verifyRes.rows[0].status})`);
@@ -378,10 +382,26 @@ export async function restoreGameStateFromRedis() {
             gameState.raceEndTime = savedState.raceEndTime;
             gameState.isRaceRunning = savedState.isRaceRunning;
             
+            // ✅ CRITIQUE: Formater le round_id du currentRound s'il existe
+            if (gameState.currentRound && gameState.currentRound.id) {
+                gameState.currentRound.id = formatRoundId(gameState.currentRound.id);
+                console.log(`[CACHE] Round ID formaté: ${gameState.currentRound.id}`);
+            }
+            
+            // ✅ CRITIQUE: Formater les round_id dans gameHistory
+            if (Array.isArray(gameState.gameHistory)) {
+                gameState.gameHistory = gameState.gameHistory.map(round => {
+                    if (round && round.id) {
+                        round.id = formatRoundId(round.id);
+                    }
+                    return round;
+                });
+            }
+            
             // ✅ CRITIQUE: Réinitialiser TOUS les locks au redémarrage
             // Les locks ne doivent JAMAIS être persistés en Redis
             gameState.operationLock = false;
-            console.log(`✅ [CACHE] GameState restauré depuis Redis (locks réinitialisés)`);
+            console.log(`✅ [CACHE] GameState restauré depuis Redis (locks réinitialisés, round IDs formatés)`);
             return true;
         }
         return false;

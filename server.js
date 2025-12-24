@@ -21,6 +21,7 @@ import statsRouter from "./routes/stats.js";
 import accountsRouter from "./routes/accounts.js";
 import systemRouter from "./routes/system.js";
 import adminRouter from "./routes/admin.js";
+import winnersRouter from "./routes/winners.js";
 import { SERVER_WEBSOCKET_CONFIG, logWebSocketConfig } from "./config/websocket.js";
 import { logKeepaliveConfig, validateConfig } from "./config/keepalive.config.js";
 import { 
@@ -34,7 +35,7 @@ import {
 import { initChaCha20 } from "./chacha20.js";
 
 // Import base de données
-import { initializeDatabase, pool } from "./config/db.js";
+import { initializeDatabase, pool, repairDatabase } from "./config/db.js";
 
 // Import Redis pour cache et sessions
 import { initRedis, closeRedis, redisClient, getRedisStatus, clearAllCaches } from "./config/redis.js";
@@ -104,7 +105,21 @@ if (NODE_ENV === 'development') {
 try {
   const dbInitialized = await initializeDatabase();
   if (!dbInitialized) {
-    console.warn("⚠️ [STARTUP] Base de données non initialisée, le serveur continuera avec des fonctionnalités limitées");
+    console.warn("⚠️ [STARTUP] Base de données non initialisée, tentative de réparation...");
+    
+    // ✅ NOUVEAU: Essayer de réparer la base de données si l'initialisation a échoué
+    try {
+      const repaired = await repairDatabase();
+      if (repaired) {
+        console.log("✅ [STARTUP] Base de données réparée avec succès");
+      } else {
+        console.error("❌ [STARTUP] Impossible de réparer la base de données");
+        console.warn("   Le serveur continuera avec des fonctionnalités limitées");
+      }
+    } catch (repairErr) {
+      console.error("❌ [STARTUP] Erreur lors de la réparation:", repairErr.message);
+      console.warn("   Le serveur continuera avec des fonctionnalités limitées");
+    }
   }
 } catch (dbInitErr) {
   console.error("❌ [STARTUP] Erreur lors de l'initialisation de la base de données:", dbInitErr.message);
@@ -523,6 +538,9 @@ app.use("/api/v1/accounts/", verifyToken, accountsRouter);
 // ✅ NOUVEAU: Routes de configuration système
 app.use("/api/v1/system/", systemRouter);
 
+// ✅ NOUVEAU: Routes des gagnants (public)
+app.use("/api/v1/winners/", winnersRouter);
+
 // ✅ NOUVEAU: Stats & Audit routes (PostgreSQL + Redis strategy)
 app.use("/api/v1/stats/", statsRouter);
 
@@ -615,6 +633,7 @@ async function initializeGameWithRetry(maxAttempts = 3) {
       
       if (gameState.currentRound && gameState.currentRound.id) {
         console.log(`✅ [STARTUP] Round existant trouvé (ID: ${gameState.currentRound.id}), vérification des données...`);
+        console.log(`🔍 [STARTUP] Debug: round.id type=${typeof gameState.currentRound.id}, value="${gameState.currentRound.id}", truthy=${!!gameState.currentRound.id}`);
         
         // ✅ CORRECTION #2: Vérifier que le timer est configuré ET valide (pas expiré)
         let timerValid = false;

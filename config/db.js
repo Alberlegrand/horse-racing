@@ -57,6 +57,8 @@ const poolConfig = {
   connectionTimeoutMillis: 10000, // Timeout de connexion de 10s
   // ✅ NOUVEAU: Retry automatique pour les connexions perdues
   allowExitOnIdle: false, // Ne pas fermer le pool automatiquement
+  // ✅ CORRECTION: Timeout pour les requêtes longues (création de tables)
+  query_timeout: 60000, // 60 secondes pour les requêtes de création de tables
 };
 
 export const pool = new Pool(poolConfig);
@@ -158,10 +160,59 @@ export const initializeDatabase = async () => {
     try {
       await createTables();
       console.log("✅ Initialisation de la base de données réussie");
+      
+      // ✅ CORRECTION: Vérifier que les tables critiques existent vraiment
+      const criticalTables = ['users', 'participants', 'rounds', 'receipts', 'bets'];
+      const missingTables = [];
+      
+      for (const tableName of criticalTables) {
+        try {
+          const checkRes = await pool.query(
+            `SELECT EXISTS (
+              SELECT FROM information_schema.tables 
+              WHERE table_schema = 'public' 
+              AND table_name = $1
+            )`,
+            [tableName]
+          );
+          
+          if (!checkRes.rows[0].exists) {
+            missingTables.push(tableName);
+            console.error(`❌ [DB-INIT] Table critique manquante: ${tableName}`);
+          } else {
+            console.log(`✅ [DB-INIT] Table '${tableName}' vérifiée`);
+          }
+        } catch (checkErr) {
+          console.warn(`⚠️ [DB-INIT] Impossible de vérifier la table '${tableName}':`, checkErr.message);
+        }
+      }
+      
+      if (missingTables.length > 0) {
+        console.error(`❌ [DB-INIT] ${missingTables.length} table(s) critique(s) manquante(s): ${missingTables.join(', ')}`);
+        console.error("   Le serveur continuera mais certaines fonctionnalités seront indisponibles");
+        console.error("   Solution: Redémarrer le serveur pour réessayer la création des tables");
+        return false;
+      }
+      
     } catch (createErr) {
       console.error("❌ [DB-INIT] Erreur lors de la création des tables:", createErr.message);
+      console.error("   Stack:", createErr.stack);
       // Ne pas faire crash - peut-être que les tables existent déjà
       console.warn("   Tentative de continuer avec les tables existantes...");
+      
+      // Vérifier si les tables existent quand même
+      try {
+        const checkRes = await pool.query("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public'");
+        const tableCount = parseInt(checkRes.rows[0].count || 0, 10);
+        console.log(`   Nombre de tables trouvées: ${tableCount}`);
+        
+        if (tableCount === 0) {
+          console.error("   ❌ Aucune table trouvée - la création a échoué complètement");
+          return false;
+        }
+      } catch (checkErr) {
+        console.warn("   ⚠️ Impossible de vérifier les tables:", checkErr.message);
+      }
     }
     
     // Verify participants were seeded (avec gestion d'erreur)
@@ -253,7 +304,9 @@ const dropTablesIfExist = async () => {
 const createTables = async () => {
   let client;
   try {
+    console.log("📋 [DB-CREATE] Acquisition d'une connexion...");
     client = await pool.connect();
+    console.log("✅ [DB-CREATE] Connexion acquise");
   } catch (connectErr) {
     console.error("❌ [DB-CREATE] Impossible d'acquérir une connexion:", connectErr.message);
     throw connectErr;
@@ -261,12 +314,15 @@ const createTables = async () => {
 
   try {
     console.log("📋 Création des tables...");
+    console.log("   [1/10] Début de la transaction...");
     await client.query("BEGIN");
+    console.log("   [2/10] Transaction démarrée");
 
     // ==========================================
     // === UTILISATEURS & CAISSIERS ===
     // ==========================================
 
+    console.log("   [3/10] Création table 'users'...");
     await client.query(`
       CREATE TABLE IF NOT EXISTS users (
         user_id SERIAL PRIMARY KEY,
@@ -282,6 +338,7 @@ const createTables = async () => {
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
     `);
+    console.log("   ✓ Table 'users' créée");
 
     // Profils d'utilisateurs
     await client.query(`
@@ -795,6 +852,19 @@ const createTables = async () => {
         console.warn("⚠️ [DB-CREATE] Erreur lors de la libération du client:", releaseErr.message);
       }
     }
+  }
+};
+
+// ✅ NOUVEAU: Fonction de réparation pour créer les tables manuellement
+export const repairDatabase = async () => {
+  console.log("🔧 [DB-REPAIR] Démarrage de la réparation de la base de données...");
+  try {
+    await createTables();
+    console.log("✅ [DB-REPAIR] Tables créées avec succès");
+    return true;
+  } catch (err) {
+    console.error("❌ [DB-REPAIR] Erreur lors de la réparation:", err.message);
+    return false;
   }
 };
 
