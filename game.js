@@ -152,6 +152,7 @@ export async function createNewRound(options = {}) {
 
         // 4️⃣ PERSISTER EN BASE DE DONNÉES (TRANSACTION ATOMIQUE)
         console.log(`[ROUND-CREATE] 🔄 Début persistance round ${newRoundId} en DB...`);
+        let shouldReturnEarly = false; // Flag pour retour anticipé après le finally
         try {
             const client = await pool.connect();
             try {
@@ -185,7 +186,11 @@ export async function createNewRound(options = {}) {
                         // Si le round existe déjà, considérer comme persisté
                         gameState.currentRound.persisted = true;
                         await client.query('COMMIT');
+                        // ✅ CRITIQUE: Ne pas libérer le client ici - le bloc finally le fera
+                        // Libérer ici causerait un double release
+                        
                         // ✅ VÉRIFICATION POST-COMMIT: S'assurer que le round est visible
+                        // Utiliser le pool global (nouvelle connexion) pour vérifier la visibilité
                         await new Promise(resolve => setTimeout(resolve, 100)); // Délai pour la visibilité du commit
                         const verifyRes = await pool.query(
                             `SELECT round_id FROM rounds WHERE round_id = $1`,
@@ -197,54 +202,77 @@ export async function createNewRound(options = {}) {
                         } else {
                             console.log(`[ROUND-CREATE] ✅ Round ${newRoundId} vérifié et visible en DB`);
                         }
-                        return newRoundId;
+                        // ✅ CRITIQUE: Marquer pour retour anticipé après le finally
+                        shouldReturnEarly = true;
                     } else {
                         // Round n'existe pas et insertion a échoué - erreur critique
                         throw new Error(`Round ${newRoundId} insertion failed: no rows returned and round does not exist`);
                     }
-                }
-                
-                await client.query('COMMIT');
-                console.log(`[ROUND-CREATE] ✅ Round #${roundNum} (ID: ${newRoundId}) commité en DB`);
-                
-                // Libérer le client AVANT la vérification (utiliser le pool global)
-                client.release();
-                
-                // ✅ VÉRIFICATION POST-COMMIT: S'assurer que le round est visible immédiatement
-                // Utiliser le pool global (nouvelle connexion) pour vérifier la visibilité
-                await new Promise(resolve => setTimeout(resolve, 100)); // Délai pour la visibilité du commit
-                
-                let verified = false;
-                for (let verifyAttempt = 0; verifyAttempt < 10; verifyAttempt++) {
-                    try {
-                        const verifyRes = await pool.query(
-                            `SELECT round_id, status FROM rounds WHERE round_id = $1`,
-                            [roundIdForDb]
-                        );
-                        if (verifyRes.rows && verifyRes.rows[0]) {
-                            console.log(`[ROUND-CREATE] ✅ Round ${newRoundId} vérifié et visible en DB (attempt ${verifyAttempt + 1}, status: ${verifyRes.rows[0].status})`);
-                            verified = true;
-                            gameState.currentRound.persisted = true;
-                            break;
+                } else {
+                    // Insertion réussie, continuer avec le commit et la vérification
+                    await client.query('COMMIT');
+                    console.log(`[ROUND-CREATE] ✅ Round #${roundNum} (ID: ${newRoundId}) commité en DB`);
+                    
+                    // ✅ CRITIQUE: Ne pas libérer le client ici - le bloc finally le fera
+                    // Libérer ici causerait un double release si une erreur survient après
+                    
+                    // ✅ VÉRIFICATION POST-COMMIT: S'assurer que le round est visible immédiatement
+                    // Utiliser le pool global (nouvelle connexion) pour vérifier la visibilité
+                    await new Promise(resolve => setTimeout(resolve, 100)); // Délai pour la visibilité du commit
+                    
+                    let verified = false;
+                    for (let verifyAttempt = 0; verifyAttempt < 10; verifyAttempt++) {
+                        try {
+                            const verifyRes = await pool.query(
+                                `SELECT round_id, status FROM rounds WHERE round_id = $1`,
+                                [roundIdForDb]
+                            );
+                            if (verifyRes.rows && verifyRes.rows[0]) {
+                                console.log(`[ROUND-CREATE] ✅ Round ${newRoundId} vérifié et visible en DB (attempt ${verifyAttempt + 1}, status: ${verifyRes.rows[0].status})`);
+                                verified = true;
+                                gameState.currentRound.persisted = true;
+                                break;
+                            }
+                        } catch (verifyErr) {
+                            console.warn(`[ROUND-CREATE] Erreur vérification round ${newRoundId} (attempt ${verifyAttempt + 1}):`, verifyErr.message);
                         }
-                    } catch (verifyErr) {
-                        console.warn(`[ROUND-CREATE] Erreur vérification round ${newRoundId} (attempt ${verifyAttempt + 1}):`, verifyErr.message);
+                        if (verifyAttempt < 9) {
+                            await new Promise(resolve => setTimeout(resolve, 100));
+                        }
                     }
-                    if (verifyAttempt < 9) {
-                        await new Promise(resolve => setTimeout(resolve, 100));
+                    
+                    if (!verified) {
+                        console.error(`[ROUND-CREATE] ❌ Round ${newRoundId} non visible après commit après 10 tentatives!`);
+                        gameState.currentRound.persisted = false; // Marquer comme non persisté
+                        throw new Error(`Round ${newRoundId} non visible en DB après commit - persistance échouée`);
                     }
-                }
-                
-                if (!verified) {
-                    console.error(`[ROUND-CREATE] ❌ Round ${newRoundId} non visible après commit après 10 tentatives!`);
-                    gameState.currentRound.persisted = false; // Marquer comme non persisté
-                    throw new Error(`Round ${newRoundId} non visible en DB après commit - persistance échouée`);
                 }
             } catch (err) {
-                await client.query('ROLLBACK');
+                // ✅ CRITIQUE: Ne faire ROLLBACK que si la transaction est toujours active
+                // Si le client a déjà été libéré, cela causerait une erreur
+                try {
+                    await client.query('ROLLBACK');
+                } catch (rollbackErr) {
+                    // Ignorer l'erreur de rollback si le client est déjà libéré
+                    console.warn(`[ROUND-CREATE] ⚠️ Erreur lors du ROLLBACK (peut être normal si client déjà libéré):`, rollbackErr.message);
+                }
                 throw err;
             } finally {
-                client.release();
+                // ✅ CRITIQUE: Libérer le client UNE SEULE FOIS dans le finally
+                // Vérifier que le client n'a pas déjà été libéré
+                if (client && typeof client.release === 'function') {
+                    try {
+                        client.release();
+                    } catch (releaseErr) {
+                        // Ignorer l'erreur si le client est déjà libéré
+                        console.warn(`[ROUND-CREATE] ⚠️ Erreur lors de la libération du client (peut être normal si déjà libéré):`, releaseErr.message);
+                    }
+                }
+            }
+            
+            // ✅ CRITIQUE: Retour anticipé APRÈS le finally si nécessaire
+            if (shouldReturnEarly) {
+                return newRoundId;
             }
         } catch (err) {
             console.error('[ROUND-CREATE] ❌ Erreur persistence DB:', err.message);
