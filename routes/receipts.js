@@ -9,10 +9,10 @@ import { SYSTEM_NAME, CURRENT_GAME } from "../config/system.config.js";
 import { chacha20Random, chacha20RandomInt, initChaCha20 } from "../chacha20.js";
 import crypto from 'crypto';
 // DB models pour persistance des tickets
-import { createReceipt as dbCreateReceipt, createBet as dbCreateBet, getReceiptById, getBetsByReceipt } from "../models/receiptModel.js";
+import { createReceipt as dbCreateReceipt, createBet as dbCreateBet, getReceiptById, getBetsByReceipt, updateReceiptStatus } from "../models/receiptModel.js";
 import { pool } from "../config/db.js";
 // Import cache strategy (Redis)
-import dbStrategy, { deleteTicketFromRoundCache } from "../config/db-strategy.js";
+import dbStrategy, { deleteTicketFromRoundCache, updateTicketInRoundCache } from "../config/db-strategy.js";
 // Import validation des montants
 import { MIN_BET_AMOUNT, MAX_BET_AMOUNT, BETTING_LOCK_DURATION_MS } from "../config/app.config.js";
 
@@ -277,18 +277,18 @@ export default function createReceiptsRouter(broadcast) {
             background: #fff;
             margin: 0;
             padding: 0; /* Important pour les POS */
-            font-size: 12px; /* Taille de base lisible */
+            font-size: 11px; /* Taille de base réduite */
             line-height: 1.4;
             color: #000 !important;
           }
           
           .receipt-container {
-            /* Largeur cible (58mm papier - 6mm marges = 52mm) */
-            width: 52mm; 
-            max-width: 52mm;
+            /* Largeur cible (58mm papier - 3mm marges = 55mm) */
+            width: 55mm; 
+            max-width: 55mm;
             margin: 0 auto;
-            /* Marges internes pour la lisibilité */
-            padding: 5mm 3mm; 
+            /* Marges internes réduites pour éviter la perte de contenu */
+            padding: 5mm 1.5mm; 
             box-sizing: border-box;
           }
 
@@ -310,14 +310,14 @@ export default function createReceiptsRouter(broadcast) {
 
           /* --- En-tête --- */
           .header h2 {
-            font-size: 14px;
+            font-size: 13px;
             font-weight: bold;
             margin-bottom: 5px;
             /* Forcer la couleur noire pour éviter le blanc */
             color: #000 !important; 
           }
           .header p {
-            font-size: 11px;
+            font-size: 10px;
             line-height: 1.2;
             margin-bottom: 10px;
           }
@@ -325,13 +325,13 @@ export default function createReceiptsRouter(broadcast) {
           .header-info {
             margin-top: 8px;
             text-align: left;
-            padding: 0 5px;
+            padding: 0 2px;
           }
           
           .header-line {
             display: flex;
             justify-content: space-between;
-            font-size: 10px;
+            font-size: 9px;
             line-height: 1.5;
             padding: 2px 0;
           }
@@ -348,7 +348,7 @@ export default function createReceiptsRouter(broadcast) {
 
           /* --- Section Paris --- */
           .bets-title {
-            font-size: 13px;
+            font-size: 12px;
             font-weight: bold;
             text-align: center;
             margin-bottom: 10px;
@@ -375,7 +375,7 @@ export default function createReceiptsRouter(broadcast) {
             display: flex;
             align-items: center;
             justify-content: flex-start;
-            font-size: 12px;
+            font-size: 11px;
             font-weight: bold;
             margin-bottom: 6px;
             padding-bottom: 4px;
@@ -384,7 +384,7 @@ export default function createReceiptsRouter(broadcast) {
           
           .bet-number {
             color: #000 !important;
-            font-size: 10px;
+            font-size: 9px;
             margin-right: 4px;
           }
           
@@ -407,7 +407,7 @@ export default function createReceiptsRouter(broadcast) {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            font-size: 11px;
+            font-size: 10px;
             line-height: 1.6;
             padding: 2px 0;
           }
@@ -429,7 +429,7 @@ export default function createReceiptsRouter(broadcast) {
           }
           
           .bet-gain-value {
-            font-size: 12px;
+            font-size: 11px;
             color: #000 !important;
           }
 
@@ -441,7 +441,7 @@ export default function createReceiptsRouter(broadcast) {
              text-align: center;
           }
           .footer p {
-            font-size: 11px;
+            font-size: 10px;
             line-height: 1.5;
             margin: 5px 0;
           }
@@ -572,6 +572,10 @@ export default function createReceiptsRouter(broadcast) {
       // Trouver le gagnant de la course
       const winner = (round.participants || []).find(p => p.place === 1);
       const winnerName = winner ? `${winner.name} (N°${winner.number})` : 'Non disponible';
+      
+      // ✅ LOG: Tracer le gagnant utilisé pour l'impression du ticket
+      console.log(`[PRINT-TICKET] 🏆 Gagnant utilisé pour ticket #${receiptId}:`, winner ? `№${winner.number} ${winner.name}` : 'Non trouvé');
+      console.log(`[PRINT-TICKET] 📊 Round ID: ${round?.id}, Participants avec place=1:`, (round.participants || []).filter(p => p.place === 1).map(p => `№${p.number} ${p.name}`));
 
       // Calculer les totaux et préparer le détail par pari avec meilleure organisation
       let totalMise = 0;
@@ -1166,6 +1170,13 @@ export default function createReceiptsRouter(broadcast) {
       let prizeForThisReceipt = 0;
       const winner = Array.isArray(gameState.currentRound.participants) ? gameState.currentRound.participants.find(p => p.place === 1) : null;
       
+      // ✅ LOG: Tracer le gagnant utilisé pour le calcul du prize
+      if (winner) {
+        console.log(`[RECEIPTS-ADD] 🏆 Gagnant trouvé pour calcul prize: №${winner.number} ${winner.name} (Round #${gameState.currentRound?.id})`);
+      } else {
+        console.log(`[RECEIPTS-ADD] ℹ️ Aucun gagnant trouvé (Round #${gameState.currentRound?.id}, participants: ${gameState.currentRound?.participants?.length || 0})`);
+      }
+      
       // Vérifier si la course est terminée
       // Un round est terminé SEULEMENT si la course a été lancée ET terminée
       // Cela garantit que les nouveaux tickets restent en "pending" tant que la course n'a pas été lancée
@@ -1187,6 +1198,9 @@ export default function createReceiptsRouter(broadcast) {
       // ✅ OBLIGATOIRE: round_id doit être défini (round actuel)
       receipt.roundId = gameState.currentRound.id;
       receipt.round_id = gameState.currentRound.id;
+      // ✅ CRITIQUE: Calculer total_amount en système (×100) et l'ajouter au receipt
+      // Les valeurs bet.value sont en système (×100), donc total_amount doit aussi être en système
+      receipt.total_amount = (receipt.bets || []).reduce((sum, b) => sum + (Number(b.value) || 0), 0);
       // Ajout de la date de création si elle n'existe pas
       if (!receipt.created_time) {
         receipt.created_time = new Date().toISOString();
@@ -1268,8 +1282,10 @@ export default function createReceiptsRouter(broadcast) {
         };
 
         try {
-          // calculer total_amount (somme des mises en valeur publique)
-          const totalAmount = (receipt.bets || []).reduce((sum, b) => sum + (Number(b.value) || 0), 0);
+          // ✅ CRITIQUE: Utiliser receipt.total_amount qui est déjà calculé en système (×100)
+          // Les valeurs bet.value sont en système (×100), donc total_amount doit aussi être en système
+          // receipt.total_amount a été calculé juste avant le push dans gameState
+          const totalAmount = receipt.total_amount || (receipt.bets || []).reduce((sum, b) => sum + (Number(b.value) || 0), 0);
           
           // ✅ OBLIGATOIRE: round_id doit être le round actuel (pas null)
           const dbRoundId = roundId;
@@ -1391,27 +1407,31 @@ export default function createReceiptsRouter(broadcast) {
       // ✅ Broadcast WebSocket pour notifier les clients avec toutes les infos
       // ✅ OPTIMISATION: Inclure toutes les données formatées pour mise à jour directe du DOM
       if (broadcast) {
-        // Calculer totalAmount en valeur publique pour le frontend
-        const totalAmountPublic = (receipt.bets || []).reduce((sum, b) => {
-          const valueSystem = Number(b.value || 0);
-          return sum + (valueSystem / 100); // Conversion système -> publique
-        }, 0);
+        // ✅ CRITIQUE: Convertir totalAmount de système (×100) à publique pour le frontend
+        // receipt.total_amount est en système, il faut le convertir en publique
+        const totalAmountSystem = receipt.total_amount || (receipt.bets || []).reduce((sum, b) => sum + (Number(b.value) || 0), 0);
+        const totalAmountPublic = systemToPublic(totalAmountSystem);
 
-        // Formater les bets pour le frontend
-        const formattedBets = (receipt.bets || []).map(bet => ({
-          number: bet.number || bet.participant?.number,
-          value: (Number(bet.value || 0) / 100).toFixed(2), // Valeur publique
-          participant: bet.participant || {
-            number: bet.number,
-            name: bet.participant?.name || '',
-            coeff: bet.participant?.coeff || 0
-          }
-        }));
+        // Formater les bets pour le frontend (conversion système -> publique)
+        const formattedBets = (receipt.bets || []).map(bet => {
+          const valueSystem = Number(bet.value || 0);
+          const valuePublic = systemToPublic(valueSystem);
+          return {
+            number: bet.number || bet.participant?.number,
+            value: typeof valuePublic === 'object' && valuePublic.toNumber ? valuePublic.toNumber() : Number(valuePublic),
+            participant: bet.participant || {
+              number: bet.number,
+              name: bet.participant?.name || '',
+              coeff: bet.participant?.coeff || 0
+            }
+          };
+        });
 
         broadcast({
           event: "receipt_added",
           receipt: JSON.parse(JSON.stringify(receipt)),
           receiptId: receipt.id,
+          totalAmount: typeof totalAmountPublic === 'object' && totalAmountPublic.toNumber ? totalAmountPublic.toNumber() : Number(totalAmountPublic),
           roundId: gameState.currentRound.id,
           status: receipt.status || (isRaceFinished ? (receipt.prize > 0 ? 'won' : 'lost') : 'pending'),
           prize: receipt.prize || 0,
@@ -1506,43 +1526,61 @@ export default function createReceiptsRouter(broadcast) {
               return res.status(400).json({ error: "Impossible d'annuler un ticket une fois la course terminée avec résultats", reason: "race_finished", isRaceFinished, receiptId: id });
             }
 
-            // Supprimer le ticket en base si le ticket existe et appartient au round courant
-            try {
-              // Supprimer les bets associés au ticket (cascade)
-              await pool.query("DELETE FROM bets WHERE receipt_id = $1", [id]);
-              console.log(`[DB] Bets associés au ticket ${id} supprimés en base (fallback)`);
-              
-              // Puis supprimer le ticket lui-même
-              await pool.query("DELETE FROM receipts WHERE receipt_id = $1", [id]);
-              console.log(`[DB] Receipt ${id} supprimé en base (fallback) + bets associés`);
-
-              // ✅ CORRECTION: Mettre à jour le cache Redis
-              await deleteTicketFromRoundCache(gameState.currentRound.id, id);
-
-              // Mettre à jour l'état en mémoire (au cas où une entrée correspondante existerait)
-              // Décrémenter totalPrize si le ticket avait un prize
-              const prizeValue = dbReceipt.prize ? Number(dbReceipt.prize) : 0;
-              if (prizeValue) {
-                gameState.currentRound.totalPrize = Math.max(0, (gameState.currentRound.totalPrize || 0) - prizeValue);
-              }
-              gameState.currentRound.receipts = (gameState.currentRound.receipts || []).filter(r => r.id !== id);
-
-              if (broadcast) {
-                broadcast({
-                  event: "receipt_deleted",
-                  receiptId: id,
-                  roundId: gameState.currentRound.id,
-                  totalReceipts: gameState.currentRound.receipts.length,
-                  currentRound: JSON.parse(JSON.stringify(gameState.currentRound)),
-                  totalPrize: gameState.currentRound.totalPrize || 0
-                });
-              }
-
-              return res.json(wrap({ success: true }));
-            } catch (delErr) {
-              console.error('[DB] Erreur lookup/delete receipt fallback:', delErr);
-              return res.status(500).json({ error: 'Erreur serveur lors de la suppression' });
+            // ✅ CORRECTION: Marquer le ticket comme "cancelled" au lieu de le supprimer complètement
+            
+            // Décrémenter totalPrize si le ticket avait un prize
+            const prizeValue = dbReceipt.prize ? Number(dbReceipt.prize) : 0;
+            if (prizeValue) {
+              gameState.currentRound.totalPrize = Math.max(0, (gameState.currentRound.totalPrize || 0) - prizeValue);
             }
+            
+            // ✅ ÉTAPE 1: MARQUER COMME "cancelled" EN MÉMOIRE (gameState) - TOUJOURS effectuée
+            const receiptIndex = gameState.currentRound.receipts.findIndex(r => r.id === id);
+            if (receiptIndex !== -1) {
+              gameState.currentRound.receipts[receiptIndex].status = 'cancelled';
+              console.log(`[CANCEL] ✅ Ticket ${id} marqué comme "cancelled" dans gameState (fallback)`);
+            } else {
+              // Si pas trouvé dans gameState, essayer de l'ajouter avec statut cancelled (au cas où)
+              console.warn(`[CANCEL] ⚠️ Ticket ${id} non trouvé dans gameState.currentRound.receipts (fallback)`);
+            }
+
+            // ✅ ÉTAPE 2: METTRE À JOUR REDIS - TOUJOURS effectuée (indépendante de DB)
+            try {
+              await updateTicketInRoundCache(gameState.currentRound.id, id, 'cancelled', null);
+              console.log(`[REDIS] ✅ Ticket ${id} marqué comme "cancelled" dans Redis (fallback)`);
+            } catch (redisErr) {
+              console.error('[REDIS] ❌ Échec mise à jour ticket dans Redis (fallback):', redisErr && redisErr.message);
+              // Ne pas bloquer - la mise à jour gameState est déjà effectuée
+            }
+
+            // ✅ ÉTAPE 3: METTRE À JOUR EN BASE (DB) - Tentative avec gestion d'erreur
+            try {
+              // Mettre à jour le statut du ticket en "cancelled" au lieu de le supprimer
+              const updateResult = await updateReceiptStatus(id, 'cancelled', null);
+              if (updateResult.success && updateResult.rowsAffected > 0) {
+                console.log(`[DB] ✅ Receipt ${id} marqué comme "cancelled" en base (fallback)`);
+              } else {
+                console.warn(`[DB] ⚠️ Receipt ${id} non trouvé en base ou déjà annulé (reason: ${updateResult.reason || 'unknown'})`);
+              }
+            } catch (dbErr) {
+              console.error('[DB] ❌ Échec mise à jour receipt en base (fallback):', dbErr && dbErr.message);
+              // Ne pas bloquer - les mises à jour gameState et Redis sont déjà effectuées
+            }
+
+            // Broadcast WebSocket pour notifier les clients
+            if (broadcast) {
+              broadcast({
+                event: "receipt_cancelled", // ✅ CORRECTION: Utiliser "receipt_cancelled" pour indiquer le statut
+                receiptId: id,
+                roundId: gameState.currentRound.id,
+                status: 'cancelled', // ✅ NOUVEAU: Inclure le statut "cancelled" dans le message
+                totalReceipts: gameState.currentRound.receipts.length,
+                currentRound: JSON.parse(JSON.stringify(gameState.currentRound)),
+                totalPrize: gameState.currentRound.totalPrize || 0
+              });
+            }
+
+            return res.json(wrap({ success: true }));
           }
         } catch (dbErr) {
           console.error('[DB] Erreur lookup/delete receipt fallback:', dbErr);
@@ -1569,43 +1607,61 @@ export default function createReceiptsRouter(broadcast) {
         });
       }
 
-      // Supprimer le ticket du round actuel en mémoire
+      // ✅ CORRECTION: Marquer le ticket comme "cancelled" au lieu de le supprimer complètement
+      // Cela permet de garder une trace et d'éviter les problèmes si le ticket s'affiche encore
+      
       // Calculer prize à retirer si présent
       if (receipt && receipt.prize) {
         gameState.currentRound.totalPrize = Math.max(0, (gameState.currentRound.totalPrize || 0) - Number(receipt.prize));
       }
 
-      gameState.currentRound.receipts = (gameState.currentRound.receipts || []).filter(r => r.id !== id);
+      // ✅ ÉTAPE 1: MARQUER COMME "cancelled" EN MÉMOIRE (gameState) - TOUJOURS effectuée
+      const receiptIndex = gameState.currentRound.receipts.findIndex(r => r.id === id);
+      if (receiptIndex !== -1) {
+        gameState.currentRound.receipts[receiptIndex].status = 'cancelled';
+        console.log(`[CANCEL] ✅ Ticket ${id} marqué comme "cancelled" dans gameState.currentRound.receipts`);
+      } else {
+        console.warn(`[CANCEL] ⚠️ Ticket ${id} non trouvé dans gameState.currentRound.receipts`);
+      }
 
-      // Supprimer également en base (s'il existe) - Receipt et ses Bets associés
+      // ✅ ÉTAPE 2: METTRE À JOUR REDIS - TOUJOURS effectuée (indépendante de DB)
       try {
-        // Supprimer les bets associés au ticket (cascade)
-        await pool.query("DELETE FROM bets WHERE receipt_id = $1", [id]);
-        console.log(`[DB] Bets associés au ticket ${id} supprimés en base`);
-        
-        // Puis supprimer le ticket lui-même
-        await pool.query("DELETE FROM receipts WHERE receipt_id = $1", [id]);
-        console.log(`[DB] Receipt ${id} supprimé en base (memo->db) + bets associés`);
-        
-        // ✅ CORRECTION: Mettre à jour le cache Redis
-        await deleteTicketFromRoundCache(gameState.currentRound.id, id);
-      } catch (e) {
-        console.warn('[DB] Échec suppression receipt en base (memo->db) pour id', id, e && e.message);
+        await updateTicketInRoundCache(gameState.currentRound.id, id, 'cancelled', null);
+        console.log(`[REDIS] ✅ Ticket ${id} marqué comme "cancelled" dans le cache Redis`);
+      } catch (redisErr) {
+        console.error('[REDIS] ❌ Échec mise à jour ticket dans Redis:', redisErr && redisErr.message);
+        // Ne pas bloquer - la mise à jour gameState est déjà effectuée
+      }
+
+      // ✅ ÉTAPE 3: METTRE À JOUR EN BASE (DB) - Tentative avec gestion d'erreur
+      try {
+        // Mettre à jour le statut du ticket en "cancelled" au lieu de le supprimer
+        const updateResult = await updateReceiptStatus(id, 'cancelled', null);
+        if (updateResult.success && updateResult.rowsAffected > 0) {
+          console.log(`[DB] ✅ Receipt ${id} marqué comme "cancelled" en base`);
+        } else {
+          console.warn(`[DB] ⚠️ Receipt ${id} non trouvé en base ou déjà annulé (reason: ${updateResult.reason || 'unknown'})`);
+        }
+      } catch (dbErr) {
+        console.error('[DB] ❌ Échec mise à jour receipt en base (memo->db) pour id', id, dbErr && dbErr.message);
+        // ✅ IMPORTANT: Ne pas throw - les mises à jour gameState et Redis sont déjà effectuées
+        // Le ticket est marqué comme "cancelled" dans gameState et Redis même si la DB échoue
       }
 
       // Broadcast WebSocket pour notifier les clients avec toutes les infos
       if (broadcast) {
         broadcast({
-          event: "receipt_deleted",
+          event: "receipt_cancelled", // ✅ CORRECTION: Utiliser "receipt_cancelled" pour indiquer le statut
           receiptId: id,
           roundId: gameState.currentRound.id,
+          status: 'cancelled', // ✅ NOUVEAU: Inclure le statut "cancelled" dans le message
           totalReceipts: gameState.currentRound.receipts.length,
           currentRound: JSON.parse(JSON.stringify(gameState.currentRound)),
           totalPrize: gameState.currentRound.totalPrize || 0
         });
       }
 
-      console.log("Ticket supprimé ID :", id);
+      console.log("Ticket annulé (statut 'cancelled') ID :", id);
       return res.json(wrap({ success: true }));
     }
 

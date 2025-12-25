@@ -196,21 +196,32 @@ class App {
            Fonction pour formater un ticket depuis les données WebSocket
         ------------------------- */
         const formatTicketForTable = (t) => {
+            // ✅ CORRECTION: Gérer tous les formats possibles de tickets
+            if (!t || (!t.id && !t.receiptId && !t.receipt_id)) {
+                console.warn('⚠️ [DASHBOARD] Ticket invalide:', t);
+                return null;
+            }
+            
             const roundId = t.roundId || t.round_id || '-';
             const createdTime = t.date || t.created_time || t.created_at || Date.now();
             
-            // Calculer totalAmount depuis les bets si non fourni
-            let totalAmount = t.totalAmount || t.total_amount || 0;
-            if (!totalAmount && Array.isArray(t.bets)) {
-                // Convertir de système à publique si nécessaire
+            // ✅ CRITIQUE: Les API retournent TOUJOURS des valeurs publiques (déjà converties)
+            // On utilise directement les valeurs sans conversion supplémentaire
+            let totalAmount = 0;
+            
+            // Les API convertissent déjà de système à publique, utiliser directement
+            if (typeof t.totalAmount === 'number') {
+                totalAmount = t.totalAmount;
+            } else if (typeof t.total_amount === 'number') {
+                totalAmount = t.total_amount;
+            } else if (typeof t.total_amount === 'string') {
+                totalAmount = parseFloat(t.total_amount);
+            } 
+            // Calculer depuis les bets si totalAmount n'existe pas (les bets sont déjà en publique)
+            else if (Array.isArray(t.bets) && t.bets.length > 0) {
                 totalAmount = t.bets.reduce((sum, b) => {
-                    const valueSystem = Number(b.value || 0);
-                    // Si Currency est disponible, utiliser systemToPublic, sinon diviser par 100
-                    if (typeof Currency !== 'undefined' && typeof Currency.systemToPublic === 'function') {
-                        const valuePublic = Currency.systemToPublic(valueSystem);
-                        return sum + (typeof valuePublic === 'object' && valuePublic.toNumber ? valuePublic.toNumber() : Number(valuePublic));
-                    }
-                    return sum + (valueSystem / 100);
+                    // Les valeurs des bets sont déjà converties en publique par les API
+                    return sum + (Number(b.value) || 0);
                 }, 0);
             }
             
@@ -218,7 +229,7 @@ class App {
             const isMultibet = Array.isArray(t.bets) && t.bets.length > 1;
             // For single bets, show the participant coeff; for multibets, show a compact label
             const coeffLabel = isMultibet ? `Multibet (${t.bets.length})` : (t.bets && t.bets[0] && t.bets[0].participant ? `x${Number(t.bets[0].participant.coeff).toFixed(2)}` : (t.avgCoeff ? `x${Number(t.avgCoeff).toFixed(2)}` : '-'));
-            const hasPrize = t.prize && t.prize > 0;
+            const hasPrize = t.prize && Number(t.prize) > 0;
             // Permettre l'annulation tant que le statut est "pending" ET que les paris ne sont pas verrouillés
             const canCancel = t.status === 'pending' && !this.bettingLocked && !this.isRaceRunning;
             
@@ -232,48 +243,100 @@ class App {
                 canCancel,
                 id: t.id || t.receiptId || t.receipt_id,
                 status: t.status || 'pending',
-                prize: t.prize || 0,
+                prize: typeof t.prize === 'number' ? t.prize : (typeof t.prize === 'string' ? parseFloat(t.prize) : 0),
                 paidAt: t.paidAt || t.paid_at || null
             };
         };
 
         /* -------------------------
            Fonction pour créer une ligne de ticket dans le tableau
+           ✅ UTILISE LA MÊME LOGIQUE QUE MY-BETS
         ------------------------- */
         const createTicketRow = (ticketData) => {
-            const t = formatTicketForTable(ticketData);
+            // ✅ CORRECTION: Utiliser la même logique que my-bets pour formater le ticket
+            // Ne pas utiliser formatTicketForTable qui simplifie trop les données
+            const ticket = ticketData;
+            if (!ticket || (!ticket.id && !ticket.receiptId && !ticket.receipt_id)) {
+                console.warn('⚠️ [DASHBOARD] Impossible de créer une ligne: ticket invalide', ticketData);
+                return null;
+            }
+            
+            const ticketId = ticket.id || ticket.receiptId || ticket.receipt_id;
+            const isMultibet = Array.isArray(ticket.bets) && ticket.bets.length > 1;
+            const canCancel = ticket.status === 'pending' && !this.bettingLocked && !this.isRaceRunning;
+            const isInCurrentRound = (ticket.roundId || ticket.round_id) === this.currentRoundId;
+            
+            // ✅ CRITIQUE: Les API retournent TOUJOURS des valeurs publiques (déjà converties)
+            // On utilise directement les valeurs sans conversion supplémentaire
+            let totalAmount = 0;
+            if (typeof ticket.totalAmount === 'number') {
+                totalAmount = ticket.totalAmount;
+            } else if (typeof ticket.total_amount === 'number') {
+                // Les API convertissent déjà, utiliser directement
+                totalAmount = ticket.total_amount;
+            } else if (Array.isArray(ticket.bets) && ticket.bets.length > 0) {
+                // Les bets sont déjà convertis en publique par les API
+                totalAmount = ticket.bets.reduce((sum, b) => {
+                    return sum + (Number(b.value) || 0);
+                }, 0);
+            }
+            
+            // ✅ Calculer avgCoeff et potentialWinnings pour single bets
+            let avgCoeff = 0;
+            let potentialWinnings = 0;
+            if (!isMultibet && ticket.bets && ticket.bets.length === 1) {
+                avgCoeff = Number(ticket.bets[0].participant?.coeff || ticket.bets[0].coeff || 0);
+                // Les valeurs des bets sont déjà en publique depuis les API
+                const betValuePublic = Number(ticket.bets[0].value || 0);
+                potentialWinnings = betValuePublic * avgCoeff;
+            } else if (ticket.avgCoeff) {
+                avgCoeff = Number(ticket.avgCoeff);
+            }
+            
             const tr = document.createElement('tr');
             tr.className = 'hover:bg-slate-700/50';
-            tr.setAttribute('data-receipt-id', t.id);
+            tr.setAttribute('data-receipt-id', String(ticketId));
             tr.innerHTML = `
-                <td class="p-2 text-sm font-medium">#${t.id || '—'}</td>
-                <td class="p-2 text-slate-400 text-xs">${new Date(t.createdTime).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</td>
-                <td class="p-2 text-sm text-slate-300">#${t.roundId}</td>
-                <td class="p-2 text-sm font-semibold text-green-300">${t.total} HTG</td>
-                <td class="p-2 text-sm text-slate-300">${t.coeffLabel}</td>
-                <td class="p-2">${this.formatStatus(t.status)}</td>
+                <td class="p-2">${ticketId}</td>
+                <td class="p-2">${new Date(ticket.date || ticket.created_time || ticket.created_at || Date.now()).toLocaleString('fr-FR')}</td>
+                <td class="p-2">${ticket.roundId || ticket.round_id || '-'}</td>
                 <td class="p-2">
-                    <div class="flex gap-1 flex-wrap">
-                        <button data-action="print" data-id="${t.id || ''}" 
-                            class="px-2 py-1 bg-blue-600 hover:bg-blue-700 text-xs rounded text-white" 
-                            title="Imprimer">🖨️</button>
-                        ${t.canCancel
-                            ? `<button data-action="void" data-id="${t.id || ''}" 
-                                class="px-2 py-1 bg-red-600 hover:bg-red-700 text-xs rounded text-white" 
-                                title="Annuler">❌</button>`
-                            : ''}
-                        ${t.status === 'won'
-                            ? `<button data-action="pay" data-id="${t.id || ''}" 
-                                class="px-2 py-1 bg-green-600 hover:bg-green-700 text-xs rounded text-white" 
-                                title="Payer le ticket">💵</button>`
-                            : ''}
-                        ${t.status === 'paid'
-                            ? `<span class="px-2 py-1 bg-blue-500/30 text-blue-300 text-xs rounded" 
-                                title="Payé le ${t.paidAt ? new Date(t.paidAt).toLocaleString('fr-FR') : 'N/A'}">✓ Payé</span>`
-                            : ''}
-                        <button data-action="rebet" data-id="${t.id || ''}" 
-                            class="px-2 py-1 bg-purple-600 hover:bg-purple-700 text-xs rounded text-white" 
-                            title="Rejouer ce ticket">🔄</button>
+                    ${isMultibet ? `
+                        <div class="text-sm font-medium">Multibet (${ticket.bets.length} paris)</div>
+                        <div class="text-xs text-slate-400 mt-1">Total: ${totalAmount.toFixed(2)} HTG</div>
+                    ` : (ticket.bets || []).map(bet => {
+                        const betValue = Number(bet.value || 0);
+                        // Les valeurs des bets sont déjà en publique depuis les API
+                        const betValuePublic = Number(bet.value || 0);
+                        const coeff = Number(bet.participant?.coeff || bet.coeff || 0);
+                        return `
+                            <div class="text-sm mb-1">
+                                <span title="Participant">#${bet.participant?.number || bet.number} ${bet.participant?.name || ''}</span>
+                                <span class="text-slate-400"> - </span>
+                                <span title="Mise">${betValuePublic.toFixed(2)} HTG</span>
+                                <span class="text-slate-400">×</span>
+                                <span title="Cote">${coeff}x</span>
+                                <span class="text-slate-400">=</span>
+                                <span title="Gain potentiel">${(betValuePublic * coeff).toFixed(2)} HTG</span>
+                            </div>
+                        `;
+                    }).join('')}
+                </td>
+                <td class="p-2">${isMultibet ? `Multibet (${ticket.bets.length})` : `${avgCoeff.toFixed(2)}x`}</td>
+                <td class="p-2">${isMultibet ? '-' : `${potentialWinnings.toFixed(2)} HTG`}</td>
+                <td class="p-2">${this.formatStatus(ticket.status || 'pending')}</td>
+                <td class="p-2">
+                    <div class="flex items-center gap-2">
+                        <button onclick="window.printTicket && window.printTicket(${ticketId})" 
+                            class="p-1 hover:bg-slate-600 rounded" title="Imprimer">🖨️</button>
+                        ${ticket.status === 'won' ? 
+                            `<button onclick="payTicket(${ticketId}, this)" 
+                                     class="p-1 hover:bg-slate-600 rounded" title="Payer">💰</button>` : ''}
+                        ${canCancel && isInCurrentRound ? 
+                            `<button onclick="cancelTicket(${ticketId}, this)" 
+                                     class="p-1 hover:bg-slate-600 rounded" title="Annuler">❌</button>` : ''}
+                        <button onclick="window.rebetTicket && window.rebetTicket(${ticketId})" 
+                            class="p-1 hover:bg-slate-600 rounded" title="Rejouer">🔄</button>
                     </div>
                 </td>
             `;
@@ -292,12 +355,16 @@ class App {
             }
 
             // Vérifier si le ticket existe déjà
-            const existingRow = table.querySelector(`tr[data-receipt-id="${ticketData.id || ticketData.receiptId}"]`);
+            // ✅ CORRECTION: Normaliser l'ID pour la recherche
+            const ticketId = String(ticketData.id || ticketData.receiptId || ticketData.receipt_id);
+            const existingRow = table.querySelector(`tr[data-receipt-id="${ticketId}"]`);
             if (existingRow) {
-                console.log(`⚠️ Ticket #${ticketData.id || ticketData.receiptId} déjà présent, mise à jour...`);
+                console.log(`⚠️ Ticket #${ticketId} déjà présent, mise à jour...`);
                 // Mettre à jour la ligne existante
                 const newRow = createTicketRow(ticketData);
+                if (newRow) {
                 existingRow.replaceWith(newRow);
+                }
                 return;
             }
 
@@ -325,20 +392,61 @@ class App {
         ------------------------- */
         const removeTicketFromTable = (ticketId) => {
             const table = el('ticketsTable');
-            if (!table) return;
+            if (!table) {
+                console.warn('⚠️ [DASHBOARD] Table ticketsTable introuvable');
+                return;
+            }
 
-            const row = table.querySelector(`tr[data-receipt-id="${ticketId}"]`);
-            if (row) {
+            // ✅ CORRECTION: Normaliser l'ID (peut être nombre ou string)
+            const normalizedId = String(ticketId);
+            console.log(`🔍 [DASHBOARD] Recherche ticket à supprimer: ID=${normalizedId}`);
+            
+            // ✅ CORRECTION: Chercher toutes les lignes et comparer les IDs normalisés
+            const rows = table.querySelectorAll('tr[data-receipt-id]');
+            let found = false;
+            
+            rows.forEach(row => {
+                const rowId = String(row.getAttribute('data-receipt-id'));
+                if (rowId === normalizedId) {
+                    console.log(`✅ [DASHBOARD] Ticket ${normalizedId} trouvé et supprimé`);
                 row.remove();
+                    found = true;
+                }
+            });
+            
+            if (!found) {
+                console.warn(`⚠️ [DASHBOARD] Ticket ${normalizedId} non trouvé dans le tableau. Lignes présentes:`, 
+                    Array.from(rows).map(r => r.getAttribute('data-receipt-id')));
+                // ✅ FALLBACK: Forcer un refresh complet si le ticket n'est pas trouvé
+                if (this.dashboardRefreshTickets) {
+                    console.log('🔄 [DASHBOARD] Refresh complet après échec suppression directe');
+                    this.dashboardRefreshTickets(true);
+                }
+                return;
+            }
                 
                 // Si le tableau est vide, afficher "Aucun ticket"
                 if (table.querySelectorAll('tr[data-receipt-id]').length === 0) {
-                    table.innerHTML = `<tr><td colspan="7" class="p-4 text-slate-400">Aucun ticket</td></tr>`;
+                    table.innerHTML = `<tr><td colspan="8" class="p-4 text-slate-400">Aucun ticket</td></tr>`;
                 }
                 
-                // ✅ Mettre à jour les stats
-                refreshTickets(); // Refresh pour recalculer les stats correctement
+            // ✅ CORRECTION: Ne PAS appeler refreshTickets immédiatement après suppression
+            // Le ticket est déjà supprimé du DOM, et refreshTickets pourrait le réafficher
+            // si l'API retourne encore le ticket (problème de timing)
+            // Les stats seront mises à jour lors du prochain refresh naturel ou via WebSocket
+            
+            // ✅ NOUVEAU: Mettre à jour les stats immédiatement après suppression
+            // On peut recalculer les stats depuis les tickets restants dans le DOM
+            if (this.dashboardUpdateStats) {
+                // Recharger les stats depuis l'API pour avoir les valeurs exactes
+                setTimeout(() => {
+                    if (this.dashboardRefreshTickets) {
+                        this.dashboardRefreshTickets(false); // Refresh sans forcer pour mettre à jour les stats seulement
+                    }
+                }, 500); // Petit délai pour laisser le temps au serveur de mettre à jour
             }
+            
+            console.log(`✅ [DASHBOARD] Ticket ${normalizedId} supprimé du DOM. Stats mises à jour lors du prochain refresh.`);
         };
 
         /* -------------------------
@@ -382,19 +490,45 @@ class App {
         ------------------------- */
         const updateTicketsTable = (tickets) => {
             const table = el('ticketsTable');
-            if (!table) return console.warn('⚠️ #ticketsTable introuvable');
+            if (!table) {
+                console.warn('⚠️ #ticketsTable introuvable');
+                return;
+            }
 
             table.innerHTML = '';
 
             if (!tickets || tickets.length === 0) {
-                table.innerHTML = `<tr><td colspan="7" class="p-4 text-slate-400">Aucun ticket</td></tr>`;
+                table.innerHTML = `<tr><td colspan="8" class="p-4 text-slate-400">Aucun ticket</td></tr>`;
+                console.debug('ℹ️ [DASHBOARD] Aucun ticket à afficher');
                 return;
             }
 
-            tickets.forEach(t => {
-                const tr = createTicketRow(t);
+            console.debug(`📋 [DASHBOARD] Affichage de ${tickets.length} ticket(s)`);
+            
+            let successCount = 0;
+            let errorCount = 0;
+            
+            // ✅ CORRECTION: Utiliser directement les données du ticket (comme my-bets)
+            // createTicketRow gère maintenant le formatage directement depuis les données brutes
+            tickets.forEach((t, index) => {
+                try {
+                    // ✅ Ne plus utiliser formatTicketForTable, créer directement depuis les données brutes
+                    const tr = createTicketRow(t);
+                    if (tr) {
                 table.appendChild(tr);
+                        successCount++;
+                    } else {
+                        console.warn(`⚠️ [DASHBOARD] Impossible de créer la ligne pour le ticket ${index}`);
+                        errorCount++;
+                    }
+                } catch (err) {
+                    console.error(`❌ [DASHBOARD] Erreur formatage ticket ${index}:`, err);
+                    console.error(`❌ [DASHBOARD] Données ticket:`, t);
+                    errorCount++;
+                }
             });
+            
+            console.debug(`✅ [DASHBOARD] Tableau mis à jour: ${successCount} ticket(s) affiché(s), ${errorCount} erreur(s)`);
         }
 
         /* -------------------------
@@ -658,9 +792,13 @@ class App {
                             if (!res.ok) throw new Error(data.error || data.message || 'Erreur lors de l\'annulation');
                         }
                         
-                        // Rafraîchir immédiatement la liste des tickets pour synchroniser l'UI
-                        try { refreshTickets(); } catch (e) { console.warn('refreshTickets failed after delete:', e); }
-                        this.alertModal(`✅ Ticket #${ticketId} annulé avec succès`, 'success');
+                        // ✅ CORRECTION: Ne PAS rafraîchir immédiatement après suppression
+                        // Le WebSocket receipt_deleted va mettre à jour le DOM directement
+                        // Un refresh immédiat pourrait réafficher le ticket si l'API n'est pas encore synchronisée
+                        // this.alertModal(`✅ Ticket #${ticketId} annulé avec succès`, 'success');
+                        
+                        // Le message de succès sera affiché via WebSocket receipt_deleted
+                        // Cela évite les problèmes de timing où refreshTickets réaffiche le ticket supprimé
                         
                     } catch (err) {
                         console.error('Erreur cancelTicket:', err);
@@ -731,26 +869,89 @@ class App {
                     const rawTickets = dashboardData.tickets || [];
                     const roundData = dashboardData.round || {};
                     
-                    // Formater les tickets pour correspondre au format attendu
-                    tickets = rawTickets.map(t => {
-                        // Convertir les valeurs système (×100) en valeurs publiques
-                        const totalAmount = typeof t.total_amount === 'number' ? t.total_amount / 100 : 
-                                          (typeof t.total_amount === 'string' ? parseFloat(t.total_amount) / 100 : 0);
+                    console.debug(`🔍 [DASHBOARD] Raw tickets reçus: ${rawTickets.length}, structure:`, rawTickets.length > 0 ? Object.keys(rawTickets[0]) : 'aucun');
+                    
+                    // ✅ CRITIQUE: Filtrer les tickets avec statut "cancelled" côté client aussi (sécurité supplémentaire)
+                    const validRawTickets = rawTickets.filter(t => t.status !== 'cancelled');
+                    
+                    // ✅ CORRECTION: Formater les tickets en gérant tous les cas possibles avec conversion cohérente
+                    tickets = validRawTickets.map(t => {
+                        // ✅ CRITIQUE: Les API retournent TOUJOURS des valeurs publiques (déjà converties)
+                        // On utilise directement les valeurs sans conversion supplémentaire
+                        let totalAmount = 0;
+                        
+                        // Les API convertissent déjà de système à publique, utiliser directement
+                        if (typeof t.totalAmount === 'number') {
+                            totalAmount = t.totalAmount;
+                        } else if (typeof t.total_amount === 'number') {
+                            totalAmount = t.total_amount;
+                        } else if (typeof t.total_amount === 'string') {
+                            totalAmount = parseFloat(t.total_amount);
+                        } 
+                        // Calculer depuis les bets si totalAmount n'existe pas (les bets sont déjà en publique)
+                        else if (Array.isArray(t.bets) && t.bets.length > 0) {
+                            totalAmount = t.bets.reduce((sum, b) => {
+                                // Les valeurs des bets sont déjà converties en publique par les API
+                                return sum + (Number(b.value) || 0);
+                            }, 0);
+                        }
+                        
+                        // ✅ Les API convertissent déjà prize de système à publique
+                        let prize = 0;
+                        if (typeof t.prize === 'number') {
+                            prize = t.prize;
+                        } else if (typeof t.prize === 'string') {
+                            prize = parseFloat(t.prize);
+                        }
+                        
+                        // ✅ S'assurer que bets existe et est un tableau
+                        const bets = Array.isArray(t.bets) ? t.bets : [];
+                        
+                        // ✅ Récupérer l'ID du ticket (plusieurs formats possibles)
+                        const ticketId = t.id || t.receipt_id || t.receiptId;
+                        
+                        // ✅ Récupérer le roundId
+                        const ticketRoundId = t.round_id || t.roundId || roundData.id;
+                        
+                        // ✅ Récupérer la date
+                        const ticketDate = t.created_time || t.created_at || t.date || new Date().toISOString();
                         
                         return {
-                            id: t.id || t.receipt_id,
-                            receiptId: t.id || t.receipt_id,
-                            roundId: t.round_id || t.roundId || roundData.id,
+                            id: ticketId,
+                            receiptId: ticketId,
+                            roundId: ticketRoundId,
                             status: t.status || 'pending',
-                            prize: typeof t.prize === 'number' ? t.prize / 100 : 
-                                  (typeof t.prize === 'string' ? parseFloat(t.prize) / 100 : 0),
-                            bets: t.bets || [],
+                            prize: prize,
+                            bets: bets,
                             totalAmount: totalAmount,
-                            created_time: t.created_time || t.created_at || t.date,
-                            date: t.created_time || t.created_at || t.date,
+                            created_time: ticketDate,
+                            date: ticketDate,
                             user_id: t.user_id || null
                         };
                     });
+                    
+                    // ✅ Si aucun ticket depuis gameState, essayer de récupérer depuis la DB (comme my-bets)
+                    if (tickets.length === 0 && roundData.id) {
+                        console.warn('⚠️ [DASHBOARD] Aucun ticket dans gameState, tentative récupération depuis DB...');
+                        try {
+                            const dbRes = await fetch(`/api/v1/my-bets/?limit=50&page=1`, { 
+                                credentials: 'include',
+                                cache: 'no-cache'
+                            });
+                            if (dbRes.ok) {
+                                const dbData = await dbRes.json();
+                                const dbTickets = dbData?.data?.tickets || [];
+                                // Filtrer seulement les tickets du round actuel
+                                const currentRoundTickets = dbTickets.filter(t => t.roundId === roundData.id);
+                                if (currentRoundTickets.length > 0) {
+                                    console.log(`✅ [DASHBOARD] ${currentRoundTickets.length} ticket(s) récupéré(s) depuis DB pour le round ${roundData.id}`);
+                                    tickets = currentRoundTickets;
+                                }
+                            }
+                        } catch (dbErr) {
+                            console.warn('⚠️ [DASHBOARD] Erreur récupération DB:', dbErr);
+                        }
+                    }
                     
                     roundId = roundData.id || (tickets.length > 0 ? tickets[0]?.roundId : null);
                     if (roundId) {
@@ -772,9 +973,10 @@ class App {
                         totalPrize: round.totalPrize || 0
                     };
                     
-                    console.debug(`✅ [DASHBOARD] ${tickets.length} ticket(s) du round actuel récupéré(s)`);
+                    console.debug(`✅ [DASHBOARD] ${tickets.length} ticket(s) formaté(s) et prêt(s) pour affichage`);
                 } catch (err) {
                     console.error('❌ [DASHBOARD] Erreur récupération tickets:', err);
+                    console.error('❌ [DASHBOARD] Stack:', err.stack);
                     throw err;
                 }
                 
@@ -1206,20 +1408,50 @@ class App {
            Fonction pour supprimer un ticket directement du tableau my-bets (WebSocket)
         ------------------------- */
         const removeTicketFromMyBetsTable = (ticketId) => {
-            if (!ticketsTableBody) return;
+            if (!ticketsTableBody) {
+                console.warn('⚠️ [MY-BETS] ticketsTableBody introuvable');
+                return;
+            }
 
-            const row = ticketsTableBody.querySelector(`tr[data-receipt-id="${ticketId}"]`);
-            if (row) {
+            // ✅ CORRECTION: Normaliser l'ID (peut être nombre ou string)
+            const normalizedId = String(ticketId);
+            console.log(`🔍 [MY-BETS] Recherche ticket à supprimer: ID=${normalizedId}`);
+            
+            // ✅ CORRECTION: Chercher toutes les lignes et comparer les IDs normalisés
+            const rows = ticketsTableBody.querySelectorAll('tr[data-receipt-id]');
+            let found = false;
+            
+            rows.forEach(row => {
+                const rowId = String(row.getAttribute('data-receipt-id'));
+                if (rowId === normalizedId) {
+                    console.log(`✅ [MY-BETS] Ticket ${normalizedId} trouvé et supprimé`);
                 row.remove();
-                
-                // Si le tableau est vide, afficher "Aucun ticket"
+                    found = true;
+                }
+            });
+            
+            if (!found) {
+                console.warn(`⚠️ [MY-BETS] Ticket ${normalizedId} non trouvé dans le tableau. Lignes présentes:`, 
+                    Array.from(rows).map(r => r.getAttribute('data-receipt-id')));
+                // ✅ FALLBACK: Forcer un refresh complet si le ticket n'est pas trouvé
+                if (this.myBetsFetchMyBets) {
+                    const currentPage = document.getElementById('currentPage')?.textContent || 1;
+                    console.log('🔄 [MY-BETS] Refresh complet après échec suppression directe');
+                    this.myBetsFetchMyBets(parseInt(currentPage, 10));
+                }
+                return;
+            }
+            
+            // Si le tableau est vide, afficher "Aucun ticket trouvé"
                 if (ticketsTableBody.querySelectorAll('tr[data-receipt-id]').length === 0) {
                     ticketsTableBody.innerHTML = `<tr><td colspan="8" class="p-4 text-center text-slate-400">Aucun ticket trouvé</td></tr>`;
                 }
                 
-                // ✅ Mettre à jour les stats
-                fetchMyBets(currentPage); // Refresh pour recalculer les stats correctement
-            }
+            // ✅ CORRECTION: Ne PAS appeler fetchMyBets immédiatement après suppression
+            // Le ticket est déjà supprimé du DOM, et fetchMyBets pourrait le réafficher
+            // si l'API retourne encore le ticket (problème de timing)
+            // Les stats seront mises à jour lors du prochain refresh naturel ou via WebSocket
+            console.log(`✅ [MY-BETS] Ticket ${normalizedId} supprimé du DOM. Stats mises à jour lors du prochain refresh.`);
         };
 
         /* -------------------------
@@ -1284,6 +1516,11 @@ class App {
                 }
 
                 const body = payload.data || payload;
+                
+                // ✅ CRITIQUE: Filtrer les tickets avec statut "cancelled" côté client (sécurité supplémentaire)
+                if (body.tickets) {
+                    body.tickets = body.tickets.filter(t => t.status !== 'cancelled');
+                }
 
                 // Mise à jour de la pagination
                 currentPage = body.pagination?.currentPage || currentPage;
@@ -2941,14 +3178,30 @@ class App {
                 
                 // ✅ OPTIONNEL: Essayer d'ajouter directement le ticket au DOM (si les données sont complètes)
                 // Cela permet une mise à jour immédiate pendant que l'API se synchronise
+                // ✅ CRITIQUE: Convertir les valeurs système en valeurs publiques pour l'affichage
+                const betsFromData = data.bets || data.receipt?.bets || [];
+                const totalAmountSystem = data.totalAmount || data.receipt?.total_amount || 
+                    (betsFromData.reduce((sum, b) => sum + (Number(b.value) || 0), 0));
+                // Convertir de système à publique (diviser par 100)
+                const totalAmountPublic = typeof Currency !== 'undefined' && typeof Currency.systemToPublic === 'function' 
+                    ? Currency.systemToPublic(totalAmountSystem)
+                    : (totalAmountSystem / 100);
+                
                 const ticketData = {
                     id: data.receiptId || data.receipt?.id,
                     receiptId: data.receiptId || data.receipt?.id,
                     roundId: data.roundId,
                     status: data.status || 'pending',
                     prize: data.prize || 0,
-                    bets: data.bets || data.receipt?.bets || [],
-                    totalAmount: data.totalAmount || (data.receipt?.bets ? data.receipt.bets.reduce((sum, b) => sum + (Number(b.value) || 0), 0) / 100 : 0),
+                    bets: betsFromData.map(bet => ({
+                        ...bet,
+                        value: typeof Currency !== 'undefined' && typeof Currency.systemToPublic === 'function'
+                            ? Currency.systemToPublic(Number(bet.value) || 0)
+                            : ((Number(bet.value) || 0) / 100)
+                    })),
+                    totalAmount: typeof totalAmountPublic === 'object' && totalAmountPublic.toNumber 
+                        ? totalAmountPublic.toNumber() 
+                        : Number(totalAmountPublic),
                     created_time: data.created_time || data.receipt?.created_time || new Date().toISOString(),
                     date: data.date || data.created_time || data.receipt?.created_time || new Date().toISOString(),
                     user_id: data.receipt?.user_id || data.user_id || null
@@ -2958,7 +3211,7 @@ class App {
                 if (this.currentPage === 'dashboard' && ticketData.id && ticketData.bets && ticketData.bets.length > 0) {
                     if (this.dashboardAddTicketToTable) {
                         try {
-                            this.dashboardAddTicketToTable(ticketData);
+                        this.dashboardAddTicketToTable(ticketData);
                             console.log('✅ [DASHBOARD] Ticket ajouté directement au DOM');
                         } catch (err) {
                             console.warn('⚠️ [DASHBOARD] Erreur ajout direct ticket:', err);
@@ -2972,7 +3225,7 @@ class App {
                     // Note: Le serveur devrait déjà filtrer, mais on peut aussi vérifier côté client
                     if (this.myBetsAddTicketToTable) {
                         try {
-                            this.myBetsAddTicketToTable(ticketData);
+                        this.myBetsAddTicketToTable(ticketData);
                             console.log('✅ [MY-BETS] Ticket ajouté directement au DOM');
                         } catch (err) {
                             console.warn('⚠️ [MY-BETS] Erreur ajout direct ticket:', err);
@@ -2996,19 +3249,27 @@ class App {
 
             case 'receipt_deleted':
             case 'receipt_cancelled':
-                // ✅ OPTIMISATION: Supprimer directement le ticket du tableau sans appel API
-                console.log('🎫 Ticket supprimé - Round:', data.roundId, 'Ticket ID:', data.receiptId);
+                // ✅ CORRECTION: Le ticket est maintenant marqué comme "cancelled" au lieu d'être supprimé
+                // On peut soit le supprimer du DOM, soit mettre à jour son statut
+                console.log('🎫 Ticket annulé (statut "cancelled") - Round:', data.roundId, 'Ticket ID:', data.receiptId);
+                console.log('🔍 [DEBUG] currentPage:', this.currentPage, 'dashboardRemoveTicketFromTable:', typeof this.dashboardRemoveTicketFromTable);
                 
                 // ✅ Mise à jour DIRECTE du DOM pour le dashboard
+                // Option 1: Supprimer le ticket du DOM (recommandé car les API filtrent déjà les "cancelled")
                 if (this.currentPage === 'dashboard') {
+                    console.log('✅ [DASHBOARD] Tentative suppression ticket via WebSocket');
                     if (this.dashboardRemoveTicketFromTable) {
+                        console.log('✅ [DASHBOARD] Appel dashboardRemoveTicketFromTable pour ticket:', data.receiptId);
                         this.dashboardRemoveTicketFromTable(data.receiptId);
                     } else {
+                        console.warn('⚠️ [DASHBOARD] dashboardRemoveTicketFromTable non disponible, fallback refresh');
                         // Fallback: refresh complet si la fonction n'est pas disponible
                         if (this.dashboardRefreshTickets) {
-                            this.dashboardRefreshTickets();
+                            this.dashboardRefreshTickets(true); // Force refresh pour éviter cache
                         }
                     }
+                } else {
+                    console.log('⚠️ [DASHBOARD] currentPage !== dashboard, page actuelle:', this.currentPage);
                 }
                 
                 // ✅ Mise à jour DIRECTE du DOM pour my-bets
@@ -3018,7 +3279,8 @@ class App {
                     } else {
                         // Fallback: refresh complet
                         if (this.myBetsFetchMyBets) {
-                            this.myBetsFetchMyBets(1);
+                            const currentPage = document.getElementById('currentPage')?.textContent || 1;
+                            this.myBetsFetchMyBets(parseInt(currentPage, 10));
                         }
                     }
                 }
@@ -3029,7 +3291,7 @@ class App {
                 }
                 
                 // Notification
-                if (data.event === 'receipt_cancelled') {
+                if (data.event === 'receipt_cancelled' || data.status === 'cancelled') {
                     this.showToast(`❌ Ticket #${data.receiptId} annulé - Round #${data.roundId || 'N/A'}`, 'info');
                 }
                 break;

@@ -126,11 +126,13 @@ export async function createNewRound(options = {}) {
 
         // 3️⃣ CRÉER LE NOUVEAU ROUND
         const newRoundId = await generateRoundId();
+        
+        // ✅ LOGIQUE ORIGINALE: Attribuer une place aléatoire à chaque participant (1-6) sans duplication
+        // Le participant avec place: 1 est le gagnant
         const basePlaces = Array.from({ length: BASE_PARTICIPANTS.length }, (_, i) => i + 1);
         const shuffledPlaces = chacha20Shuffle(basePlaces);
         
-        // ✅ CORRECTION CRITIQUE: Mélanger l'ordre des participants pour éviter les patterns
-        // Cela garantit que l'index du gagnant sélectionné aléatoirement pointe vers différents participants
+        // ✅ Mélanger l'ordre des participants pour éviter les patterns
         const shuffledParticipants = chacha20Shuffle([...BASE_PARTICIPANTS]);
         console.log(`[ROUND-CREATE] 🎲 Participants mélangés:`, shuffledParticipants.map(p => `№${p.number} ${p.name}`).join(', '));
 
@@ -138,13 +140,21 @@ export async function createNewRound(options = {}) {
             id: newRoundId,
             participants: shuffledParticipants.map((p, i) => ({
                 ...p,
-                place: shuffledPlaces[i],
+                place: shuffledPlaces[i], // ✅ Place aléatoire (1-6) sans duplication, place: 1 = gagnant
             })),
             receipts: [],
             lastReceiptId: 3,
             totalPrize: 0,
             persisted: false
         };
+        
+        // ✅ Trouver le gagnant (participant avec place: 1)
+        const winner = newRound.participants.find(p => p.place === 1);
+        if (winner) {
+            console.log(`[ROUND-CREATE] 🏆 Gagnant déterminé: №${winner.number} ${winner.name} (place: 1)`);
+        } else {
+            console.error(`[ROUND-CREATE] ❌ ERREUR: Aucun participant avec place: 1 trouvé!`);
+        }
 
         gameState.currentRound = newRound;
         console.log(`[ROUND-CREATE] ✅ Nouveau round #${newRoundId} en mémoire`);
@@ -307,15 +317,27 @@ export async function createNewRound(options = {}) {
         if (broadcast && typeof broadcast === 'function') {
             const elapsedFromRaceStart = raceStartTime ? (now - raceStartTime) : 0;
             
-            console.log(`[ROUND-CREATE] 🎙️ Broadcasting new_round (elapsed: ${elapsedFromRaceStart}ms)`);
+            // ✅ CORRECTION CRITIQUE: S'assurer que currentRound contient bien le nouveau round ID
+            const currentRoundForBroadcast = JSON.parse(JSON.stringify(newRound));
+            if (currentRoundForBroadcast.id !== newRoundId) {
+                console.error(`[ROUND-CREATE] ❌ INCOHÉRENCE: currentRound.id (${currentRoundForBroadcast.id}) !== newRoundId (${newRoundId})`);
+                currentRoundForBroadcast.id = newRoundId;
+                console.log(`[ROUND-CREATE] ✅ Correction appliquée: currentRound.id mis à jour vers ${newRoundId}`);
+            }
+            
+            console.log(`[ROUND-CREATE] 🎙️ Broadcasting new_round:`);
+            console.log(`   - roundId: ${newRoundId}`);
+            console.log(`   - currentRound.id: ${currentRoundForBroadcast.id}`);
+            console.log(`   - isRaceRunning: ${gameState.isRaceRunning}`);
+            console.log(`   - elapsed: ${elapsedFromRaceStart}ms`);
             
             broadcast({
                 event: "new_round",
-                roundId: newRoundId,
-                game: JSON.parse(JSON.stringify(newRound)),
-                currentRound: JSON.parse(JSON.stringify(newRound)),
+                roundId: newRoundId, // ✅ CRITIQUE: Round ID explicite
+                game: currentRoundForBroadcast,
+                currentRound: currentRoundForBroadcast, // ✅ CRITIQUE: Contient le nouveau round ID
                 participants: newRound.participants,
-                isRaceRunning: gameState.isRaceRunning,
+                isRaceRunning: gameState.isRaceRunning, // ✅ Doit être false après la course
                 raceStartTime: gameState.isRaceRunning ? gameState.raceStartTime : null,
                 raceEndTime: gameState.isRaceRunning ? gameState.raceEndTime : null,
                 gameHistory: gameState.gameHistory || [],
@@ -326,6 +348,8 @@ export async function createNewRound(options = {}) {
                     endTime: gameState.nextRoundStartTime
                 }
             });
+            
+            console.log(`[ROUND-CREATE] ✅ Broadcast new_round envoyé avec roundId=${newRoundId}`);
         } else {
             console.warn('[ROUND-CREATE] ⚠️ Fonction broadcast non fournie');
         }

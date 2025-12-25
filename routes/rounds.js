@@ -335,26 +335,23 @@ export default function createRoundsRouter(broadcast) {
             return null;
         }
 
-        // ✅ CORRECTION CRITIQUE: Calculer le gagnant (ALÉATOIRE) avec logs détaillés
-        console.log(`[RACE-RESULTS] 🎲 Sélection du gagnant parmi ${participants.length} participants:`);
-        participants.forEach((p, i) => {
-            console.log(`   [${i}] №${p.number} ${p.name} (place: ${p.place})`);
-        });
+        // ✅ LOGIQUE SIMPLIFIÉE: Le gagnant est déjà déterminé dans game.js lors de la création du round
+        // Le participant avec place: 1 est le gagnant (déterminé aléatoirement dans createNewRound)
+        const winner = participants.find(p => p.place === 1);
         
-        const winnerIndex = chacha20RandomInt(participants.length);
-        const winner = participants[winnerIndex];
-        console.log(`[RACE-RESULTS] ✅ Gagnant sélectionné aléatoirement: Index ${winnerIndex} → №${winner.number} ${winner.name}`);
+        if (!winner) {
+            console.error(`[RACE-RESULTS] ❌ ERREUR: Aucun participant avec place: 1 trouvé!`);
+            console.error(`[RACE-RESULTS] Participants disponibles:`, participants.map(p => `№${p.number} ${p.name} (place: ${p.place})`));
+            return null;
+        }
+        
+        console.log(`[RACE-RESULTS] 🏆 Gagnant trouvé: №${winner.number} ${winner.name} (place: 1)`);
         
         const winnerWithPlace = { ...winner, place: 1, family: winner.family ?? 0 };
-
-        // ✅ CORRECTION CRITIQUE: Mettre à jour les participants AVANT de copier savedRoundData
-        // Cela garantit que savedRoundData contient les bons participants avec le gagnant marqué place=1
-        const updatedParticipants = participants.map(p =>
-            (p.number === winner.number ? winnerWithPlace : p)
-        );
         
-        // Copier et mettre à jour les participants dans savedRoundData
-        savedRoundData.participants = updatedParticipants;
+        // ✅ Les participants sont déjà corrects (places assignées dans game.js)
+        // Pas besoin de modifier les places, elles sont déjà correctes
+        savedRoundData.participants = participants;
 
         // Calculer les gains pour chaque ticket
         let totalPrizeAll = 0;
@@ -920,6 +917,16 @@ export default function createRoundsRouter(broadcast) {
                         }
                     }
                     
+                    // ✅ CORRECTION CRITIQUE: Inclure currentRound avec les participants mis à jour
+                    // Cela garantit que le movie screen et le finish screen utilisent le même gagnant
+                    const currentRoundWithWinner = {
+                        ...gameState.currentRound,
+                        participants: raceResults.participants, // Participants avec le gagnant marqué place=1
+                        receipts: raceResults.receipts,
+                        totalPrize: raceResults.totalPrize,
+                        winner: raceResults.winner
+                    };
+                    
                     broadcast({
                         event: "race_results",
                         roundId: raceResults.roundId,
@@ -927,6 +934,7 @@ export default function createRoundsRouter(broadcast) {
                         receipts: JSON.parse(JSON.stringify(raceResults.receipts)),
                         totalPrize: raceResults.totalPrize,
                         participants: raceResults.participants,
+                        currentRound: currentRoundWithWinner, // ✅ NOUVEAU: Inclure currentRound avec le gagnant
                         gameHistory: gameState.gameHistory || [],
                         currentScreen: "finish_screen",  // ✅ NOUVEAU: Confirmer l'écran actuel
                         // ✅ NE PAS inclure isRaceRunning=false ici - cela sera dans new_round
@@ -938,9 +946,14 @@ export default function createRoundsRouter(broadcast) {
                 // Utiliser createNewRound() - une seule source de vérité consolidée
                 console.log('[RACE-SEQ] ÉTAPE 2: Création du nouveau round via createNewRound()');
                 const raceStartTimeBackup = gameState.raceStartTime;
+                
+                // ✅ CORRECTION CRITIQUE: S'assurer que isRaceRunning est false AVANT de créer le nouveau round
+                // Cela garantit que le nouveau round est créé dans un état "en attente" et non "course en cours"
                 gameState.isRaceRunning = false;
                 gameState.raceStartTime = null;
                 gameState.raceEndTime = null;
+                
+                console.log(`[RACE-SEQ] ✅ État réinitialisé: isRaceRunning=${gameState.isRaceRunning}, raceStartTime=${gameState.raceStartTime}, raceEndTime=${gameState.raceEndTime}`);
                 
                 // ✅ Appeler la nouvelle fonction unifiée
                 // archiveCurrentRound=true car c'est après une course
@@ -957,15 +970,40 @@ export default function createRoundsRouter(broadcast) {
                     checkLock: false             // ❌ NE PAS vérifier le lock car il est déjà set dans onCleanup()
                 });
                 
+                // ✅ CORRECTION CRITIQUE: Vérifier que le nouveau round ID est bien créé
+                if (!newRoundId) {
+                    console.error('[RACE-SEQ] ❌ ERREUR CRITIQUE: createNewRound() n\'a pas retourné de round ID!');
+                    console.error('[RACE-SEQ] currentRound:', gameState.currentRound);
+                } else {
+                    console.log(`[RACE-SEQ] ✅ Nouveau round créé avec succès: ID=${newRoundId}`);
+                    console.log(`[RACE-SEQ] 📊 Vérification: gameState.currentRound.id=${gameState.currentRound?.id}`);
+                    
+                    // ✅ VÉRIFICATION: S'assurer que gameState.currentRound.id correspond au nouveau round ID
+                    if (gameState.currentRound?.id !== newRoundId) {
+                        console.error(`[RACE-SEQ] ❌ INCOHÉRENCE: gameState.currentRound.id (${gameState.currentRound?.id}) !== newRoundId (${newRoundId})`);
+                        // Corriger l'incohérence
+                        if (gameState.currentRound) {
+                            gameState.currentRound.id = newRoundId;
+                            console.log(`[RACE-SEQ] ✅ Correction appliquée: gameState.currentRound.id mis à jour vers ${newRoundId}`);
+                        }
+                    }
+                }
+                
                 // ✅ ÉTAPE 3: CRÉER LE TIMER (T=35s) - ATOMIQUE
                 console.log('[RACE-SEQ] ÉTAPE 3: Démarrage du timer pour le prochain round');
                 const timerNow = Date.now();
                 gameState.nextRoundStartTime = timerNow + ROUND_WAIT_DURATION_MS;
                 
+                // ✅ CORRECTION: Utiliser le nouveau round ID pour le timer_update
+                const roundIdForTimer = newRoundId || gameState.currentRound?.id;
+                if (!roundIdForTimer) {
+                    console.error('[RACE-SEQ] ❌ ERREUR: Aucun round ID disponible pour timer_update!');
+                }
+                
                 broadcast({
                     event: 'timer_update',
                     serverTime: timerNow,
-                    roundId: newRoundId || gameState.currentRound?.id,
+                    roundId: roundIdForTimer,
                     timer: {
                         timeLeft: ROUND_WAIT_DURATION_MS,
                         totalDuration: ROUND_WAIT_DURATION_MS,
@@ -973,7 +1011,7 @@ export default function createRoundsRouter(broadcast) {
                         endTime: gameState.nextRoundStartTime
                     }
                 });
-                console.log(`[TIMER] ⏱️ Timer de ${ROUND_WAIT_DURATION_MS}ms créé et broadcasté`);
+                console.log(`[TIMER] ⏱️ Timer de ${ROUND_WAIT_DURATION_MS}ms créé et broadcasté pour round #${roundIdForTimer}`);
                 
             } catch (error) {
                 // ✅ Si une erreur survient, libérer le lock acquis au début de onCleanup()

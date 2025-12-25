@@ -173,7 +173,9 @@ router.get("/", cacheResponse(30), async (req, res) => {
       try {
         const dbLimit = parseInt(limit, 10) || 50;
         const dbReceipts = await getReceiptsByUser(userId, dbLimit);
-        const receiptIds = dbReceipts.map(r => r.receipt_id);
+        // ✅ CRITIQUE: Filtrer les tickets avec statut "cancelled"
+        const validDbReceipts = dbReceipts.filter(r => r.status !== 'cancelled');
+        const receiptIds = validDbReceipts.map(r => r.receipt_id);
         
         // OPTIMISATION: Fetch tous les bets en une seule query au lieu de N queries
         const allBets = receiptIds.length > 0 ? await getBetsByReceiptsBatch(receiptIds) : [];
@@ -183,7 +185,7 @@ router.get("/", cacheResponse(30), async (req, res) => {
           betsByReceipt[bet.receipt_id].push(bet);
         });
         
-        const ticketsFromDb = dbReceipts.map(r => {
+        const ticketsFromDb = validDbReceipts.map(r => {
           const bets = betsByReceipt[r.receipt_id] || [];
           const totalAmountPublic = systemToPublic(Number(r.total_amount) || 0);
           const prizePublic = systemToPublic(Number(r.prize) || 0);
@@ -250,13 +252,16 @@ router.get("/", cacheResponse(30), async (req, res) => {
                 COUNT(b.bet_id) as bet_count
          FROM receipts r 
          LEFT JOIN bets b ON r.receipt_id = b.receipt_id 
-         WHERE r.user_id = $1
+         WHERE r.user_id = $1 AND r.status != 'cancelled'
          GROUP BY r.receipt_id 
          ORDER BY r.created_at DESC`,
         [userId]
       );
       
-      for (const dbReceipt of allDbReceipts.rows) {
+      // ✅ CRITIQUE: Filtrer aussi au niveau application pour sécurité supplémentaire
+      const validDbReceipts = allDbReceipts.rows.filter(r => r.status !== 'cancelled');
+      
+      for (const dbReceipt of validDbReceipts) {
         const bets = await getBetsByReceipt(dbReceipt.receipt_id);
         
         // Convertir total_amount de système à publique
@@ -308,8 +313,12 @@ router.get("/", cacheResponse(30), async (req, res) => {
     const isRoundFinished = gameState.raceEndTime !== null || 
                             (gameState.raceStartTime !== null && !gameState.isRaceRunning && hasWinner);
     
+    // ✅ CRITIQUE: Exclure les tickets avec statut "cancelled" (tickets supprimés)
+    // Les tickets annulés ne doivent jamais apparaître dans les réponses API
+    allTickets = allTickets.filter(t => t.status !== 'cancelled');
+    console.log(`✅ [MY-BETS] Tickets "cancelled" exclus de la réponse`);
+    
     // ✅ CORRECTION: Filtrer par user_id dans gameState et ajouter les tickets du round actuel
-    const currentRoundId = gameState.currentRound?.id;
     const pendingTickets = (gameState.currentRound.receipts || [])
       .filter(r => {
         // Filtrer par user_id
@@ -334,7 +343,13 @@ router.get("/", cacheResponse(30), async (req, res) => {
     if (allTickets.length === 0) {
       const historicalTickets = gameState.gameHistory.flatMap(round => 
         (round.receipts || [])
-          .filter(r => !r.user_id || r.user_id === userId)
+          .filter(r => {
+            // Filtrer par user_id
+            if (r.user_id && r.user_id !== userId) return false;
+            // ✅ CRITIQUE: Exclure les tickets avec statut "cancelled"
+            if (r.status === 'cancelled') return false;
+            return true;
+          })
           .map(r => {
             const ticket = formatTicket(r, round.id, 'historical');
             ticket.isRoundFinished = true;

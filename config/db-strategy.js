@@ -652,6 +652,7 @@ export default {
   initRoundCache,
   addTicketToRoundCache,
   deleteTicketFromRoundCache,
+  updateTicketInRoundCache, // ✅ NOUVEAU: Export pour mise à jour statut tickets
   getRoundTicketsFromCache,
   getRoundParticipantsFromCache,
   clearRoundCache,
