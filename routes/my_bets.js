@@ -300,23 +300,38 @@ router.get("/", cacheResponse(30), async (req, res) => {
       // Fallback: utiliser gameState si DB échoue
     }
 
-    // Si la DB n'a rien retourné, fallback sur gameState (filtrer par user_id)
+    // ✅ CRITIQUE: Toujours ajouter les tickets de gameState pour le round actuel
+    // Cela garantit que les nouveaux tickets (pas encore en DB) sont inclus
+    const hasWinner = Array.isArray(gameState.currentRound.participants) && 
+                     gameState.currentRound.participants.some(p => p.place === 1);
+    
+    const isRoundFinished = gameState.raceEndTime !== null || 
+                            (gameState.raceStartTime !== null && !gameState.isRaceRunning && hasWinner);
+    
+    // ✅ CORRECTION: Filtrer par user_id dans gameState et ajouter les tickets du round actuel
+    const currentRoundId = gameState.currentRound?.id;
+    const pendingTickets = (gameState.currentRound.receipts || [])
+      .filter(r => {
+        // Filtrer par user_id
+        if (r.user_id && r.user_id !== userId) return false;
+        // Ne pas inclure les tickets déjà présents dans allTickets (depuis DB)
+        return !allTickets.some(t => t.id === r.id || t.id === r.receipt_id);
+      })
+      .map(r => {
+        const ticket = formatTicket(r, currentRoundId, 'pending', isRoundFinished);
+        ticket.isRoundFinished = isRoundFinished;
+        ticket.isInCurrentRound = true; // Marquer comme ticket du round actuel
+        return ticket;
+      });
+    
+    // Ajouter les tickets du round actuel qui ne sont pas encore en DB
+    if (pendingTickets.length > 0) {
+      allTickets = [...pendingTickets, ...allTickets];
+      console.log(`✅ [MY-BETS] ${pendingTickets.length} ticket(s) du round actuel ajouté(s) depuis gameState`);
+    }
+    
+    // Si la DB n'a rien retourné, ajouter aussi les tickets historiques depuis gameState
     if (allTickets.length === 0) {
-      const hasWinner = Array.isArray(gameState.currentRound.participants) && 
-                       gameState.currentRound.participants.some(p => p.place === 1);
-      
-      const isRoundFinished = gameState.raceEndTime !== null || 
-                              (gameState.raceStartTime !== null && !gameState.isRaceRunning && hasWinner);
-      
-      // ✅ CORRECTION: Filtrer par user_id dans gameState aussi
-      const pendingTickets = (gameState.currentRound.receipts || [])
-        .filter(r => !r.user_id || r.user_id === userId)
-        .map(r => {
-          const ticket = formatTicket(r, gameState.currentRound.id, 'pending', isRoundFinished);
-          ticket.isRoundFinished = isRoundFinished;
-          return ticket;
-        });
-      
       const historicalTickets = gameState.gameHistory.flatMap(round => 
         (round.receipts || [])
           .filter(r => !r.user_id || r.user_id === userId)
@@ -327,7 +342,7 @@ router.get("/", cacheResponse(30), async (req, res) => {
           })
       );
       
-      allTickets = [...pendingTickets, ...historicalTickets].sort((a, b) => 
+      allTickets = [...historicalTickets].sort((a, b) => 
         new Date(b.date) - new Date(a.date)
       );
     }    // 4. Appliquer les filtres

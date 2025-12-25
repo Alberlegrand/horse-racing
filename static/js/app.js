@@ -709,64 +709,72 @@ class App {
                     return;
                 }
                 
-                // ✅ CORRECTION: Le dashboard doit afficher SEULEMENT les tickets de l'utilisateur
-                // Utiliser /api/v1/my-bets/ comme source unique pour garantir l'isolation des données
+                // ✅ CORRECTION: Le dashboard doit afficher TOUS les tickets du round actuel
+                // Utiliser /api/v1/init/dashboard pour récupérer tous les tickets (pas de filtre user_id)
                 
                 let tickets = [];
                 let roundId = this.currentRoundId;
                 let round = null;
                 let stats = {};
                 
-                // ✅ Source unique: Récupérer les tickets de l'utilisateur depuis my-bets
+                // ✅ Source: Récupérer TOUS les tickets du round actuel depuis /api/v1/init/dashboard
                 try {
-                    const res = await fetch('/api/v1/my-bets/?limit=100&page=1', { 
+                    const res = await fetch('/api/v1/init/dashboard', { 
                         credentials: 'include',
                         cache: force ? 'no-cache' : 'default'
                     });
                     if (!res.ok) throw new Error(`HTTP ${res.status}`);
                     const data = await res.json();
-                    const myBetsData = data?.data || {};
+                    const dashboardData = data?.data || {};
                     
-                    tickets = myBetsData.tickets || [];
-                    stats = myBetsData.stats || {};
+                    // Récupérer les tickets bruts depuis gameState.currentRound.receipts
+                    const rawTickets = dashboardData.tickets || [];
+                    const roundData = dashboardData.round || {};
                     
-                    console.debug(`✅ [DASHBOARD] ${tickets.length} ticket(s) de l'utilisateur récupéré(s)`);
+                    // Formater les tickets pour correspondre au format attendu
+                    tickets = rawTickets.map(t => {
+                        // Convertir les valeurs système (×100) en valeurs publiques
+                        const totalAmount = typeof t.total_amount === 'number' ? t.total_amount / 100 : 
+                                          (typeof t.total_amount === 'string' ? parseFloat(t.total_amount) / 100 : 0);
+                        
+                        return {
+                            id: t.id || t.receipt_id,
+                            receiptId: t.id || t.receipt_id,
+                            roundId: t.round_id || t.roundId || roundData.id,
+                            status: t.status || 'pending',
+                            prize: typeof t.prize === 'number' ? t.prize / 100 : 
+                                  (typeof t.prize === 'string' ? parseFloat(t.prize) / 100 : 0),
+                            bets: t.bets || [],
+                            totalAmount: totalAmount,
+                            created_time: t.created_time || t.created_at || t.date,
+                            date: t.created_time || t.created_at || t.date,
+                            user_id: t.user_id || null
+                        };
+                    });
                     
-                    // Récupérer le round ID depuis les tickets ou le serveur
-                    if (!roundId && tickets.length > 0) {
-                        roundId = tickets[0]?.roundId || null;
-                        if (roundId) {
-                            this.currentRoundId = roundId;
-                        }
+                    roundId = roundData.id || (tickets.length > 0 ? tickets[0]?.roundId : null);
+                    if (roundId) {
+                        this.currentRoundId = roundId;
                     }
                     
-                    // Si toujours pas de round ID, récupérer depuis l'API rounds pour l'affichage
-                    if (!roundId) {
-                        try {
-                            const roundRes = await fetch('/api/v1/rounds/', { 
-                                method: 'POST',
-                                credentials: 'include',
-                                headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({ action: 'get' }),
-                                cache: 'default'
-                            });
-                            if (roundRes.ok) {
-                                const roundData = await roundRes.json();
-                                roundId = roundData?.data?.id || null;
-                                if (roundId) {
-                                    this.currentRoundId = roundId;
-                                    round = { id: roundId, receipts: tickets.filter(t => t.roundId === roundId) };
-                                }
-                            }
-                        } catch (roundErr) {
-                            console.debug('⚠️ [DASHBOARD] Erreur récupération round ID (non bloquant):', roundErr.message);
-                        }
-                    } else {
-                        // Créer l'objet round avec les tickets filtrés par round ID
-                        round = { id: roundId, receipts: tickets.filter(t => t.roundId === roundId) };
-                    }
+                    // Créer l'objet round avec tous les tickets
+                    round = {
+                        id: roundId,
+                        participants: roundData.participants || [],
+                        receipts: tickets,
+                        totalPrize: dashboardData.totalPrize || 0
+                    };
+                    
+                    // Calculer les stats basiques
+                    stats = {
+                        totalReceipts: tickets.length,
+                        totalMise: tickets.reduce((sum, t) => sum + (t.totalAmount || 0), 0),
+                        totalPrize: round.totalPrize || 0
+                    };
+                    
+                    console.debug(`✅ [DASHBOARD] ${tickets.length} ticket(s) du round actuel récupéré(s)`);
                 } catch (err) {
-                    console.error('❌ [DASHBOARD] Erreur récupération tickets utilisateur:', err);
+                    console.error('❌ [DASHBOARD] Erreur récupération tickets:', err);
                     throw err;
                 }
                 
@@ -2904,8 +2912,26 @@ class App {
                 break;
                 
             case 'receipt_added':
-                // ✅ OPTIMISATION: Ajouter directement le ticket au tableau sans appel API
+                // ✅ CORRECTION: Invalider le cache et forcer un refresh pour garantir la synchronisation
                 console.log('🎫 Nouveau ticket ajouté - Round:', data.roundId, 'Ticket ID:', data.receiptId);
+                
+                // ✅ CRITIQUE: Invalider le cache des tickets pour forcer un refresh depuis l'API
+                // Le ticket peut ne pas être encore en DB, donc on attend un peu avant de rafraîchir
+                if (this.currentPage === 'dashboard' || this.currentPage === 'my-bets') {
+                    // Attendre un court délai pour que le ticket soit persisté en DB
+                    setTimeout(() => {
+                        // Invalider le cache et forcer un refresh
+                        if (this.currentPage === 'dashboard' && this.dashboardRefreshTickets) {
+                            console.log('🔄 [DASHBOARD] Refresh forcé après receipt_added');
+                            this.dashboardRefreshTickets(true); // force = true pour bypasser le cache
+                        } else if (this.currentPage === 'my-bets' && this.myBetsFetchMyBets) {
+                            console.log('🔄 [MY-BETS] Refresh forcé après receipt_added');
+                            // Récupérer la page actuelle et forcer le refresh
+                            const currentPage = document.getElementById('currentPage')?.textContent || 1;
+                            this.myBetsFetchMyBets(parseInt(currentPage, 10)); // Refresh depuis l'API
+                        }
+                    }, 800); // Attendre 800ms pour que le ticket soit persisté en DB (augmenté pour plus de sécurité)
+                }
                 
                 // Mettre à jour le round si nécessaire
                 if (data.roundId) {
@@ -2913,7 +2939,8 @@ class App {
                     if (currentRoundEl) currentRoundEl.textContent = data.roundId;
                 }
                 
-                // Formater le ticket depuis les données WebSocket (format unifié)
+                // ✅ OPTIONNEL: Essayer d'ajouter directement le ticket au DOM (si les données sont complètes)
+                // Cela permet une mise à jour immédiate pendant que l'API se synchronise
                 const ticketData = {
                     id: data.receiptId || data.receipt?.id,
                     receiptId: data.receiptId || data.receipt?.id,
@@ -2927,24 +2954,29 @@ class App {
                     user_id: data.receipt?.user_id || data.user_id || null
                 };
                 
-                // ✅ Mise à jour DIRECTE du DOM pour le dashboard
-                if (this.currentPage === 'dashboard') {
+                // ✅ Mise à jour DIRECTE du DOM pour le dashboard (si les données sont complètes)
+                if (this.currentPage === 'dashboard' && ticketData.id && ticketData.bets && ticketData.bets.length > 0) {
                     if (this.dashboardAddTicketToTable) {
-                        this.dashboardAddTicketToTable(ticketData);
-                    } else {
-                        // Fallback: refresh complet si la fonction n'est pas disponible
-                        if (this.dashboardRefreshTickets) {
-                            this.dashboardRefreshTickets();
+                        try {
+                            this.dashboardAddTicketToTable(ticketData);
+                            console.log('✅ [DASHBOARD] Ticket ajouté directement au DOM');
+                        } catch (err) {
+                            console.warn('⚠️ [DASHBOARD] Erreur ajout direct ticket:', err);
                         }
                     }
                 }
                 
-                // ✅ Mise à jour DIRECTE du DOM pour my-bets
-                if (this.currentPage === 'my-bets') {
+                // ✅ Mise à jour DIRECTE du DOM pour my-bets (si les données sont complètes)
+                if (this.currentPage === 'my-bets' && ticketData.id && ticketData.bets && ticketData.bets.length > 0) {
                     // Vérifier si le ticket appartient à l'utilisateur connecté
                     // Note: Le serveur devrait déjà filtrer, mais on peut aussi vérifier côté client
                     if (this.myBetsAddTicketToTable) {
-                        this.myBetsAddTicketToTable(ticketData);
+                        try {
+                            this.myBetsAddTicketToTable(ticketData);
+                            console.log('✅ [MY-BETS] Ticket ajouté directement au DOM');
+                        } catch (err) {
+                            console.warn('⚠️ [MY-BETS] Erreur ajout direct ticket:', err);
+                        }
                     } else {
                         // Fallback: refresh complet
                         if (this.myBetsFetchMyBets) {
