@@ -726,8 +726,7 @@ export default function createRoundsRouter(broadcast) {
                 // Cela doit être fait ICI, après avoir déterminé le gagnant et trouvé participant_id
                 if (winnerParticipantId && winnerWithPlace && finishedRoundId) {
                     try {
-                        // ✅ Winners are now persisted via localStorage on frontend
-                        // No database storage needed for winners display
+                        // ✅ Sauvegarder le gagnant en base de données (plus de localStorage)
                         if (winnerWithPlace.number && winnerWithPlace.name) {
                             console.log(`[RACE-RESULTS] 🏆 Gagnant de la course:`);
                             console.log(`   - Round ID: ${finishedRoundId}`);
@@ -735,7 +734,23 @@ export default function createRoundsRouter(broadcast) {
                             console.log(`   - Name: ${winnerWithPlace.name}`);
                             console.log(`   - Family: ${winnerWithPlace.family ?? 0}`);
                             console.log(`   - Prize: ${totalPrizeAll}`);
-                            console.log(`[RACE-RESULTS] 💾 Winner will be persisted via localStorage on frontend (not DB)`);
+                            
+                            // ✅ Importer et utiliser saveWinner pour sauvegarder en DB
+                            const { saveWinner } = await import('../models/winnerModel.js');
+                            const winnerData = {
+                                id: winnerParticipantId,
+                                number: winnerWithPlace.number,
+                                name: winnerWithPlace.name,
+                                family: winnerWithPlace.family ?? 0,
+                                prize: totalPrizeAll
+                            };
+                            
+                            const savedWinner = await saveWinner(finishedRoundId, winnerData);
+                            if (savedWinner) {
+                                console.log(`[RACE-RESULTS] ✅ Gagnant sauvegardé en base de données (winner_id: ${savedWinner.winner_id})`);
+                            } else {
+                                console.warn(`[RACE-RESULTS] ⚠️ Échec de la sauvegarde du gagnant en DB`);
+                            }
                         } else {
                             console.error(`[RACE-RESULTS] ❌ Données gagnant incomplètes:`, {
                                 number: winnerWithPlace.number,
@@ -745,6 +760,7 @@ export default function createRoundsRouter(broadcast) {
                         }
                     } catch (saveErr) {
                         console.error(`[RACE-RESULTS] ❌ Erreur sauvegarde gagnant:`, saveErr.message);
+                        console.error(`   Stack:`, saveErr.stack);
                     }
                 } else {
                     console.error(`[RACE-RESULTS] ❌ Impossible de sauvegarder gagnant: roundId=${finishedRoundId}, winnerId=${winnerParticipantId}, winner=${winnerWithPlace ? 'present' : 'null'}`);

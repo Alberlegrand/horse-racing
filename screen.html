@@ -830,6 +830,7 @@
             var targetEndTime = 0; // Timestamp exact de la fin du compte à rebours
             var ws = null; // WebSocket pour la synchronisation en temps réel
             var lastRaceEndId = null; // ✅ Track last race_end to prevent duplicates
+            var currentRoundId = null; // ✅ Track current round ID to prevent stale display
 
             // --- Configuration ---
             var delaiApresFinCourse = 5000; // Délai local avant de nettoyer l'UI (5s)
@@ -895,6 +896,49 @@
                 });
             });
 
+            /**
+             * ✅ FONCTION CENTRALISÉE: Met à jour le round ID affiché
+             * Utilise une source unique de vérité pour éviter les incohérences
+             */
+            function mettreAJourRoundId(roundId, source) {
+                if (!roundId) {
+                    console.warn(`⚠️ [ROUND-ID] Tentative de mise à jour avec roundId invalide depuis ${source}:`, roundId);
+                    return;
+                }
+                
+                // ✅ Vérifier si le round ID a changé
+                if (currentRoundId === roundId) {
+                    console.log(`ℹ️ [ROUND-ID] Round ID inchangé (${roundId}), pas de mise à jour nécessaire`);
+                    return;
+                }
+                
+                const oldRoundId = currentRoundId;
+                currentRoundId = roundId;
+                
+                // Mettre à jour l'affichage
+                $('#currentRound').text('🏁 Round ' + roundId);
+                
+                console.log(`✅ [ROUND-ID] Round ID mis à jour: ${oldRoundId || 'null'} → ${roundId} (source: ${source})`);
+            }
+            
+            /**
+             * ✅ FONCTION: Extrait le round ID de manière cohérente depuis les données WebSocket
+             * Priorité: currentRound.id > roundId > game.id > currentRoundId (fallback)
+             */
+            function extraireRoundId(data) {
+                if (data.currentRound?.id) {
+                    return data.currentRound.id;
+                }
+                if (data.roundId) {
+                    return data.roundId;
+                }
+                if (data.game?.id) {
+                    return data.game.id;
+                }
+                // Fallback: utiliser le round ID actuel si disponible
+                return currentRoundId;
+            }
+            
             /**
              * Met à jour la barre de progression et l'affichage du temps restant.
              */
@@ -1225,11 +1269,12 @@
                         console.log(`✅ [WINNERS-SYNC] ${removed.length} gagnants anciens supprimés (limite: 6)`);
                     }
                     
-                    // ✅ SAUVEGARDER en localStorage pour persistance (source unique)
-                    // Sauvegarder directement l'objet payload au lieu de parser le DOM
-                    sauvegarderGagnantEnLocalStorage(payload);
-                    
-                    console.log(`✅ [WINNERS-SYNC] ✓ Historique synchronisé avec finish_screen et localStorage sauvegardé`);
+                    // ✅ Recharger depuis l'API pour avoir la liste complète à jour
+                    // Le serveur a déjà sauvegardé le gagnant en base de données
+                    console.log(`✅ [WINNERS-SYNC] ✓ Gagnant ajouté, rechargement depuis l'API...`);
+                    setTimeout(() => {
+                        chargerGagnantsDepuisAPI();
+                    }, 500); // Petit délai pour laisser le temps au serveur de sauvegarder
                 } catch (e) {
                     console.warn('❌ [WINNERS-SYNC] Impossible d\'ajouter le gagnant depuis finish_screen:', e);
                 }
@@ -1386,8 +1431,10 @@
                     timeout: 2000,
                     success: function (data) {
                         console.log('✅ État initial:', data);
-                        if (data.currentRound && data.currentRound.id) {
-                            $('#currentRound').text('🏁 Round ' + data.currentRound.id);
+                        // ✅ Utiliser la fonction centralisée pour mettre à jour le round ID
+                        const roundId = extraireRoundId(data);
+                        if (roundId) {
+                            mettreAJourRoundId(roundId, 'synchroniserAuChargement');
                         }
                         // ✅ CORRECTION: Gagnants chargés UNIQUEMENT depuis localStorage
                         // Ne pas charger depuis API pour éviter les incohérences
@@ -1453,8 +1500,11 @@
                                 // Ne pas charger depuis connected WebSocket pour éviter les incohérences
                                 console.log('ℹ️ Gagnants chargés depuis localStorage (pas depuis WebSocket connected)');
                                 rafraichirAffichageGagnants(); // S'assurer que localStorage est affiché
-                                if (data.roundId) {
-                                    $('#currentRound').text('🏁 Round ' + data.roundId);
+                                
+                                // ✅ Utiliser la fonction centralisée pour mettre à jour le round ID
+                                const connectedRoundId = extraireRoundId(data);
+                                if (connectedRoundId) {
+                                    mettreAJourRoundId(connectedRoundId, 'connected');
                                 }
                                 // Synchroniser le timer si disponible
                                 if (data.timerTimeLeft > 0) {
@@ -1468,6 +1518,12 @@
                             case 'race_start':
                                 console.log('🏁 Course démarrée - affichage movie_screen (T=' + Date.now() + ')');
                                 window.raceStartTime = Date.now();  // ✅ Tracker pour logs
+                                
+                                // ✅ CORRECTION: Mettre à jour le round ID AVANT de masquer le panel
+                                const raceStartRoundId = extraireRoundId(data);
+                                if (raceStartRoundId) {
+                                    mettreAJourRoundId(raceStartRoundId, 'race_start');
+                                }
                                 
                                 // ✅ Arrêter le timer d'attente du round
                                 if (countdownInterval) {
@@ -1514,6 +1570,13 @@
                                 // On utilise race_end seulement pour mettre à jour les données si nécessaire
                                 console.log('🏆 Course terminée (T+' + (Date.now() - window.raceStartTime) + 'ms)');
                                 console.log('   → Le Movie gère automatiquement la transition vers finish_screen');
+                                
+                                // ✅ CORRECTION: Mettre à jour le round ID si fourni
+                                const raceEndRoundId = extraireRoundId(data);
+                                if (raceEndRoundId) {
+                                    mettreAJourRoundId(raceEndRoundId, 'race_end');
+                                }
+                                
                                 // ✅ Ne rien faire ici - le système de screens gère tout
                                 break;
                                 
@@ -1522,6 +1585,12 @@
                                 // Le système de screens (FinishScreen) affichera automatiquement les résultats
                                 console.log('🎊 Résultats de course reçus (T+' + (Date.now() - window.raceStartTime) + 'ms)');
                                 console.log('   Winner:', data.winner?.number, data.winner?.name, 'Prize:', data.totalPrize);
+                                
+                                // ✅ CORRECTION: Mettre à jour le round ID si fourni
+                                const raceResultsRoundId = extraireRoundId(data);
+                                if (raceResultsRoundId) {
+                                    mettreAJourRoundId(raceResultsRoundId, 'race_results');
+                                }
                                 
                                 // ✅ Mettre à jour le GameManager avec les résultats pour que FinishScreen les affiche
                                 if (window.client && window.client._context && data.currentRound) {
@@ -1542,9 +1611,9 @@
                                     }
                                 }
                                 
-                                // ✅ CORRECTION: Gagnants seront mis à jour par l'événement round_winner + localStorage
+                                // ✅ CORRECTION: Gagnants seront mis à jour par l'événement round_winner + API
                                 // Ne pas charger depuis race_results pour éviter les incohérences
-                                console.log('ℹ️ race_results reçu - gagnants seront mis à jour par événement round_winner + localStorage');
+                                console.log('ℹ️ race_results reçu - gagnants seront mis à jour par événement round_winner + API');
                                 
                                 // Si des tickets sont inclus, mettre en cache pour le cashier
                                 if (data.receipts && Array.isArray(data.receipts)) {
@@ -1596,9 +1665,11 @@
                                         $('.screen').removeClass('active');
                                         $('.game_screen').addClass('active');
                                         $('#currentRound, #timeRemainingDisplay, .progress-container').show();
-                                        const roundId = data.currentRound?.id || data.roundId || data.game?.id;
-                                        if (roundId) {
-                                            $('#currentRound').text('🏁 Round ' + roundId);
+                                        
+                                        // ✅ CORRECTION: Utiliser la fonction centralisée pour mettre à jour le round ID
+                                        const delayedRoundId = extraireRoundId(data);
+                                        if (delayedRoundId) {
+                                            mettreAJourRoundId(delayedRoundId, 'new_round (delayed)');
                                         }
                                         if (data.currentRound?.participants?.length > 0) {
                                             afficherParticipants(data.currentRound.participants);
@@ -1635,10 +1706,12 @@
                                 // 2. Réafficher la barre de timer du round
                                 $('#currentRound, #timeRemainingDisplay, .progress-container').show();
                                 
-                                // 3. Mettre à jour le round ID
-                                const roundId = data.currentRound?.id || data.roundId || data.game?.id;
-                                if (roundId) {
-                                    $('#currentRound').text('🏁 Round ' + roundId);
+                                // 3. ✅ CORRECTION: Utiliser la fonction centralisée pour mettre à jour le round ID
+                                const newRoundId = extraireRoundId(data);
+                                if (newRoundId) {
+                                    mettreAJourRoundId(newRoundId, 'new_round');
+                                } else {
+                                    console.warn('⚠️ [NEW-ROUND] Aucun round ID trouvé dans les données:', data);
                                 }
                                 
                                 // 4. Recharger les participants
@@ -1670,6 +1743,12 @@
                                 
                             // ✅ NOUVEAU: Timer update périodique (resync tous les 500ms)
                             case 'timer_update':
+                                // ✅ CORRECTION: Mettre à jour le round ID si fourni dans timer_update
+                                const timerRoundId = extraireRoundId(data);
+                                if (timerRoundId) {
+                                    mettreAJourRoundId(timerRoundId, 'timer_update');
+                                }
+                                
                                 if (data.timer && data.timer.timeLeft >= 0) {
                                     // Resync le timer local avec le serveur
                                     totalDelayMs = data.timer.totalDuration;
@@ -1730,140 +1809,75 @@
             // --- Lancement de la synchronisation au chargement ---
             synchroniserAuChargement();
             
-            // ✅ FONCTION: Recharger les gagnants depuis localStorage (appelée lors des transitions d'écran)
+            // ✅ FONCTION: Recharger les gagnants depuis l'API (appelée lors des transitions d'écran)
             function rafraichirAffichageGagnants() {
-                console.log('🔄 [WINNERS-REFRESH] Rafraîchissement de l\'affichage des gagnants depuis localStorage...');
-                chargerGagnantsDepuisLocalStorage();
+                console.log('🔄 [WINNERS-REFRESH] Rafraîchissement de l\'affichage des gagnants depuis l\'API...');
+                chargerGagnantsDepuisAPI();
             }
             
-            // ✅ CORRECTION: Charger les gagnants depuis localStorage
-            // localStorage est la SEULE source de vérité pour l'affichage des last winners
-            // Aucune dépendance à BD, API ou WebSocket
-            function chargerGagnantsDepuisLocalStorage() {
-                const winnersJSON = localStorage.getItem('horseRacing_winners');
-                const winners = winnersJSON ? JSON.parse(winnersJSON) : [];
-                
-                console.log(`📦 [WINNERS-LOAD] localStorage: ${winners.length} gagnants chargés`);
-                if (winners.length > 0) {
-                    console.log(`   Contenu: ${winners.map(w => `№${w.winner.number} (Round ${w.id})`).join(', ')}`);
-                }
-                
-                const $winnersList = $('#winnersList');
-                if (!$winnersList.length) {
-                    console.warn('⚠️ [WINNERS-LOAD] #winnersList élément non trouvé');
-                    return;
-                }
-                
-                if (winners.length === 0) {
-                    // Aucun gagnant encore
-                    console.log('ℹ️ [WINNERS-LOAD] Aucun gagnant - affichage du placeholder');
-                    $winnersList.empty();
-                    $winnersList.html('<div class="winner-item empty"><div class="winner-card"><div class="winner-inner"><div class="winner-avatar"><div class="avatar_background"><div class="avatar"></div></div></div><div><div class="winner-name-inline">-</div><div class="winner-meta">Round -</div></div></div></div></div>');
-                } else {
-                    // Afficher les gagnants du localStorage
-                    console.log(`✅ [WINNERS-LOAD] Affichage de ${winners.length} gagnants depuis localStorage (seule source)`);
-                    afficherDerniersGagnants(winners);
-                }
-            }
-            
-            // ✅ Charger au démarrage - localStorage est la source unique
-            chargerGagnantsDepuisLocalStorage();
-            
-            // ✅ FONCTION: Sauvegarder un gagnant dans localStorage
-            // Appelée directement après ajout avec les données complètes du payload
-            function sauvegarderGagnantEnLocalStorage(payload) {
+            // ✅ CORRECTION: Charger les gagnants depuis l'API au lieu de localStorage
+            // La base de données est maintenant la source de vérité pour l'affichage des last winners
+            async function chargerGagnantsDepuisAPI() {
                 try {
-                    if (!payload || !payload.winner || !payload.id) {
-                        console.warn('❌ [WINNERS-SAVE] payload invalide:', payload);
-                        return;
+                    console.log('📡 [WINNERS-LOAD] Chargement des gagnants depuis l\'API...');
+                    const response = await fetch('/api/v1/winners/recent?limit=6');
+                    
+                    if (!response.ok) {
+                        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
                     }
                     
-                    // Charger les gagnants existants
-                    const winnersJSON = localStorage.getItem('horseRacing_winners');
-                    let winners = winnersJSON ? JSON.parse(winnersJSON) : [];
+                    const result = await response.json();
+                    const winners = result.data?.winners || [];
                     
-                    // Créer un nouvel objet gagnant avec les bonnes données
-                    const newWinner = {
-                        id: payload.id,
-                        winner: {
-                            number: payload.winner.number,
-                            name: payload.winner.name,
-                            family: payload.winner.family || 0
-                        },
-                        roundText: `Round ${payload.id}`
-                    };
-                    
-                    // Vérifier si ce round est déjà présent
-                    const alreadyExists = winners.some(w => w.id === payload.id);
-                    if (alreadyExists) {
-                        console.warn(`⚠️ [WINNERS-SAVE] Round #${payload.id} déjà en localStorage`);
-                        return;
+                    console.log(`📦 [WINNERS-LOAD] API: ${winners.length} gagnants chargés`);
+                    if (winners.length > 0) {
+                        console.log(`   Contenu: ${winners.map(w => `№${w.number} ${w.name} (Round ${w.id})`).join(', ')}`);
                     }
                     
-                    // Ajouter le nouveau gagnant au début (plus récent en premier)
-                    winners.unshift(newWinner);
-                    
-                    // Garder seulement 6 gagnants
-                    if (winners.length > 6) {
-                        winners = winners.slice(0, 6);
-                    }
-                    
-                    // Sauvegarder en localStorage
-                    localStorage.setItem('horseRacing_winners', JSON.stringify(winners));
-                    console.log(`✅ [WINNERS-SAVE] Gagnant sauvegardé en localStorage (${winners.length}/6)`);
-                    console.log(`   Données: №${newWinner.winner.number} ${newWinner.winner.name} (Round ${newWinner.id})`);
-                } catch (e) {
-                    console.warn('❌ [WINNERS-SAVE] Erreur sauvegarde localStorage:', e);
-                }
-            }
-            
-            // ✅ FONCTION: Sauvegarder tous les gagnants du DOM dans localStorage
-            // Fonction de secours - utilisée au chargement de page pour synchroniser
-            function sauvegarderTousGagnantsEnLocalStorage() {
-                try {
                     const $winnersList = $('#winnersList');
-                    const winners = [];
+                    if (!$winnersList.length) {
+                        console.warn('⚠️ [WINNERS-LOAD] #winnersList élément non trouvé');
+                        return;
+                    }
                     
-                    // Récupérer les gagnants actuels du DOM (sans le placeholder vide)
-                    $winnersList.children('.winner-item:not(.empty)').each(function() {
-                        const $item = $(this);
-                        const roundId = $item.data('roundId');
-                        const $card = $item.find('.winner-card');
-                        const $nameEl = $item.find('.winner-name-inline');
+                    if (winners.length === 0) {
+                        // Aucun gagnant encore
+                        console.log('ℹ️ [WINNERS-LOAD] Aucun gagnant - affichage du placeholder');
+                        $winnersList.empty();
+                        $winnersList.html('<div class="winner-item empty"><div class="winner-card"><div class="winner-inner"><div class="winner-avatar"><div class="avatar_background"><div class="avatar"></div></div></div><div><div class="winner-name-inline">-</div><div class="winner-meta">Round -</div></div></div></div></div>');
+                    } else {
+                        // ✅ Convertir le format API vers le format attendu par afficherDerniersGagnants
+                        const formattedWinners = winners.map(w => ({
+                            id: w.id,
+                            winner: {
+                                number: w.number,
+                                name: w.name,
+                                family: w.family || 0
+                            },
+                            roundText: `Round ${w.id}`
+                        }));
                         
-                        if (roundId && $nameEl.length) {
-                            const nameText = $nameEl.text().trim(); // "№5 Spirit"
-                            
-                            // Parser le texte pour extraire number et name
-                            const numberMatch = nameText.match(/№\s*(\d+)/);
-                            const number = numberMatch ? parseInt(numberMatch[1]) : null;
-                            const name = nameText.replace(/№\s*\d+\s*/, '').trim();
-                            
-                            // Récupérer la famille depuis les classes
-                            const classStr = $card.attr('class') || '';
-                            const familyMatch = classStr.match(/family(\d+)/);
-                            const family = familyMatch ? parseInt(familyMatch[1]) : 0;
-                            
-                            if (number && name) {
-                                winners.push({
-                                    id: roundId,
-                                    winner: {
-                                        number: number,
-                                        name: name,
-                                        family: family
-                                    },
-                                    roundText: `Round ${roundId}`
-                                });
-                            }
-                        }
-                    });
-                    
-                    localStorage.setItem('horseRacing_winners', JSON.stringify(winners));
-                    console.log(`✅ [WINNERS-SYNC-ALL] ${winners.length} gagnants synchronisés en localStorage`);
-                } catch (e) {
-                    console.warn('❌ [WINNERS-SYNC-ALL] Erreur synchronisation localStorage:', e);
+                        // Afficher les gagnants de l'API
+                        console.log(`✅ [WINNERS-LOAD] Affichage de ${formattedWinners.length} gagnants depuis l'API`);
+                        afficherDerniersGagnants(formattedWinners);
+                    }
+                } catch (error) {
+                    console.error('❌ [WINNERS-LOAD] Erreur lors du chargement des gagnants depuis l\'API:', error);
+                    // Fallback: afficher le placeholder en cas d'erreur
+                    const $winnersList = $('#winnersList');
+                    if ($winnersList.length) {
+                        $winnersList.empty();
+                        $winnersList.html('<div class="winner-item empty"><div class="winner-card"><div class="winner-inner"><div class="winner-avatar"><div class="avatar_background"><div class="avatar"></div></div></div><div><div class="winner-name-inline">-</div><div class="winner-meta">Round -</div></div></div></div></div>');
+                    }
                 }
             }
+            
+            // ✅ Charger au démarrage - API est la source unique
+            chargerGagnantsDepuisAPI();
+            
+            // ✅ SUPPRIMÉ: Plus besoin de sauvegarder dans localStorage
+            // Les gagnants sont maintenant sauvegardés en base de données par le serveur
+            // On recharge simplement depuis l'API après chaque nouveau gagnant
             
             // ✅ CORRECTION CRITIQUE: Écouter l'événement round_winner émis par finish_screen
             // Cela garantit que la liste des gagnants utilise le MÊME game.getWinner() que le finish_screen

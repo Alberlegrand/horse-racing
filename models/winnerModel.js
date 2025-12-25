@@ -62,18 +62,16 @@ export async function getRecentWinners(limit = 6) {
 
     console.log(`[WINNERS-MODEL] ✅ ${result.rows.length} gagnants récupérés`);
     
-    // ✅ CORRECTION: Retourner dans l'ordre DESC (plus récent en premier)
-    // Puis inverser pour avoir le plus ancien en premier (comme gameHistory pour affichage)
-    // Mais pour l'affichage sur screen, on veut le plus récent en premier, donc on garde l'ordre DESC
-    // En fait, on inverse pour correspondre au format gameHistory qui est du plus ancien au plus récent
-    const reversed = result.rows.reverse();
+    // ✅ CORRECTION: Retourner dans l'ordre DESC (plus récent en premier) pour l'affichage
+    // L'API retourne déjà les gagnants triés par round_id DESC (plus récent en premier)
+    // On garde cet ordre car l'affichage veut le plus récent en premier
     
     // ✅ Log pour debugging
-    if (reversed.length > 0) {
-        console.log(`[WINNERS-MODEL] 📊 Exemple gagnant: Round #${reversed[0].id}, Winner: ${reversed[0].name} (№${reversed[0].number})`);
+    if (result.rows.length > 0) {
+        console.log(`[WINNERS-MODEL] 📊 Exemple gagnant: Round #${result.rows[0].id}, Winner: ${result.rows[0].name} (№${result.rows[0].number})`);
     }
     
-    return reversed;
+    return result.rows;
   } catch (err) {
     console.error('[WINNERS-MODEL] ❌ Erreur lors de la récupération des gagnants:', err.message);
     return [];

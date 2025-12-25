@@ -26,7 +26,8 @@ class ChaCha20 {
         this.nonce = [0, 0, 0]; // 96-bit nonce (12 bytes)
         this.counter = 0;
         this.block = [];
-        this.blockIndex = 0;
+        this.blockIndex = 16; // ✅ CRITIQUE: Initialiser à 16 pour forcer la génération du premier bloc
+        console.log(`[CHACHA20] 🏗️ Constructeur: seed=${seed ? `fourni (${seed.length} mots)` : 'aléatoire'}, key=${this.key.length} mots`);
     }
 
     /**
@@ -134,6 +135,12 @@ class ChaCha20 {
             this.block[i] = (x[i] + working[i]) >>> 0;
         }
 
+        // ✅ LOG DE DIAGNOSTIC (temporaire pour debug)
+        if (this.counter === 0 || this.counter === 1) {
+            console.log(`[CHACHA20] 🔍 _generateBlock() counter=${this.counter}, block[0]=${this.block[0]} (0x${this.block[0].toString(16)}), block[1]=${this.block[1]} (0x${this.block[1].toString(16)})`);
+            console.log(`[CHACHA20] 🔍 key[0]=${this.key[0]} (0x${this.key[0].toString(16)}), key[1]=${this.key[1]} (0x${this.key[1].toString(16)})`);
+        }
+
         // Increment counter
         this.counter = (this.counter + 1) >>> 0;
         this.blockIndex = 0;
@@ -143,10 +150,24 @@ class ChaCha20 {
      * Get next 32-bit random integer
      */
     next32() {
-        if (this.blockIndex >= 16) {
+        if (this.blockIndex >= 16 || this.block.length === 0) {
             this._generateBlock();
         }
-        return this.block[this.blockIndex++];
+        
+        // ✅ VÉRIFICATION: S'assurer que le bloc est valide
+        if (!this.block || this.block.length === 0) {
+            console.error(`[CHACHA20] ❌ ERREUR: Bloc vide après _generateBlock()!`);
+            throw new Error('ChaCha20 block generation failed');
+        }
+        
+        const value = this.block[this.blockIndex++];
+        
+        // ✅ LOG DE DIAGNOSTIC (temporaire pour debug)
+        if (this.blockIndex <= 3) {
+            console.log(`[CHACHA20] 🔍 next32() appel #${this.blockIndex}, valeur=${value} (0x${value.toString(16)})`);
+        }
+        
+        return value;
     }
 
     /**
@@ -170,9 +191,25 @@ class ChaCha20 {
         const bits = Math.ceil(Math.log2(max));
         const mask = (1 << bits) - 1;
         let result;
+        let attempts = 0;
         do {
-            result = this.next32() & mask;
+            const rawValue = this.next32();
+            result = rawValue & mask;
+            attempts++;
+            // ✅ SÉCURITÉ: Éviter les boucles infinies (max 100 tentatives)
+            if (attempts > 100) {
+                console.error(`[CHACHA20] ⚠️ nextInt(${max}) boucle infinie détectée! rawValue=${rawValue}, mask=${mask.toString(16)}, result=${result}`);
+                // Fallback: utiliser modulo (moins idéal mais fonctionnel)
+                result = rawValue % max;
+                break;
+            }
         } while (result >= max);
+        
+        // ✅ LOG DE DIAGNOSTIC (temporaire pour debug)
+        if (attempts > 1) {
+            console.log(`[CHACHA20] 🔍 nextInt(${max}) nécessité ${attempts} tentatives, résultat=${result}`);
+        }
+        
         return result;
     }
 
@@ -183,7 +220,9 @@ class ChaCha20 {
         this.key = this._expandSeed(seed);
         this.nonce = [0, 0, 0];
         this.counter = 0;
-        this.blockIndex = 0;
+        this.blockIndex = 16; // ✅ CRITIQUE: Forcer la génération d'un nouveau bloc au prochain next32()
+        this.block = []; // ✅ CRITIQUE: Vider le bloc pour forcer la régénération
+        console.log(`[CHACHA20] 🔄 Seed réinitialisé, key=${this.key.length} mots, blockIndex=${this.blockIndex}`);
     }
 }
 
@@ -204,6 +243,18 @@ function getGlobalRng() {
  */
 function initChaCha20(seed = null) {
     globalRng = new ChaCha20(seed);
+    console.log(`[CHACHA20] ✅ RNG initialisé avec seed=${seed ? 'fourni' : 'aléatoire'}, key length=${globalRng.key.length}`);
+    
+    // ✅ TEST IMMÉDIAT: Générer quelques valeurs pour vérifier que ça fonctionne
+    const test1 = globalRng.nextInt(100);
+    const test2 = globalRng.nextInt(100);
+    const test3 = globalRng.nextInt(6);
+    console.log(`[CHACHA20] 🧪 Test immédiat après init: nextInt(100)=${test1}, nextInt(100)=${test2}, nextInt(6)=${test3}`);
+    
+    if (test1 === 0 && test2 === 0 && test3 === 0) {
+        console.error(`[CHACHA20] ❌ ERREUR CRITIQUE: Tous les tests retournent 0! Le RNG ne fonctionne pas correctement.`);
+    }
+    
     return globalRng;
 }
 

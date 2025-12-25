@@ -8,6 +8,23 @@ import { cacheSet, cacheGet, cacheDelPattern } from './config/redis.js';
 import dbStrategy from './config/db-strategy.js';
 import { ROUND_WAIT_DURATION_MS } from './config/app.config.js';
 
+// Import crypto pour génération de seed aléatoire (Node.js)
+// Utilisation d'une fonction helper pour charger crypto de manière dynamique
+let nodeCryptoModule = null;
+function getNodeCrypto() {
+    if (nodeCryptoModule === null) {
+        try {
+            if (typeof require !== 'undefined') {
+                nodeCryptoModule = require('crypto');
+            }
+        } catch (err) {
+            // crypto peut ne pas être disponible dans certains environnements
+            nodeCryptoModule = false; // Marquer comme non disponible
+        }
+    }
+    return nodeCryptoModule;
+}
+
 // Initialiser ChaCha20 RNG au démarrage
 initChaCha20();
 
@@ -17,10 +34,10 @@ initChaCha20();
 // ========================================
 export const BASE_PARTICIPANTS = [
     { number: 6, name: "De Bruyne", coeff: 5.5, family: 0, place: 0 },
-    { number: 7, name: "Ronaldo", coeff: 4.7, family: 1, place: 0 },
+    { number: 7, name: "Ronaldo", coeff: 4.7, family: 1, place: 0},
     { number: 8, name: "Mbappe", coeff: 7.2, family: 2, place: 0 },
-    { number: 9, name: "Halland", coeff: 5.8, family: 3, place: 0 },
-    { number: 10, name: "Messi", coeff: 8.1, family: 4, place: 0 },
+    { number: 9, name: "Halland", coeff: 5.8, family: 3, place: 0},
+    { number: 10, name: "Messi", coeff: 8.1, family: 4, place: 0},
     { number: 54, name: "Vinicius", coeff: 4.5, family: 5, place: 0 }
 ];
 
@@ -127,21 +144,221 @@ export async function createNewRound(options = {}) {
         // 3️⃣ CRÉER LE NOUVEAU ROUND
         const newRoundId = await generateRoundId();
         
-        // ✅ LOGIQUE ORIGINALE: Attribuer une place aléatoire à chaque participant (1-6) sans duplication
-        // Le participant avec place: 1 est le gagnant
-        const basePlaces = Array.from({ length: BASE_PARTICIPANTS.length }, (_, i) => i + 1);
-        const shuffledPlaces = chacha20Shuffle(basePlaces);
+        // ✅ CRITIQUE: Réinitialiser le RNG avec un seed unique et cryptographiquement aléatoire pour chaque round
+        // Cela garantit que chaque round a une distribution complètement aléatoire et indépendante
+        // Le seed est généré avec crypto.randomBytes() pour garantir un vrai aléatoire cryptographique
+        let roundSeed;
+        try {
+            // Priorité 1: Utiliser crypto.randomBytes() de Node.js (le plus sûr)
+            const nodeCrypto = getNodeCrypto();
+            if (nodeCrypto && nodeCrypto.randomBytes) {
+                const buf = nodeCrypto.randomBytes(32); // 32 bytes = 8 * 4 bytes (8 Uint32)
+                const arr = new Uint32Array(buf.buffer);
+                roundSeed = Array.from(arr);
+                console.log(`[ROUND-CREATE] 🔐 Seed généré avec crypto.randomBytes() (Node.js)`);
+            }
+            // Priorité 2: Utiliser crypto.getRandomValues() (Browser ou Node.js global)
+            else if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
+                const arr = new Uint32Array(8);
+                crypto.getRandomValues(arr);
+                roundSeed = Array.from(arr);
+                console.log(`[ROUND-CREATE] 🔐 Seed généré avec crypto.getRandomValues()`);
+            }
+            // Fallback final: combiner timestamp + roundId + Math.random (moins idéal mais fonctionnel)
+            else {
+                throw new Error('No crypto available');
+            }
+        } catch (err) {
+            console.warn(`[ROUND-CREATE] ⚠️ Erreur génération seed crypto, utilisation fallback:`, err.message);
+            // Fallback en cas d'erreur: combiner timestamp + roundId + Math.random
+            const timestamp = Date.now();
+            const roundIdNum = typeof newRoundId === 'string' ? parseInt(newRoundId.replace(/\D/g, ''), 10) : newRoundId;
+            roundSeed = [
+                timestamp & 0xFFFFFFFF,
+                (timestamp >>> 32) & 0xFFFFFFFF,
+                roundIdNum & 0xFFFFFFFF,
+                (roundIdNum >>> 32) & 0xFFFFFFFF,
+                Math.floor(Math.random() * 0xFFFFFFFF),
+                Math.floor(Math.random() * 0xFFFFFFFF),
+                Math.floor(Math.random() * 0xFFFFFFFF),
+                Math.floor(Math.random() * 0xFFFFFFFF)
+            ];
+            console.warn(`[ROUND-CREATE] ⚠️ Seed fallback utilisé (timestamp + roundId + Math.random)`);
+        }
         
-        // ✅ Mélanger l'ordre des participants pour éviter les patterns
-        const shuffledParticipants = chacha20Shuffle([...BASE_PARTICIPANTS]);
-        console.log(`[ROUND-CREATE] 🎲 Participants mélangés:`, shuffledParticipants.map(p => `№${p.number} ${p.name}`).join(', '));
+        // Réinitialiser le RNG avec le seed unique du round
+        initChaCha20(roundSeed);
+        console.log(`[ROUND-CREATE] 🎲 RNG réinitialisé avec seed cryptographique unique pour round #${newRoundId}`);
+        console.log(`[ROUND-CREATE] 🔑 Seed complet (hex): [${roundSeed.map(s => s.toString(16).padStart(8, '0')).join(', ')}]`);
+        console.log(`[ROUND-CREATE] 🔑 Seed (décimal): [${roundSeed.join(', ')}]`);
+        
+        // ✅ TEST: Générer quelques nombres aléatoires pour vérifier que le RNG fonctionne
+        console.log(`[ROUND-CREATE] 🔬 ========== TEST DU RNG ==========`);
+        const testRandom1 = chacha20RandomInt(100);
+        const testRandom2 = chacha20RandomInt(100);
+        const testRandom3 = chacha20RandomInt(100);
+        const testRandom4 = chacha20RandomInt(6); // Pour simuler une sélection de place
+        const testRandom5 = chacha20RandomInt(6);
+        const testRandom6 = chacha20RandomInt(6);
+        console.log(`[ROUND-CREATE] 🔬 Test RNG (3 nombres aléatoires 0-99): [${testRandom1}, ${testRandom2}, ${testRandom3}]`);
+        console.log(`[ROUND-CREATE] 🔬 Test RNG (3 nombres aléatoires 0-5 pour places): [${testRandom4}, ${testRandom5}, ${testRandom6}]`);
+        console.log(`[ROUND-CREATE] 🔬 Vérification: Les valeurs sont différentes = ${testRandom1 !== testRandom2 || testRandom2 !== testRandom3 ? '✅ Oui' : '⚠️ Non'}`);
+        console.log(`[ROUND-CREATE] 🔬 ========== FIN TEST DU RNG ==========`);
+        
+        // ✅ ALGORITHME RNG COMPLÈTEMENT RÉVISÉ: Attribution aléatoire avec shuffle Fisher-Yates
+        // 
+        // PROBLÈME IDENTIFIÉ: L'itération séquentielle sur BASE_PARTICIPANTS (family 0→5)
+        // créait un pattern prévisible même avec sélection aléatoire de places.
+        //
+        // SOLUTION: Mélanger les participants AVANT d'attribuer les places pour garantir
+        // un ordre d'attribution vraiment aléatoire.
+        //
+        // ÉTAPE 1: Créer une liste des places disponibles (1-6)
+        const availablePlaces = [1, 2, 3, 4, 5, 6];
+        
+        // ÉTAPE 2: Créer une copie des participants
+        const participantsCopy = BASE_PARTICIPANTS.map(p => ({ ...p }));
+        
+        console.log(`[ROUND-CREATE] 🎲 ========== DÉBUT ATTRIBUTION ALÉATOIRE DES PLACES ==========`);
+        console.log(`[ROUND-CREATE] 🔍 Round ID: ${newRoundId}`);
+        console.log(`[ROUND-CREATE] 🔍 Seed (hex): [${roundSeed.map(s => s.toString(16).padStart(8, '0')).join(', ')}]`);
+        console.log(`[ROUND-CREATE] 📋 Participants AVANT shuffle (ordre original):`);
+        participantsCopy.forEach((p, idx) => {
+            console.log(`   [${idx}] №${p.number} ${p.name} (family: ${p.family}, coeff: ${p.coeff})`);
+        });
+        console.log(`[ROUND-CREATE] 📋 Places disponibles: [${availablePlaces.join(', ')}]`);
+        
+        // ✅ ÉTAPE 3 CRITIQUE: MÉLANGER LES PARTICIPANTS AVANT D'ATTRIBUER LES PLACES
+        // Cela garantit que l'ordre d'attribution est vraiment aléatoire, pas séquentiel
+        console.log(`[ROUND-CREATE] 🔀 Mélange des participants avec Fisher-Yates shuffle...`);
+        const shuffledParticipants = chacha20Shuffle(participantsCopy);
+        
+        // ✅ Vérifier que le shuffle a bien modifié l'ordre
+        const orderChanged = !participantsCopy.every((p, idx) => p.number === shuffledParticipants[idx].number);
+        console.log(`[ROUND-CREATE] 🔀 Ordre modifié par le shuffle: ${orderChanged ? '✅ Oui' : '⚠️ Non (problème possible!)'}`);
+        if (!orderChanged) {
+            console.warn(`[ROUND-CREATE] ⚠️ ATTENTION: Le shuffle n'a pas modifié l'ordre des participants!`);
+            console.warn(`[ROUND-CREATE] ⚠️ Cela peut indiquer un problème avec le RNG ou le shuffle`);
+        }
+        
+        console.log(`[ROUND-CREATE] ✅ Participants APRÈS shuffle (ordre aléatoire):`);
+        shuffledParticipants.forEach((p, idx) => {
+            const originalIndex = participantsCopy.findIndex(orig => orig.number === p.number);
+            const moved = originalIndex !== idx ? ` (déplacé de position ${originalIndex})` : '';
+            console.log(`   [${idx}] №${p.number} ${p.name} (family: ${p.family}, coeff: ${p.coeff})${moved}`);
+        });
+        
+        // ✅ ÉTAPE 4: Assigner une place aléatoire à chaque participant DANS L'ORDRE MÉLANGÉ
+        // Utiliser Fisher-Yates pour sélectionner une place aléatoire pour chaque participant
+        const participantsWithPlaces = [];
+        const placesRemaining = [...availablePlaces];
+        
+        console.log(`[ROUND-CREATE] 🎯 Attribution des places (ordre mélangé):`);
+        for (let i = 0; i < shuffledParticipants.length; i++) {
+            const participant = shuffledParticipants[i];
+            
+            // Sélectionner une place aléatoire parmi les places restantes
+            const randomIndex = chacha20RandomInt(placesRemaining.length);
+            const selectedPlace = placesRemaining[randomIndex];
+            
+            // Logs détaillés pour chaque attribution
+            console.log(`[ROUND-CREATE]   ┌─ Itération ${i + 1}/${shuffledParticipants.length}`);
+            console.log(`[ROUND-CREATE]   │  Participant: №${participant.number} ${participant.name} (family: ${participant.family})`);
+            console.log(`[ROUND-CREATE]   │  Places restantes: [${placesRemaining.join(', ')}] (${placesRemaining.length} disponibles)`);
+            console.log(`[ROUND-CREATE]   │  Index aléatoire généré: ${randomIndex} (via chacha20RandomInt(${placesRemaining.length}))`);
+            console.log(`[ROUND-CREATE]   │  Place sélectionnée: ${selectedPlace}`);
+            
+            // Retirer la place sélectionnée de la liste
+            placesRemaining.splice(randomIndex, 1);
+            
+            // Assigner la place au participant
+            const participantWithPlace = {
+                ...participant,
+                place: selectedPlace
+            };
+            
+            participantsWithPlaces.push(participantWithPlace);
+            
+            console.log(`[ROUND-CREATE]   └─ ✅ Attribué: №${participant.number} ${participant.name} (family: ${participant.family}) → place ${selectedPlace}`);
+            console.log(`[ROUND-CREATE]      Places restantes après attribution: [${placesRemaining.join(', ')}]`);
+        }
+        
+        // ✅ ÉTAPE 5: Vérifier l'intégrité des places (chaque place 1-6 doit être présente exactement une fois)
+        const assignedPlaces = participantsWithPlaces.map(p => p.place).sort((a, b) => a - b);
+        const expectedPlaces = [1, 2, 3, 4, 5, 6];
+        const placesValid = JSON.stringify(assignedPlaces) === JSON.stringify(expectedPlaces);
+        
+        console.log(`[ROUND-CREATE] 🔍 ========== VÉRIFICATION DE L'INTÉGRITÉ ==========`);
+        console.log(`[ROUND-CREATE] 🔍 Places assignées (triées): [${assignedPlaces.join(', ')}]`);
+        console.log(`[ROUND-CREATE] 🔍 Places attendues: [${expectedPlaces.join(', ')}]`);
+        console.log(`[ROUND-CREATE] 🔍 Places restantes: [${placesRemaining.join(', ')}]`);
+        console.log(`[ROUND-CREATE] 🔍 Validation: ${placesValid ? '✅ OK' : '❌ ÉCHEC'}`);
+        
+        if (!placesValid) {
+            console.error(`[ROUND-CREATE] ❌ ERREUR CRITIQUE: Places invalides!`);
+            console.error(`   Places assignées: [${assignedPlaces.join(', ')}]`);
+            console.error(`   Places attendues: [${expectedPlaces.join(', ')}]`);
+            console.error(`   Places restantes: [${placesRemaining.join(', ')}]`);
+            throw new Error(`Invalid place distribution: expected [1,2,3,4,5,6], got [${assignedPlaces.join(',')}]`);
+        }
+        
+        // ✅ ÉTAPE 6: Analyser la distribution des places par family
+        console.log(`[ROUND-CREATE] 📊 ========== ANALYSE DE LA DISTRIBUTION ==========`);
+        const distributionByFamily = {};
+        participantsWithPlaces.forEach(p => {
+            if (!distributionByFamily[p.family]) {
+                distributionByFamily[p.family] = [];
+            }
+            distributionByFamily[p.family].push({
+                number: p.number,
+                name: p.name,
+                place: p.place
+            });
+        });
+        
+        console.log(`[ROUND-CREATE] 📊 Distribution des places par family:`);
+        for (let family = 0; family <= 5; family++) {
+            const familyParticipants = distributionByFamily[family] || [];
+            if (familyParticipants.length > 0) {
+                const places = familyParticipants.map(p => p.place).sort((a, b) => a - b);
+                const isWinner = places.includes(1) ? ' 🏆' : '';
+                console.log(`[ROUND-CREATE]   Family ${family}: ${familyParticipants.map(p => `№${p.number} ${p.name}`).join(', ')} → places [${places.join(', ')}]${isWinner}`);
+            } else {
+                console.log(`[ROUND-CREATE]   Family ${family}: Aucun participant`);
+            }
+        }
+        
+        // ✅ Vérifier si le pattern uniforme (family 0→5 = place 1→6) est présent
+        const sortedByFamily = [...participantsWithPlaces].sort((a, b) => a.family - b.family);
+        const sortedByPlace = [...participantsWithPlaces].sort((a, b) => a.place - b.place);
+        const isUniformPattern = sortedByFamily.every((p, idx) => p.place === idx + 1);
+        
+        if (isUniformPattern) {
+            console.warn(`[ROUND-CREATE] ⚠️ ATTENTION: Pattern uniforme détecté!`);
+            console.warn(`[ROUND-CREATE] ⚠️ Family 0→5 correspond exactement à place 1→6`);
+            console.warn(`[ROUND-CREATE] ⚠️ Cela ne devrait PAS se produire avec un vrai shuffle aléatoire`);
+        } else {
+            console.log(`[ROUND-CREATE] ✅ Pas de pattern uniforme détecté (bon signe)`);
+        }
+        
+        console.log(`[ROUND-CREATE] 🎲 ========== RÉSULTAT FINAL DE L'ATTRIBUTION ==========`);
+        console.log(`[ROUND-CREATE] 🎲 Résultat trié par place:`);
+        sortedByPlace.forEach((p, i) => {
+            const isWinner = p.place === 1 ? ' 🏆' : '';
+            console.log(`[ROUND-CREATE]   Place ${p.place}: №${p.number} ${p.name} (family: ${p.family})${isWinner}`);
+        });
+        
+        console.log(`[ROUND-CREATE] 🎲 Résultat trié par ordre d'attribution:`);
+        participantsWithPlaces.forEach((p, i) => {
+            const isWinner = p.place === 1 ? ' 🏆' : '';
+            console.log(`[ROUND-CREATE]   [${i}] №${p.number} ${p.name} (family: ${p.family}) → place ${p.place}${isWinner}`);
+        });
+        
+        console.log(`[ROUND-CREATE] 🎲 ========== FIN ATTRIBUTION ALÉATOIRE DES PLACES ==========`);
 
         const newRound = {
             id: newRoundId,
-            participants: shuffledParticipants.map((p, i) => ({
-                ...p,
-                place: shuffledPlaces[i], // ✅ Place aléatoire (1-6) sans duplication, place: 1 = gagnant
-            })),
+            participants: participantsWithPlaces,
             receipts: [],
             lastReceiptId: 3,
             totalPrize: 0,
@@ -151,9 +368,24 @@ export async function createNewRound(options = {}) {
         // ✅ Trouver le gagnant (participant avec place: 1)
         const winner = newRound.participants.find(p => p.place === 1);
         if (winner) {
-            console.log(`[ROUND-CREATE] 🏆 Gagnant déterminé: №${winner.number} ${winner.name} (place: 1)`);
+            console.log(`[ROUND-CREATE] 🏆 ========== GAGNANT DÉTERMINÉ ==========`);
+            console.log(`[ROUND-CREATE] 🏆 Gagnant: №${winner.number} ${winner.name} (family: ${winner.family}, place: 1)`);
+            console.log(`[ROUND-CREATE] 🏆 Vérification: Le gagnant a bien place === 1: ${winner.place === 1 ? '✅ Oui' : '❌ Non'}`);
+            console.log(`[ROUND-CREATE] 📊 Distribution complète des places (triée par place):`);
+            newRound.participants
+                .sort((a, b) => a.place - b.place)
+                .forEach(p => {
+                    const isWinner = p.place === 1 ? ' 🏆' : '';
+                    console.log(`[ROUND-CREATE]   Place ${p.place}: №${p.number} ${p.name} (family: ${p.family})${isWinner}`);
+                });
+            console.log(`[ROUND-CREATE] 🏆 ========== FIN GAGNANT ==========`);
         } else {
             console.error(`[ROUND-CREATE] ❌ ERREUR: Aucun participant avec place: 1 trouvé!`);
+            console.error(`[ROUND-CREATE] ❌ Participants disponibles:`);
+            newRound.participants.forEach(p => {
+                console.error(`[ROUND-CREATE]   №${p.number} ${p.name} (family: ${p.family}, place: ${p.place})`);
+            });
+            throw new Error('No winner found: participant with place: 1 is missing');
         }
 
         gameState.currentRound = newRound;
