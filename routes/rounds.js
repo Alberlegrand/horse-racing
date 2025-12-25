@@ -98,7 +98,7 @@ class RaceTimerManager {
      * Créer une séquence complète de timers pour une course
      * Timeline: T=0 race_start → T=10 create_new_round → T=20 finish_logic → T=25 cleanup
      */
-    startRaceSequence(raceId, callbacks) {
+    startRaceSequence(raceId, callbacks, broadcastFn) {
         console.log(`[TIMER] 🚀 Démarrage séquence course #${raceId}`);
         console.log(`[TIMER] 📋 CONFIGURATION: MOVIE_SCREEN_DURATION_MS=${MOVIE_SCREEN_DURATION_MS}ms (${MOVIE_SCREEN_DURATION_MS/1000}s), FINISH_SCREEN_DURATION_MS=${FINISH_SCREEN_DURATION_MS}ms (${FINISH_SCREEN_DURATION_MS/1000}s), TOTAL_RACE_TIME_MS=${TOTAL_RACE_TIME_MS}ms (${TOTAL_RACE_TIME_MS/1000}s)`);
         
@@ -113,6 +113,9 @@ class RaceTimerManager {
 
         // Marquer la course comme active
         this.activeRaces.add(raceId);
+        
+        // ✅ CRITIQUE: Capturer broadcast dans le scope pour l'utiliser dans setTimeout
+        const broadcast = broadcastFn || (() => {});
 
         try {
             // T=0: Race start
@@ -137,23 +140,118 @@ class RaceTimerManager {
 
             // T=35s: Nettoyage et réinitialisation
             console.log('[TIMER] ⏱️ Programmation T+35s: Nettoyage post-race');
-            gameState.timers.cleanup = setTimeout(() => {
+            gameState.timers.cleanup = setTimeout(async () => {
                 console.log(`[TIMER] T+35s: Nettoyage post-race`);
-                // ✅ CORRECTION: Toujours nettoyer activeRaces même si onCleanup échoue
+                // ✅ CRITIQUE: Toujours nettoyer activeRaces même si onCleanup échoue
                 try {
                     this.activeRaces.delete(raceId);
                     clearAllTimers();
+                    
+                    // ✅ CRITIQUE: S'assurer que le lock est libéré avant d'appeler onCleanup
+                    // Si le lock est bloqué, le libérer d'abord
+                    if (gameState.operationLock) {
+                        console.warn('[TIMER] ⚠️ operationLock actif au début de cleanup, libération forcée');
+                        gameState.operationLock = false;
+                    }
+                    
                     if (callbacks.onCleanup) {
-                        callbacks.onCleanup();
+                        // ✅ CRITIQUE: Wrapper dans un try-catch pour garantir le nettoyage même en cas d'erreur
+                        try {
+                            await callbacks.onCleanup();
+                        } catch (cleanupCallbackErr) {
+                            console.error('[TIMER] ❌ Erreur dans callback onCleanup:', cleanupCallbackErr);
+                            // ✅ CRITIQUE: Libérer le lock et réinitialiser l'état même si onCleanup échoue
+                            gameState.operationLock = false;
+                            gameState.isRaceRunning = false;
+                            gameState.raceStartTime = null;
+                            gameState.raceEndTime = null;
+                            
+                            // ✅ CRITIQUE: S'assurer qu'un timer est créé même si onCleanup échoue
+                            // Sinon le système restera bloqué sans timer
+                            if (!gameState.nextRoundStartTime || gameState.nextRoundStartTime <= Date.now()) {
+                                console.warn('[TIMER] ⚠️ Timer manquant après erreur cleanup, création d\'urgence...');
+                                const now = Date.now();
+                                gameState.nextRoundStartTime = now + ROUND_WAIT_DURATION_MS;
+                                
+                                // Créer un nouveau round d'urgence si nécessaire
+                                if (!gameState.currentRound || !gameState.currentRound.id) {
+                                    console.warn('[TIMER] ⚠️ Round manquant après erreur cleanup, création d\'urgence...');
+                                    try {
+                                        const { createNewRound } = await import('../game.js');
+                                        await createNewRound({
+                                            broadcast: broadcast || (() => {}),
+                                            archiveCurrentRound: false,
+                                            checkLock: false // Pas de lock car déjà libéré
+                                        });
+                                    } catch (emergencyErr) {
+                                        console.error('[TIMER] ❌ Erreur création round d\'urgence:', emergencyErr);
+                                    }
+                                }
+                                
+                                // Broadcaster le timer d'urgence
+                                if (broadcast) {
+                                    broadcast({
+                                        event: 'timer_update',
+                                        serverTime: now,
+                                        roundId: gameState.currentRound?.id,
+                                        timer: {
+                                            timeLeft: ROUND_WAIT_DURATION_MS,
+                                            totalDuration: ROUND_WAIT_DURATION_MS,
+                                            startTime: now,
+                                            endTime: gameState.nextRoundStartTime
+                                        }
+                                    });
+                                }
+                            }
+                        }
                     }
                 } catch (cleanupErr) {
                     console.error('[TIMER] ❌ Erreur dans cleanup:', cleanupErr);
-                    // Nettoyer quand même activeRaces pour éviter les blocages
+                    // ✅ CRITIQUE: Nettoyer quand même activeRaces pour éviter les blocages
                     this.activeRaces.delete(raceId);
                     clearAllTimers();
-                    // Libérer le lock si bloqué
+                    // ✅ CRITIQUE: Libérer le lock si bloqué
                     gameState.operationLock = false;
                     gameState.isRaceRunning = false;
+                    gameState.raceStartTime = null;
+                    gameState.raceEndTime = null;
+                    
+                    // ✅ CRITIQUE: S'assurer qu'un timer est créé même en cas d'erreur
+                    if (!gameState.nextRoundStartTime || gameState.nextRoundStartTime <= Date.now()) {
+                        console.warn('[TIMER] ⚠️ Timer manquant après erreur cleanup, création d\'urgence...');
+                        const now = Date.now();
+                        gameState.nextRoundStartTime = now + ROUND_WAIT_DURATION_MS;
+                        
+                        // Créer un nouveau round d'urgence si nécessaire
+                        if (!gameState.currentRound || !gameState.currentRound.id) {
+                            console.warn('[TIMER] ⚠️ Round manquant après erreur cleanup, création d\'urgence...');
+                            try {
+                                const { createNewRound } = await import('../game.js');
+                                await createNewRound({
+                                    broadcast: broadcast || (() => {}),
+                                    archiveCurrentRound: false,
+                                    checkLock: false
+                                });
+                            } catch (emergencyErr) {
+                                console.error('[TIMER] ❌ Erreur création round d\'urgence:', emergencyErr);
+                            }
+                        }
+                        
+                        // Broadcaster le timer d'urgence
+                        if (broadcast) {
+                            broadcast({
+                                event: 'timer_update',
+                                serverTime: now,
+                                roundId: gameState.currentRound?.id,
+                                timer: {
+                                    timeLeft: ROUND_WAIT_DURATION_MS,
+                                    totalDuration: ROUND_WAIT_DURATION_MS,
+                                    startTime: now,
+                                    endTime: gameState.nextRoundStartTime
+                                }
+                            });
+                        }
+                    }
                 }
             }, TOTAL_RACE_TIME_MS);
 
@@ -880,15 +978,91 @@ export default function createRoundsRouter(broadcast) {
             } catch (error) {
                 // ✅ Si une erreur survient, libérer le lock acquis au début de onCleanup()
                 console.error('[RACE-SEQ] ❌ Erreur dans onCleanup():', error.message);
+                console.error('[RACE-SEQ] ❌ Stack:', error.stack);
                 // Réinitialiser l'état pour éviter les blocages
                 gameState.isRaceRunning = false;
                 gameState.raceStartTime = null;
                 gameState.raceEndTime = null;
+                
+                // ✅ CRITIQUE: S'assurer qu'un timer est créé même en cas d'erreur
+                // Sinon le système restera bloqué sans timer
+                const errorNow = Date.now();
+                if (!gameState.nextRoundStartTime || gameState.nextRoundStartTime <= errorNow) {
+                    console.warn('[RACE-SEQ] ⚠️ Timer manquant après erreur, création d\'urgence...');
+                    gameState.nextRoundStartTime = errorNow + ROUND_WAIT_DURATION_MS;
+                    
+                    // Créer un nouveau round d'urgence si nécessaire
+                    if (!gameState.currentRound || !gameState.currentRound.id) {
+                        console.warn('[RACE-SEQ] ⚠️ Round manquant après erreur, création d\'urgence...');
+                        try {
+                            await createNewRound({
+                                broadcast: broadcast || (() => {}),
+                                archiveCurrentRound: false,
+                                checkLock: false // Pas de lock car déjà libéré dans finally
+                            });
+                        } catch (emergencyErr) {
+                            console.error('[RACE-SEQ] ❌ Erreur création round d\'urgence:', emergencyErr);
+                        }
+                    }
+                    
+                    // Broadcaster le timer d'urgence
+                    if (broadcast) {
+                        broadcast({
+                            event: 'timer_update',
+                            serverTime: errorNow,
+                            roundId: gameState.currentRound?.id,
+                            timer: {
+                                timeLeft: ROUND_WAIT_DURATION_MS,
+                                totalDuration: ROUND_WAIT_DURATION_MS,
+                                startTime: errorNow,
+                                endTime: gameState.nextRoundStartTime
+                            }
+                        });
+                    }
+                }
                 // Ne pas throw pour éviter de bloquer le serveur
             } finally {
                 // ✅ TOUJOURS libérer le lock à la fin (succès ou erreur)
                 gameState.operationLock = false;
                 console.log('[LOCK] 🔓 operationLock libéré par onCleanup()');
+                
+                // ✅ VÉRIFICATION FINALE CRITIQUE: S'assurer qu'un timer existe après le cleanup
+                // Si le timer n'existe toujours pas, le créer maintenant (dernière chance)
+                const finalNow = Date.now();
+                if (!gameState.nextRoundStartTime || gameState.nextRoundStartTime <= finalNow) {
+                    console.warn('[RACE-SEQ] ⚠️ Timer toujours manquant après finally, création finale...');
+                    gameState.nextRoundStartTime = finalNow + ROUND_WAIT_DURATION_MS;
+                    
+                    // Créer un nouveau round si nécessaire
+                    if (!gameState.currentRound || !gameState.currentRound.id) {
+                        console.warn('[RACE-SEQ] ⚠️ Round toujours manquant après finally, création finale...');
+                        try {
+                            await createNewRound({
+                                broadcast: broadcast || (() => {}),
+                                archiveCurrentRound: false,
+                                checkLock: false // Pas de lock car déjà libéré
+                            });
+                        } catch (finalErr) {
+                            console.error('[RACE-SEQ] ❌ Erreur création round finale:', finalErr);
+                        }
+                    }
+                    
+                    // Broadcaster le timer final
+                    if (broadcast) {
+                        broadcast({
+                            event: 'timer_update',
+                            serverTime: finalNow,
+                            roundId: gameState.currentRound?.id,
+                            timer: {
+                                timeLeft: ROUND_WAIT_DURATION_MS,
+                                totalDuration: ROUND_WAIT_DURATION_MS,
+                                startTime: finalNow,
+                                endTime: gameState.nextRoundStartTime
+                            }
+                        });
+                    }
+                    console.log('[RACE-SEQ] ✅ Timer final créé dans finally');
+                }
                 
                 // ✅ CORRECTION: Ne pas recharger la page
                 // Les événements WebSocket (race_results, new_round) gèrent la mise à jour de l'UI
@@ -965,9 +1139,75 @@ export default function createRoundsRouter(broadcast) {
         // ✅ UTILISER LES CONSTANTES UNIFIÉES IMPORTÉES DE config/app.config.js
         // Pas de redéfinition locale des timers!
 
-        // ✅ PROBLÈME #15 CORRIGÉ: GET endpoint sans side effects
-        // La création automatique de round a été déplacée vers POST /api/v1/rounds/ avec action=reset_timer
-        // Si le timer est bloqué, l'admin peut appeler POST /api/v1/rounds/ avec action=reset_timer
+        // ✅ TIMER GUARD: Vérifier et réparer automatiquement les états bloqués
+        let timerFixed = false;
+        
+        // Vérifier si isRaceRunning est bloqué (course "en cours" depuis trop longtemps)
+        if (gameState.isRaceRunning && gameState.raceStartTime) {
+            const elapsed = now - gameState.raceStartTime;
+            const hasActiveTimers = gameState.timers.finish !== null || gameState.timers.cleanup !== null;
+            
+            // Si la course est "en cours" depuis plus de 50s (35s + 15s marge) et pas de timers actifs
+            if (elapsed > TOTAL_RACE_TIME_MS + 15000 || (!hasActiveTimers && elapsed > 5000)) {
+                console.warn(`[TIMER-GUARD] ⚠️ Course bloquée détectée (elapsed=${elapsed}ms, timers=${hasActiveTimers ? 'actifs' : 'inactifs'}), réinitialisation...`);
+                gameState.isRaceRunning = false;
+                gameState.raceStartTime = null;
+                gameState.raceEndTime = null;
+                clearAllTimers();
+                raceTimerManager.activeRaces.clear();
+                timerFixed = true;
+            }
+        }
+        
+        // ✅ TIMER GUARD: Vérifier si le timer est bloqué (null ou expiré sans course)
+        if (!gameState.isRaceRunning && (!gameState.nextRoundStartTime || gameState.nextRoundStartTime <= now)) {
+            // Timer bloqué: créer un nouveau round automatiquement
+            console.warn(`[TIMER-GUARD] ⚠️ Timer bloqué détecté (nextRoundStartTime=${gameState.nextRoundStartTime ? new Date(gameState.nextRoundStartTime).toISOString() : 'null'}), création automatique d'un nouveau round...`);
+            
+            // Vérifier que le lock n'est pas bloqué
+            if (gameState.operationLock) {
+                console.warn('[TIMER-GUARD] ⚠️ operationLock actif, libération forcée...');
+                gameState.operationLock = false;
+            }
+            
+            try {
+                // Créer un nouveau round automatiquement
+                const newRoundId = await createNewRound({
+                    broadcast: broadcast || (() => {}),
+                    archiveCurrentRound: false,
+                    checkLock: false // Pas de lock car déjà vérifié
+                });
+                
+                if (newRoundId) {
+                    const timerNow = Date.now();
+                    gameState.nextRoundStartTime = timerNow + ROUND_WAIT_DURATION_MS;
+                    
+                    // Broadcaster le nouveau timer
+                    if (broadcast) {
+                        broadcast({
+                            event: 'timer_update',
+                            serverTime: timerNow,
+                            roundId: newRoundId,
+                            timer: {
+                                timeLeft: ROUND_WAIT_DURATION_MS,
+                                totalDuration: ROUND_WAIT_DURATION_MS,
+                                startTime: timerNow,
+                                endTime: gameState.nextRoundStartTime
+                            }
+                        });
+                    }
+                    
+                    console.log(`[TIMER-GUARD] ✅ Nouveau round créé automatiquement (ID: ${newRoundId}), timer réinitialisé`);
+                    timerFixed = true;
+                }
+            } catch (guardErr) {
+                console.error('[TIMER-GUARD] ❌ Erreur création automatique round:', guardErr);
+                // En cas d'erreur, au moins réinitialiser le timer
+                const timerNow = Date.now();
+                gameState.nextRoundStartTime = timerNow + ROUND_WAIT_DURATION_MS;
+                timerFixed = true;
+            }
+        }
 
         let screen = "game_screen"; // Par défaut
         let timeRemaining = 0;
@@ -1010,7 +1250,8 @@ export default function createRoundsRouter(broadcast) {
                 ? gameState.nextRoundStartTime - now 
                 : 0,
             timerTotalDuration: ROUND_WAIT_DURATION_MS,
-            gameHistory: gameState.gameHistory || []
+            gameHistory: gameState.gameHistory || [],
+            timerFixed: timerFixed // Indiquer si le timer a été réparé automatiquement
         });
     });
 
@@ -1144,14 +1385,14 @@ export default function createRoundsRouter(broadcast) {
                 const raceSequenceId = `${roundId}-${Date.now()}`;
                 
                 // ✅ UTILISER LE GESTIONNAIRE CENTRALISÉ
-                const success = raceTimerManager.startRaceSequence(raceSequenceId, raceCallbacks);
+                const success = raceTimerManager.startRaceSequence(raceSequenceId, raceCallbacks, broadcast);
                 
                 if (!success) {
                     console.warn('[FINISH] ⚠️ startRaceSequence a retourné false, nettoyage de activeRaces...');
                     // Nettoyer les anciennes séquences orphelines
                     raceTimerManager.activeRaces.clear();
                     // Réessayer
-                    const retrySuccess = raceTimerManager.startRaceSequence(raceSequenceId, raceCallbacks);
+                    const retrySuccess = raceTimerManager.startRaceSequence(raceSequenceId, raceCallbacks, broadcast);
                     if (!retrySuccess) {
                         return res.json(wrap({ skipped: true, reason: 'race sequence already active after cleanup' }));
                     }
