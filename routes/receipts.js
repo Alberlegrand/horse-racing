@@ -178,15 +178,12 @@ export default function createReceiptsRouter(broadcast) {
       const createdDate = receiptDate.toLocaleDateString('fr-FR');
       const createdTime = receiptDate.toLocaleTimeString('fr-FR');
 
-      let totalMise = 0;
-      let totalGainPotentiel = 0;
-
-      // ✅ Génération des lignes de paris au format colonnes (Description | Price)
+      // ✅ Génération des sections de paris avec détails et totaux séparés pour chaque pari
       const betsArray = Array.isArray(receipt.bets) ? receipt.bets : [];
       console.log(`[PRINT] 📋 Génération HTML pour ${betsArray.length} pari(s)`);
       
-      // ✅ Calculer les totaux et générer le HTML des paris
-      const betsRowsHTML = betsArray.map((bet, index) => {
+      // ✅ Générer le HTML pour chaque pari avec ses propres détails et totaux
+      const betsSectionsHTML = betsArray.map((bet, index) => {
         const participant = bet.participant || {};
         const name = escapeHtml(
           participant.name || 
@@ -206,21 +203,34 @@ export default function createReceiptsRouter(broadcast) {
         }
         const mise = systemToPublic(miseSystem);
         const gainPot = systemToPublic(miseSystem * coeff);
-        totalMise += mise;
-        totalGainPotentiel += gainPot;
         
         const description = `N°${number} ${name}`;
         
         return `
-          <div class="bet-row">
-            <span>${description}</span>
-            <span style="font-weight:bold;">${mise.toFixed(2)}</span>
+          <!-- Détails Pari ${index + 1} -->
+          <div class="bets-section">
+            <div class="bets-header"><span>Détails</span><span>Mise</span></div>
+            <div class="bet-row">
+              <span>${description}</span>
+              <span style="font-weight:bold;">${mise.toFixed(2)}</span>
+            </div>
+            <div class="bet-row">
+              <span>Cote</span>
+              <span style="font-weight:bold;">${coeff.toFixed(2)}</span>
+            </div>
+            ${gainPot > 0 ? `
+            <div class="bet-row">
+              <span>Gain</span>
+              <span style="font-weight:bold;">${gainPot.toFixed(2)}</span>
+            </div>
+            ` : ''}
           </div>
+          ${index < betsArray.length - 1 ? '<div class="separator-line">-------------------------------</div>' : ''}
         `;
       }).join('');
       
       // ✅ Vérifier qu'au moins un pari est affiché
-      if (!betsRowsHTML || betsRowsHTML.trim() === '') {
+      if (!betsSectionsHTML || betsSectionsHTML.trim() === '') {
         console.error(`[PRINT] ❌ Aucun pari à afficher pour le ticket #${receiptId}`);
         return res.status(500).send("<h1>Erreur: Aucun pari trouvé pour ce ticket</h1>");
       }
@@ -352,19 +362,7 @@ body {
 
   <div class="separator-line">-------------------------------</div>
 
-  <!-- Détails Paris -->
-  <div class="bets-section">
-    <div class="bets-header"><span>Détails</span><span>Mise</span></div>
-    ${betsRowsHTML}
-  </div>
-
-  <!-- Totaux -->
-  <div class="totals-section">
-    <div class="total-row"><span>TOTAL</span><span>${totalMise.toFixed(2)} HTG</span></div>
-    ${totalGainPotentiel > 0 ? `
-    <div class="total-row"><span>Gain</span><span>${totalGainPotentiel.toFixed(2)} HTG</span></div>
-    ` : ''}
-  </div>
+  ${betsSectionsHTML}
 
   <div class="separator-line">-------------------------------</div>
 
