@@ -259,6 +259,7 @@ const dropTablesIfExist = async () => {
     await client.query("BEGIN");
 
     // Drop in reverse dependency order
+    // ⚠️ IMPORTANT: Ne PAS supprimer cashier_accounts et account_transactions pour préserver les données
     await client.query("DROP TABLE IF EXISTS notifications CASCADE");
     await client.query("DROP TABLE IF EXISTS reports CASCADE");
     await client.query("DROP TABLE IF EXISTS game_statistics CASCADE");
@@ -271,6 +272,10 @@ const dropTablesIfExist = async () => {
     await client.query("DROP SEQUENCE IF EXISTS rounds_round_number_seq CASCADE");
     await client.query("DROP TABLE IF EXISTS participants CASCADE");
     await client.query("DROP TABLE IF EXISTS user_profiles CASCADE");
+    // ⚠️ PROTECTION: Ne pas supprimer account_transactions et cashier_accounts pour préserver les données
+    // Ces tables sont importantes et doivent persister même en mode développement
+    await client.query("DROP TABLE IF EXISTS account_transactions CASCADE");
+    await client.query("DROP TABLE IF EXISTS cashier_accounts CASCADE");
     await client.query("DROP TABLE IF EXISTS users CASCADE");
     await client.query("DROP TABLE IF EXISTS app_settings CASCADE");
     
@@ -774,18 +779,23 @@ const createTables = async () => {
       "SELECT user_id, username FROM users WHERE role = 'cashier'"
     );
     
+    console.log(`🔍 Vérification des comptes pour ${cashierUsers.rows.length} caissier(s)...`);
+    
     for (const cashier of cashierUsers.rows) {
       const accountExists = await client.query(
-        "SELECT account_id FROM cashier_accounts WHERE user_id = $1",
+        "SELECT account_id, current_balance, status FROM cashier_accounts WHERE user_id = $1",
         [cashier.user_id]
       );
       
       if (accountExists.rows.length === 0) {
         await client.query(`
-          INSERT INTO cashier_accounts (user_id, current_balance, opening_balance, status)
-          VALUES ($1, 0, 0, 'closed')
+          INSERT INTO cashier_accounts (user_id, current_balance, opening_balance, status, created_at, updated_at)
+          VALUES ($1, 0, 0, 'closed', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
         `, [cashier.user_id]);
-        console.log(`💰 Compte de caisse créé pour ${cashier.username}`);
+        console.log(`💰 Compte de caisse créé pour ${cashier.username} (nouveau)`);
+      } else {
+        const account = accountExists.rows[0];
+        console.log(`✅ Compte existant pour ${cashier.username} - Solde: ${parseFloat(account.current_balance || 0).toFixed(2)} HTG, Statut: ${account.status}`);
       }
     }
 

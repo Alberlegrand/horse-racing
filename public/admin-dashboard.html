@@ -416,6 +416,70 @@
       pointer-events: none;
     }
 
+    /* CASHIERS TABLE */
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 10px;
+    }
+
+    th, td {
+      padding: 12px;
+      text-align: left;
+      border-bottom: 1px solid var(--light);
+    }
+
+    th {
+      background: #f8f9fa;
+      font-weight: 600;
+      color: var(--primary);
+      position: sticky;
+      top: 0;
+    }
+
+    tr:hover {
+      background: #f8f9fa;
+    }
+
+    .status-badge-cashier {
+      display: inline-block;
+      padding: 4px 12px;
+      border-radius: 12px;
+      font-size: 12px;
+      font-weight: 600;
+    }
+
+    .status-open {
+      background: #d4edda;
+      color: #155724;
+    }
+
+    .status-closed {
+      background: #f8d7da;
+      color: #721c24;
+    }
+
+    .cashier-balance {
+      font-weight: 600;
+      color: var(--info);
+    }
+
+    .cashier-info {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .cashier-name {
+      font-weight: 600;
+      color: var(--primary);
+    }
+
+    .cashier-email {
+      font-size: 12px;
+      color: #7f8c8d;
+    }
+
     .spinner {
       display: inline-block;
       width: 16px;
@@ -732,6 +796,42 @@
       </div>
     </div>
 
+    <!-- CASHIER MANAGEMENT -->
+    <div class="card" style="grid-column: 1 / -1;">
+      <h2>💰 Gestion des Caissiers</h2>
+      
+      <!-- Add Cashier Form -->
+      <div style="margin-bottom: 20px; padding: 15px; background: #f8f9fa; border-radius: 8px;">
+        <h3 style="font-size: 16px; margin-bottom: 15px; color: var(--primary);">➕ Ajouter un Nouveau Caissier</h3>
+        <form id="addCashierForm" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px;">
+          <input type="text" id="cashierUsername" placeholder="Nom d'utilisateur" required style="padding: 10px; border: 1px solid var(--border); border-radius: 5px;">
+          <input type="email" id="cashierEmail" placeholder="Email" required style="padding: 10px; border: 1px solid var(--border); border-radius: 5px;">
+          <input type="password" id="cashierPassword" placeholder="Mot de passe" required style="padding: 10px; border: 1px solid var(--border); border-radius: 5px;">
+          <button type="submit" class="btn btn-success" style="margin: 0;">Ajouter Caissier</button>
+        </form>
+      </div>
+
+      <!-- Cashiers List -->
+      <div>
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; flex-wrap: wrap; gap: 10px;">
+          <h3 style="font-size: 16px; color: var(--primary);">📋 Liste des Caissiers</h3>
+          <div style="display: flex; gap: 10px;">
+            <button class="btn btn-warning" onclick="initializeMissingAccounts()" style="margin: 0; padding: 8px 16px;">
+              🔧 Initialiser Comptes Manquants
+            </button>
+            <button class="btn btn-primary" onclick="loadCashiers()" style="margin: 0; padding: 8px 16px;">
+              🔄 Actualiser
+            </button>
+          </div>
+        </div>
+        <div id="cashiersList" style="overflow-x: auto;">
+          <div style="text-align: center; padding: 20px; color: #7f8c8d;">
+            Chargement des caissiers...
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- LOGS -->
     <div class="card">
       <h2>Logs du Serveur</h2>
@@ -748,10 +848,21 @@
   <div class="modal" id="confirmModal">
     <div class="modal-content">
       <h3 id="modalTitle">Confirmation</h3>
-      <p id="modalMessage">Êtes-vous sûr?</p>
+      <div id="modalMessage">Êtes-vous sûr?</div>
       <div class="modal-actions">
         <button class="btn btn-primary" onclick="closeModal()">Annuler</button>
         <button class="btn btn-danger" id="confirmBtn" onclick="executeConfirm()">Confirmer</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL DETAILS -->
+  <div class="modal" id="detailsModal">
+    <div class="modal-content" style="max-width: 700px;">
+      <h3 id="detailsTitle">Détails</h3>
+      <div id="detailsContent"></div>
+      <div class="modal-actions">
+        <button class="btn btn-primary" onclick="closeDetailsModal()">Fermer</button>
       </div>
     </div>
   </div>
@@ -776,7 +887,7 @@
     // ===== INIT =====
     document.addEventListener('DOMContentLoaded', () => {
       if (!authToken) {
-        window.location.href = '/login.html';
+        window.location.href = '/login';
         return;
       }
 
@@ -786,6 +897,7 @@
       loadUserInfo();
       loadServerStatus();
       loadDatabaseStats();
+      loadCashiers();
       
       // Actualiser le statut avec le CONFIG
       setInterval(loadServerStatus, CONFIG.healthCheckInterval);
@@ -795,6 +907,12 @@
       
       // Actualiser les logs avec le CONFIG
       setInterval(loadLogs, CONFIG.logRefreshInterval);
+
+      // Actualiser la liste des caissiers toutes les minutes
+      setInterval(loadCashiers, 60000);
+
+      // Formulaire d'ajout de caissier
+      document.getElementById('addCashierForm').addEventListener('submit', handleAddCashier);
 
       addLog('✅ Connexion au panneau d\'administration', 'success');
     });
@@ -1189,6 +1307,16 @@
       confirmAction = null;
     }
 
+    function showDetailsModal(title, content) {
+      document.getElementById('detailsTitle').textContent = title;
+      document.getElementById('detailsContent').innerHTML = content;
+      document.getElementById('detailsModal').classList.add('active');
+    }
+
+    function closeDetailsModal() {
+      document.getElementById('detailsModal').classList.remove('active');
+    }
+
     function executeConfirm() {
       if (confirmAction) confirmAction();
       closeModal();
@@ -1216,13 +1344,329 @@
       console.log('[ADMIN DASHBOARD] Déconnexion utilisateur');
       
       // Rediriger vers login
-      window.location.href = '/login.html';
+      window.location.href = '/login';
     }
 
     // Fermer modal avec Escape
     document.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') closeModal();
+      if (e.key === 'Escape') {
+        closeModal();
+        closeDetailsModal();
+      }
     });
+
+    // ===== CASHIER MANAGEMENT =====
+    async function loadCashiers() {
+      try {
+        const response = await fetch(`${API_BASE}/api/v1/admin/cashiers`, {
+          headers: { 'Authorization': `Bearer ${authToken}` }
+        });
+        const data = await response.json();
+
+        if (!response.ok) {
+          addLog('❌ Erreur chargement caissiers: ' + (data.error || response.status), 'error');
+          document.getElementById('cashiersList').innerHTML = 
+            '<div style="text-align: center; padding: 20px; color: var(--secondary);">Erreur de chargement</div>';
+          return;
+        }
+
+        const cashiersList = document.getElementById('cashiersList');
+        
+        if (!data.cashiers || data.cashiers.length === 0) {
+          cashiersList.innerHTML = 
+            '<div style="text-align: center; padding: 20px; color: #7f8c8d;">Aucun caissier trouvé</div>';
+          return;
+        }
+
+        // Créer le tableau
+        let tableHTML = `
+          <table>
+            <thead>
+              <tr>
+                <th>Caissier</th>
+                <th>Statut Utilisateur</th>
+                <th>Solde</th>
+                <th>Statut Caisse</th>
+                <th>Ouverture</th>
+                <th>Fermeture</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+        `;
+
+        data.cashiers.forEach(cashier => {
+          const account = cashier.account;
+          const statusBadge = cashier.isActive && !cashier.isSuspended 
+            ? '<span style="color: var(--success);">✅ Actif</span>' 
+            : '<span style="color: var(--secondary);">❌ Inactif</span>';
+          
+          const accountStatus = account 
+            ? `<span class="status-badge-cashier status-${account.status}">${account.status === 'open' ? 'Ouverte' : 'Fermée'}</span>`
+            : '<span style="color: var(--warning); font-weight: 600;">⚠️ Compte manquant</span>';
+          
+          const balance = account ? formatCurrency(account.currentBalance) : '<span style="color: var(--warning);">N/A</span>';
+          const openingTime = account && account.openingTime 
+            ? new Date(account.openingTime).toLocaleString('fr-FR', { 
+                day: '2-digit', 
+                month: '2-digit', 
+                year: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit'
+              })
+            : '-';
+          const closingTime = account && account.closingTime 
+            ? new Date(account.closingTime).toLocaleString('fr-FR', { 
+                day: '2-digit', 
+                month: '2-digit', 
+                year: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit'
+              })
+            : '-';
+
+          const accountActions = account
+            ? `<button class="btn btn-primary" onclick="viewCashierAccount(${cashier.userId})" 
+                  style="padding: 6px 12px; font-size: 12px; margin: 0;">
+                  👁️ Détails
+                </button>`
+            : `<button class="btn btn-warning" onclick="createCashierAccount(${cashier.userId}, '${escapeHtml(cashier.username)}')" 
+                  style="padding: 6px 12px; font-size: 12px; margin: 0;">
+                  ➕ Créer Compte
+                </button>`;
+
+          tableHTML += `
+            <tr>
+              <td>
+                <div class="cashier-info">
+                  <span class="cashier-name">${escapeHtml(cashier.username)}</span>
+                  <span class="cashier-email">${escapeHtml(cashier.email || '')}</span>
+                </div>
+              </td>
+              <td>${statusBadge}</td>
+              <td><span class="cashier-balance">${balance}</span></td>
+              <td>${accountStatus}</td>
+              <td style="font-size: 12px;">${openingTime}</td>
+              <td style="font-size: 12px;">${closingTime}</td>
+              <td>${accountActions}</td>
+            </tr>
+          `;
+        });
+
+        tableHTML += '</tbody></table>';
+        cashiersList.innerHTML = tableHTML;
+        
+        addLog(`✅ ${data.cashiers.length} caissier(s) chargé(s)`, 'success');
+      } catch (e) {
+        addLog('❌ Erreur chargement caissiers: ' + e.message, 'error');
+        document.getElementById('cashiersList').innerHTML = 
+          '<div style="text-align: center; padding: 20px; color: var(--secondary);">Erreur: ' + e.message + '</div>';
+      }
+    }
+
+    async function handleAddCashier(e) {
+      e.preventDefault();
+      
+      const username = document.getElementById('cashierUsername').value.trim();
+      const email = document.getElementById('cashierEmail').value.trim();
+      const password = document.getElementById('cashierPassword').value;
+
+      if (!username || !email || !password) {
+        showAlert('❌ Tous les champs sont requis', 'danger');
+        return;
+      }
+
+      try {
+        addLog(`➕ Création du caissier ${username}...`, 'info');
+        
+        const response = await fetch(`${API_BASE}/api/v1/admin/cashiers`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${authToken}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ username, email, password })
+        });
+
+        const data = await response.json();
+
+        if (!response.ok) {
+          showAlert('❌ Erreur: ' + (data.error || response.status), 'danger');
+          addLog('❌ Erreur création caissier: ' + (data.error || response.status), 'error');
+          return;
+        }
+
+        showAlert('✅ Caissier créé avec succès: ' + username, 'success');
+        addLog(`✅ Caissier créé: ${username} (ID: ${data.cashier.userId})`, 'success');
+        
+        // Réinitialiser le formulaire
+        document.getElementById('addCashierForm').reset();
+        
+        // Recharger la liste
+        loadCashiers();
+      } catch (e) {
+        showAlert('❌ Erreur: ' + e.message, 'danger');
+        addLog('❌ Erreur création caissier: ' + e.message, 'error');
+      }
+    }
+
+    async function viewCashierAccount(userId) {
+      try {
+        const response = await fetch(`${API_BASE}/api/v1/admin/cashiers/${userId}/account`, {
+          headers: { 'Authorization': `Bearer ${authToken}` }
+        });
+        const data = await response.json();
+
+        if (!response.ok) {
+          showAlert('❌ Erreur: ' + (data.error || response.status), 'danger');
+          return;
+        }
+
+        const account = data.account;
+        const transactions = data.recentTransactions || [];
+
+        let modalHTML = `
+          <h3>Détails du Compte Caissier</h3>
+          <div style="margin: 20px 0;">
+            <div class="status-item">
+              <span class="status-label">Solde Actuel:</span>
+              <span class="status-value" style="font-size: 20px; font-weight: bold; color: var(--info);">
+                ${formatCurrency(account.currentBalance)}
+              </span>
+            </div>
+            <div class="status-item">
+              <span class="status-label">Solde d'Ouverture:</span>
+              <span class="status-value">${formatCurrency(account.openingBalance)}</span>
+            </div>
+            <div class="status-item">
+              <span class="status-label">Statut:</span>
+              <span class="status-value">
+                <span class="status-badge-cashier status-${account.status}">
+                  ${account.status === 'open' ? 'Ouverte' : 'Fermée'}
+                </span>
+              </span>
+            </div>
+            ${account.openingTime ? `
+            <div class="status-item">
+              <span class="status-label">Ouverture:</span>
+              <span class="status-value">${new Date(account.openingTime).toLocaleString('fr-FR')}</span>
+            </div>
+            ` : ''}
+            ${account.closingTime ? `
+            <div class="status-item">
+              <span class="status-label">Fermeture:</span>
+              <span class="status-value">${new Date(account.closingTime).toLocaleString('fr-FR')}</span>
+            </div>
+            ` : ''}
+          </div>
+        `;
+
+        if (transactions.length > 0) {
+          modalHTML += `
+            <h4 style="margin-top: 20px; margin-bottom: 10px;">Transactions Récentes</h4>
+            <div style="max-height: 300px; overflow-y: auto;">
+              <table style="font-size: 12px;">
+                <thead>
+                  <tr>
+                    <th>Date</th>
+                    <th>Type</th>
+                    <th>Montant</th>
+                    <th>Solde</th>
+                  </tr>
+                </thead>
+                <tbody>
+          `;
+
+          transactions.forEach(t => {
+            modalHTML += `
+              <tr>
+                <td>${new Date(t.createdAt).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</td>
+                <td>${escapeHtml(t.type)}</td>
+                <td>${formatCurrency(t.amount)}</td>
+                <td>${formatCurrency(t.newBalance)}</td>
+              </tr>
+            `;
+          });
+
+          modalHTML += '</tbody></table></div>';
+        } else {
+          modalHTML += '<p style="color: #7f8c8d; text-align: center; margin-top: 20px;">Aucune transaction</p>';
+        }
+
+        showDetailsModal('Détails du Compte Caissier', modalHTML);
+      } catch (e) {
+        showAlert('❌ Erreur: ' + e.message, 'danger');
+      }
+    }
+
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
+    async function initializeMissingAccounts() {
+      try {
+        addLog('🔧 Initialisation des comptes manquants...', 'info');
+        
+        const response = await fetch(`${API_BASE}/api/v1/admin/cashiers/initialize-accounts`, {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${authToken}` }
+        });
+
+        const data = await response.json();
+
+        if (!response.ok) {
+          showAlert('❌ Erreur: ' + (data.error || response.status), 'danger');
+          addLog('❌ Erreur initialisation comptes: ' + (data.error || response.status), 'error');
+          return;
+        }
+
+        showAlert(`✅ ${data.message}`, 'success');
+        addLog(`✅ ${data.createdAccounts.length} compte(s) initialisé(s)`, 'success');
+        
+        // Recharger la liste
+        loadCashiers();
+      } catch (e) {
+        showAlert('❌ Erreur: ' + e.message, 'danger');
+        addLog('❌ Erreur initialisation comptes: ' + e.message, 'error');
+      }
+    }
+
+    async function createCashierAccount(userId, username) {
+      showConfirm(
+        'Créer le Compte',
+        `Créer le compte de caisse pour ${username}?`,
+        async () => {
+          try {
+            addLog(`➕ Création du compte pour ${username}...`, 'info');
+            
+            // Utiliser la route account pour forcer la création
+            const response = await fetch(`${API_BASE}/api/v1/admin/cashiers/${userId}/account`, {
+              method: 'GET',
+              headers: { 'Authorization': `Bearer ${authToken}` }
+            });
+
+            const data = await response.json();
+
+            if (!response.ok) {
+              showAlert('❌ Erreur: ' + (data.error || response.status), 'danger');
+              addLog('❌ Erreur création compte: ' + (data.error || response.status), 'error');
+              return;
+            }
+
+            showAlert(`✅ Compte créé avec succès pour ${username}`, 'success');
+            addLog(`✅ Compte créé pour ${username}`, 'success');
+            
+            // Recharger la liste
+            loadCashiers();
+          } catch (e) {
+            showAlert('❌ Erreur: ' + e.message, 'danger');
+            addLog('❌ Erreur création compte: ' + e.message, 'error');
+          }
+        }
+      );
+    }
   </script>
 </body>
 </html>

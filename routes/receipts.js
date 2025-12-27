@@ -175,8 +175,16 @@ export default function createReceiptsRouter(broadcast) {
       const receiptDate = receipt.created_time
         ? new Date(receipt.created_time)
         : new Date();
-      const createdDate = receiptDate.toLocaleDateString('fr-FR');
-      const createdTime = receiptDate.toLocaleTimeString('fr-FR');
+      // Utiliser le fuseau horaire Haïti/Port-au-Prince pour l'impression
+      const createdDate = receiptDate.toLocaleDateString('fr-FR', {
+        timeZone: 'America/Port-au-Prince'
+      });
+      const createdTime = receiptDate.toLocaleTimeString('fr-FR', {
+        timeZone: 'America/Port-au-Prince',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit'
+      });
 
       // ✅ Génération des sections de paris avec détails et totaux séparés pour chaque pari
       const betsArray = Array.isArray(receipt.bets) ? receipt.bets : [];
@@ -220,7 +228,7 @@ export default function createReceiptsRouter(broadcast) {
             </div>
             ${gainPot > 0 ? `
             <div class="bet-row">
-              <span>Gain</span>
+              <span>Gain Potentiel</span>
               <span style="font-weight:bold;">${gainPot.toFixed(2)}</span>
             </div>
             ` : ''}
@@ -410,6 +418,10 @@ body {
           receipt = await getReceiptById(receiptId);
           if (receipt) {
             console.log(`[PAYOUT] ✅ Ticket #${receiptId} trouvé en base de données`);
+            // ✅ CORRECTION: Mapper receipt_id vers id pour compatibilité
+            if (!receipt.id && receipt.receipt_id) {
+              receipt.id = receipt.receipt_id;
+            }
             // Récupérer les paris du ticket
             let bets = await getBetsByReceipt(receiptId);
             // Transformer les bets en format compatible avec la mémoire
@@ -445,11 +457,24 @@ body {
         return res.status(404).send("<h1>Ticket non trouvé</h1>");
       }
 
+      // ✅ CORRECTION: S'assurer que l'ID est toujours présent (même si receipt vient de gameState)
+      if (receipt && !receipt.id) {
+        receipt.id = receipt.receipt_id || receiptId;
+      }
+
       const receiptDate = receipt.created_time
         ? new Date(receipt.created_time)
         : new Date();
-      const createdDate = receiptDate.toLocaleDateString('fr-FR');
-      const createdTime = receiptDate.toLocaleTimeString('fr-FR');
+      // Utiliser le fuseau horaire Haïti/Port-au-Prince pour l'impression
+      const createdDate = receiptDate.toLocaleDateString('fr-FR', {
+        timeZone: 'America/Port-au-Prince'
+      });
+      const createdTime = receiptDate.toLocaleTimeString('fr-FR', {
+        timeZone: 'America/Port-au-Prince',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit'
+      });
 
       // Déterminer le résultat (receipt.prize est en système, convertir en publique)
       const prizeSystem = parseFloat(receipt.prize || 0);
@@ -513,7 +538,7 @@ body {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Décaissement #${receipt.id}</title>
+  <title>Décaissement #${receipt.id || receipt.receipt_id || receiptId}</title>
   <style>
     * {
       margin: 0;
@@ -670,7 +695,7 @@ body {
 
     <!-- Infos Ticket -->
     <div class="info-section">
-      <div class="info-row"><span>Ticket:</span><span class="info-value">#${receipt.id}</span></div>
+      <div class="info-row"><span>Ticket:</span><span class="info-value">#${receipt.id || receipt.receipt_id || receiptId}</span></div>
       <div class="info-row"><span>Tour:</span><span class="info-value">#${round.id}</span></div>
       <div class="info-row info-date"><span>Date:</span><span class="info-value">${escapeHtml(createdDate)}</span></div>
       <div class="info-row info-date"><span>Heure:</span><span class="info-value">${escapeHtml(createdTime)}</span></div>

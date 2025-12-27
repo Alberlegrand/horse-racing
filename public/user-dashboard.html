@@ -356,8 +356,10 @@
     function updateTime() {
       const now = new Date();
       const timeString = now.toLocaleTimeString('fr-FR', { 
+        timeZone: 'America/Port-au-Prince',
         hour: '2-digit', 
         minute: '2-digit',
+        second: '2-digit',
         hour12: false 
       });
       document.getElementById('timeDisplay').textContent = timeString;
@@ -381,7 +383,7 @@
       // Check if user is authenticated
       const token = localStorage.getItem('authToken');
       if (!token) {
-        window.location.href = '/login.html';
+        window.location.href = '/login';
         return;
       }
 
@@ -505,11 +507,11 @@
           showSuccess('Déconnexion...');
           
           setTimeout(() => {
-            window.location.href = '/login.html';
+            window.location.href = '/login';
           }, 800);
         } catch (err) {
           console.error('Logout error:', err);
-          window.location.href = '/login.html';
+          window.location.href = '/login';
         }
       }
     });

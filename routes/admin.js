@@ -6,6 +6,8 @@ import { gameState, startNewRound } from '../game.js';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import { spawn } from 'child_process';
+import { createUser, getUserByUsername, getAllUsers } from '../models/userModel.js';
+import { getAllAccounts, getAccountByUserId } from '../models/accountModel.js';
 
 const router = express.Router();
 const execAsync = promisify(exec);
@@ -472,6 +474,259 @@ router.get('/user/me', async (req, res) => {
     });
   } catch (e) {
     console.error('[ADMIN] User info error:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ===== CASHIER MANAGEMENT =====
+/**
+ * GET /api/v1/admin/cashiers
+ * Récupère tous les caissiers avec leurs comptes
+ */
+router.get('/cashiers', async (req, res) => {
+  try {
+    // Récupérer tous les utilisateurs avec le rôle 'cashier'
+    const cashiersResult = await pool.query(
+      `SELECT u.user_id, u.username, u.email, u.is_active, u.is_suspended, u.created_at
+       FROM users u
+       WHERE u.role = 'cashier'
+       ORDER BY u.created_at DESC`
+    );
+
+    // Pour chaque caissier, récupérer son compte (ou créer s'il manque)
+    const cashiersWithAccounts = await Promise.all(
+      cashiersResult.rows.map(async (cashier) => {
+        let account = await getAccountByUserId(cashier.user_id);
+        
+        // Si le compte n'existe pas, le créer automatiquement
+        if (!account) {
+          try {
+            const accountResult = await pool.query(
+              `INSERT INTO cashier_accounts (user_id, current_balance, opening_balance, status, created_at, updated_at)
+               VALUES ($1, 0, 0, 'closed', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+               RETURNING *`,
+              [cashier.user_id]
+            );
+            account = accountResult.rows[0];
+            console.log(`✅ [ADMIN] Compte auto-créé pour caissier ${cashier.username}`);
+          } catch (createErr) {
+            console.error(`❌ [ADMIN] Erreur création compte pour ${cashier.username}:`, createErr.message);
+            // Continue sans compte
+          }
+        }
+        
+        return {
+          userId: cashier.user_id,
+          username: cashier.username,
+          email: cashier.email,
+          isActive: cashier.is_active,
+          isSuspended: cashier.is_suspended,
+          createdAt: cashier.created_at,
+          account: account ? {
+            accountId: account.account_id,
+            currentBalance: parseFloat(account.current_balance || 0),
+            openingBalance: parseFloat(account.opening_balance || 0),
+            status: account.status,
+            openingTime: account.opening_time,
+            closingTime: account.closing_time,
+            notes: account.notes,
+            createdAt: account.created_at,
+            updatedAt: account.updated_at
+          } : null
+        };
+      })
+    );
+
+    res.json({
+      success: true,
+      cashiers: cashiersWithAccounts
+    });
+  } catch (e) {
+    console.error('[ADMIN] Cashiers list error:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+/**
+ * POST /api/v1/admin/cashiers
+ * Crée un nouveau caissier
+ */
+router.post('/cashiers', async (req, res) => {
+  try {
+    const { username, email, password } = req.body;
+
+    // Validation
+    if (!username || !email || !password) {
+      return res.status(400).json({ error: 'Username, email et password requis' });
+    }
+
+    // Vérifier si l'utilisateur existe déjà
+    const existingUser = await getUserByUsername(username);
+    if (existingUser) {
+      return res.status(400).json({ error: 'Ce nom d\'utilisateur existe déjà' });
+    }
+
+    // Créer l'utilisateur caissier
+    const newUser = await createUser({
+      username,
+      email,
+      password, // Le système utilise des mots de passe en clair
+      role: 'cashier',
+      is_active: true
+    });
+
+    // Créer automatiquement un compte pour le caissier (garantir la création)
+    try {
+      // Vérifier d'abord si le compte existe
+      const existingAccount = await pool.query(
+        `SELECT account_id FROM cashier_accounts WHERE user_id = $1`,
+        [newUser.user_id]
+      );
+
+      if (existingAccount.rows.length === 0) {
+        // Créer le compte s'il n'existe pas
+        const accountResult = await pool.query(
+          `INSERT INTO cashier_accounts (user_id, current_balance, opening_balance, status, created_at, updated_at)
+           VALUES ($1, 0, 0, 'closed', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+           RETURNING account_id`,
+          [newUser.user_id]
+        );
+        console.log(`✅ [ADMIN] Compte créé pour caissier ${username} (account_id: ${accountResult.rows[0].account_id})`);
+      } else {
+        console.log(`ℹ️ [ADMIN] Compte existe déjà pour caissier ${username}`);
+      }
+    } catch (accountErr) {
+      console.error('[ADMIN] ❌ Erreur création compte caissier:', accountErr.message);
+      // Ne pas échouer la création de l'utilisateur, mais logger l'erreur
+      // Le compte pourra être créé plus tard via la fonction d'initialisation
+    }
+
+    res.json({
+      success: true,
+      message: 'Caissier créé avec succès',
+      cashier: {
+        userId: newUser.user_id,
+        username: newUser.username,
+        email: newUser.email,
+        role: newUser.role,
+        isActive: newUser.is_active
+      }
+    });
+  } catch (e) {
+    console.error('[ADMIN] Create cashier error:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+/**
+ * POST /api/v1/admin/cashiers/initialize-accounts
+ * Initialise les comptes manquants pour tous les caissiers
+ */
+router.post('/cashiers/initialize-accounts', async (req, res) => {
+  try {
+    // Récupérer tous les caissiers sans compte
+    const cashiersWithoutAccount = await pool.query(
+      `SELECT u.user_id, u.username 
+       FROM users u
+       WHERE u.role = 'cashier'
+       AND NOT EXISTS (
+         SELECT 1 FROM cashier_accounts ca WHERE ca.user_id = u.user_id
+       )`
+    );
+
+    const createdAccounts = [];
+    for (const cashier of cashiersWithoutAccount.rows) {
+      try {
+        const accountResult = await pool.query(
+          `INSERT INTO cashier_accounts (user_id, current_balance, opening_balance, status, created_at, updated_at)
+           VALUES ($1, 0, 0, 'closed', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+           RETURNING account_id`,
+          [cashier.user_id]
+        );
+        createdAccounts.push({
+          userId: cashier.user_id,
+          username: cashier.username,
+          accountId: accountResult.rows[0].account_id
+        });
+        console.log(`✅ [ADMIN] Compte initialisé pour ${cashier.username}`);
+      } catch (err) {
+        console.error(`❌ [ADMIN] Erreur création compte pour ${cashier.username}:`, err.message);
+      }
+    }
+
+    res.json({
+      success: true,
+      message: `${createdAccounts.length} compte(s) créé(s)`,
+      createdAccounts
+    });
+  } catch (e) {
+    console.error('[ADMIN] Initialize accounts error:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+/**
+ * GET /api/v1/admin/cashiers/:userId/account
+ * Récupère le compte d'un caissier spécifique
+ */
+router.get('/cashiers/:userId/account', async (req, res) => {
+  try {
+    const { userId } = req.params;
+    let account = await getAccountByUserId(parseInt(userId, 10));
+
+    // Si le compte n'existe pas, le créer automatiquement
+    if (!account) {
+      try {
+        const accountResult = await pool.query(
+          `INSERT INTO cashier_accounts (user_id, current_balance, opening_balance, status, created_at, updated_at)
+           VALUES ($1, 0, 0, 'closed', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+           RETURNING *`,
+          [parseInt(userId, 10)]
+        );
+        account = accountResult.rows[0];
+        console.log(`✅ [ADMIN] Compte créé automatiquement pour userId ${userId}`);
+      } catch (createErr) {
+        console.error('[ADMIN] Erreur création compte automatique:', createErr.message);
+        return res.status(500).json({ error: 'Compte non trouvé et impossible de le créer' });
+      }
+    }
+
+    // Récupérer aussi les transactions récentes
+    const transactionsResult = await pool.query(
+      `SELECT * FROM account_transactions 
+       WHERE account_id = $1 
+       ORDER BY created_at DESC 
+       LIMIT 20`,
+      [account.account_id]
+    );
+
+    res.json({
+      success: true,
+      account: {
+        accountId: account.account_id,
+        userId: account.user_id,
+        currentBalance: parseFloat(account.current_balance || 0),
+        openingBalance: parseFloat(account.opening_balance || 0),
+        status: account.status,
+        openingTime: account.opening_time,
+        closingTime: account.closing_time,
+        notes: account.notes,
+        createdAt: account.created_at,
+        updatedAt: account.updated_at
+      },
+      recentTransactions: transactionsResult.rows.map(t => ({
+        transactionId: t.transaction_id,
+        type: t.transaction_type,
+        amount: parseFloat(t.amount || 0),
+        previousBalance: parseFloat(t.previous_balance || 0),
+        newBalance: parseFloat(t.new_balance || 0),
+        reference: t.reference,
+        description: t.description,
+        createdAt: t.created_at
+      }))
+    });
+  } catch (e) {
+    console.error('[ADMIN] Get cashier account error:', e);
     res.status(500).json({ error: e.message });
   }
 });

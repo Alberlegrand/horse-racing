@@ -454,7 +454,15 @@ class CashierAccountManager {
       : '<span class="badge badge-secondary">FERMÉ</span>';
 
     const openingTimeFormatted = account.openingTime
-      ? new Date(account.openingTime).toLocaleString('fr-FR')
+      ? new Date(account.openingTime).toLocaleString('fr-FR', {
+          timeZone: 'America/Port-au-Prince',
+          year: 'numeric',
+          month: '2-digit',
+          day: '2-digit',
+          hour: '2-digit',
+          minute: '2-digit',
+          second: '2-digit'
+        })
       : 'Non ouvert';
 
     return `
@@ -547,7 +555,15 @@ class CashierAccountManager {
     }
 
     const rows = this.transactions.map(t => {
-      const date = new Date(t.createdAt).toLocaleString('fr-FR');
+      const date = new Date(t.createdAt).toLocaleString('fr-FR', {
+        timeZone: 'America/Port-au-Prince',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit'
+      });
       const typeLabel = this.getTransactionTypeLabel(t.type);
       const amountClass = ['deposit', 'cash-in', 'pay-receipt'].includes(t.type) ? 'text-success' : 'text-danger';
       const amountSign = ['deposit', 'cash-in', 'pay-receipt'].includes(t.type) ? '+' : '-';

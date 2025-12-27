@@ -330,10 +330,30 @@ function updateTicketsTable(tickets) {
     // Les tickets dans le dashboard proviennent du round actuel
     const createdTime = t.created_time || t.created_at || Date.now();
     
+    // Fonction pour formater les dates avec le fuseau horaire Haïti/Port-au-Prince
+    const formatDateHaiti = (date) => {
+        if (!date) return '';
+        try {
+            const dateObj = new Date(date);
+            return dateObj.toLocaleString('fr-FR', {
+                timeZone: 'America/Port-au-Prince',
+                year: 'numeric',
+                month: '2-digit',
+                day: '2-digit',
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit'
+            });
+        } catch (e) {
+            console.warn('Erreur formatage date:', e);
+            return new Date(date).toLocaleString('fr-FR');
+        }
+    };
+    
     const tr = document.createElement('tr');
     tr.innerHTML = `
       <td class="p-2">#${t.id}</td>
-      <td class="p-2 text-slate-400 text-sm">${new Date(createdTime).toLocaleString('fr-FR')}</td>
+      <td class="p-2 text-slate-400 text-sm">${formatDateHaiti(createdTime)}</td>
       <td class="p-2 text-sm">${t.race || '-'}</td>
       <td class="p-2 text-green-300">${total} HTG</td>
       <td class="p-2 text-sm">${t.odds || '-'}</td>

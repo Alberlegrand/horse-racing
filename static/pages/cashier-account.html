@@ -552,12 +552,28 @@
             document.getElementById('account-status').innerHTML = statusBadge;
 
             const openingTime = account.openingTime
-                ? new Date(account.openingTime).toLocaleString('fr-FR')
+                ? new Date(account.openingTime).toLocaleString('fr-FR', {
+                    timeZone: 'America/Port-au-Prince',
+                    year: 'numeric',
+                    month: '2-digit',
+                    day: '2-digit',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    second: '2-digit'
+                  })
                 : '-';
             document.getElementById('opening-time').textContent = openingTime;
 
             const closingTime = account.closingTime
-                ? new Date(account.closingTime).toLocaleString('fr-FR')
+                ? new Date(account.closingTime).toLocaleString('fr-FR', {
+                    timeZone: 'America/Port-au-Prince',
+                    year: 'numeric',
+                    month: '2-digit',
+                    day: '2-digit',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    second: '2-digit'
+                  })
                 : '-';
             document.getElementById('closing-time').textContent = closingTime;
 
@@ -590,7 +606,15 @@
             }
 
             transactions.forEach(t => {
-                const date = new Date(t.createdAt).toLocaleString('fr-FR');
+                const date = new Date(t.createdAt).toLocaleString('fr-FR', {
+                  timeZone: 'America/Port-au-Prince',
+                  year: 'numeric',
+                  month: '2-digit',
+                  day: '2-digit',
+                  hour: '2-digit',
+                  minute: '2-digit',
+                  second: '2-digit'
+                });
                 const typeLabel = getTypeLabel(t.type);
                 const amountClass = ['deposit', 'cash-in', 'pay-receipt'].includes(t.type) ? 'text-success' : 'text-danger';
                 const amountSign = ['deposit', 'cash-in', 'pay-receipt'].includes(t.type) ? '+' : '-';

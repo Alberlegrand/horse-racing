@@ -11,6 +11,27 @@ class App {
         return statusMap[status] || status;
     }
 
+    // Fonction utilitaire pour formater les dates avec le fuseau horaire Haïti/Port-au-Prince
+    formatDate(date) {
+        if (!date) return '';
+        try {
+            const dateObj = new Date(date);
+            // Utiliser le fuseau horaire America/Port-au-Prince
+            return dateObj.toLocaleString('fr-FR', {
+                timeZone: 'America/Port-au-Prince',
+                year: 'numeric',
+                month: '2-digit',
+                day: '2-digit',
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit'
+            });
+        } catch (e) {
+            console.warn('Erreur formatage date:', e);
+            return new Date(date).toLocaleString('fr-FR');
+        }
+    }
+
     constructor() {
         this.currentPage = 'dashboard';
         this.isRaceRunning = false; // État de la course pour contrôler les boutons d'annulation
@@ -298,7 +319,7 @@ class App {
             tr.setAttribute('data-receipt-id', String(ticketId));
             tr.innerHTML = `
                 <td class="p-2">${ticketId}</td>
-                <td class="p-2">${new Date(ticket.date || ticket.created_time || ticket.created_at || Date.now()).toLocaleString('fr-FR')}</td>
+                <td class="p-2">${this.formatDate(ticket.date || ticket.created_time || ticket.created_at || Date.now())}</td>
                 <td class="p-2">${ticket.roundId || ticket.round_id || '-'}</td>
                 <td class="p-2">
                     ${isMultibet ? `
@@ -1294,7 +1315,7 @@ class App {
             return `
                 <tr class="hover:bg-slate-700/50" data-receipt-id="${ticket.id}">
                     <td class="p-2">${ticket.id}</td>
-                    <td class="p-2">${new Date(ticket.date).toLocaleString('fr-FR')}</td>
+                    <td class="p-2">${this.formatDate(ticket.date)}</td>
                     <td class="p-2">${ticket.roundId}</td>
                     <td class="p-2">
                         ${isMultibet ? `
@@ -1752,9 +1773,25 @@ class App {
             ticketsTableBody.innerHTML = `<tr><td colspan="7" class="p-4 text-center text-red-400">${msg}</td></tr>`;
         }
 
-        function formatDate(date) {
-            return new Date(date).toLocaleString('fr-FR');
-        }
+        const formatDate = (date) => {
+            if (!date) return '';
+            try {
+                const dateObj = new Date(date);
+                // Utiliser le fuseau horaire America/Port-au-Prince
+                return dateObj.toLocaleString('fr-FR', {
+                    timeZone: 'America/Port-au-Prince',
+                    year: 'numeric',
+                    month: '2-digit',
+                    day: '2-digit',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    second: '2-digit'
+                });
+            } catch (e) {
+                console.warn('Erreur formatage date:', e);
+                return new Date(date).toLocaleString('fr-FR');
+            }
+        };
 
         function formatStatus(status) {
             const base = "px-2.5 py-0.5 rounded-full text-xs font-medium";
@@ -1986,7 +2023,7 @@ class App {
                         historyEl.innerHTML = '<div class="p-2 text-center text-slate-500">Aucune opération récente</div>';
                     } else {
                         historyEl.innerHTML = recent.map(t => {
-                            const time = t.created_time ? new Date(t.created_time).toLocaleString('fr-FR') : '';
+                            const time = t.created_time ? this.formatDate(t.created_time) : '';
                             const status = (t.status || '').toUpperCase();
                             const total = (Number(t.total_amount) || (t.bets && t.bets.reduce((s, b) => s + (Number(b.value)||0), 0)) || 0).toFixed(2);
                             return `<div class="p-2 border-b border-slate-600 flex justify-between items-center">
@@ -2102,17 +2139,24 @@ class App {
                     return;
                 }
 
-                // Formater la date
+                // Formater la date avec le fuseau horaire Haïti/Port-au-Prince
                 function formatDate(dateString) {
                     if (!dateString) return 'N/A';
-                    const date = new Date(dateString);
-                    return date.toLocaleDateString('fr-FR', { 
-                        day: '2-digit', 
-                        month: '2-digit', 
-                        year: 'numeric',
-                        hour: '2-digit',
-                        minute: '2-digit'
-                    });
+                    try {
+                        const date = new Date(dateString);
+                        return date.toLocaleString('fr-FR', {
+                            timeZone: 'America/Port-au-Prince',
+                            day: '2-digit',
+                            month: '2-digit',
+                            year: 'numeric',
+                            hour: '2-digit',
+                            minute: '2-digit',
+                            second: '2-digit'
+                        });
+                    } catch (e) {
+                        console.warn('Erreur formatage date:', e);
+                        return new Date(dateString).toLocaleString('fr-FR');
+                    }
                 }
 
                 winnersContainer.innerHTML = winners.map((winner, index) => {

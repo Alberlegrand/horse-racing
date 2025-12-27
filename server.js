@@ -406,6 +406,7 @@ function requireRoleHTML(role) {
 // Page de login - pas de protection
 //app.get("/", (req, res) => res.sendFile(path.join(__dirname, "index.html")));
 app.get("/", (req, res) => res.sendFile(path.join(__dirname, "./static/pages", "login.html")));
+app.get("/login", (req, res) => res.sendFile(path.join(__dirname, "./static/pages", "login.html")));
 app.get("/landing", (req, res) => res.sendFile(path.join(__dirname, "landing.html")));
 
 // Routes protégées - authentification requise
