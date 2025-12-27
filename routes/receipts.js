@@ -335,7 +335,7 @@ body {
   <!-- En-tête -->
   <div class="header-section">
     <div class="shop-name">${SYSTEM_NAME}</div>
-    <div class="shop-phone">${CURRENT_GAME}</div>
+    <div class="shop-phone">Course Cheval</div>
   </div>
 
   <div class="separator-line">-------------------------------</div>
@@ -663,7 +663,7 @@ body {
     <!-- En-tête -->
     <div class="header-section">
       <div class="shop-name">${SYSTEM_NAME}</div>
-      <div class="shop-phone">Telp. -</div>
+      <div class="shop-phone">Course Cheval</div>
     </div>
 
     <div class="separator-line">-------------------------------</div>
