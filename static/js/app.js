@@ -667,33 +667,19 @@ class App {
                             if (!res.ok) throw new Error(data.error || data.message || 'Erreur lors du paiement');
                         }
                         
-                        // 2️⃣ ✅ IMPRESSION DU DÉCAISSEMENT APRÈS LE PAIEMENT
+                        // 2️⃣ ✅ IMPRESSION SILENCIEUSE DU DÉCAISSEMENT APRÈS LE PAIEMENT
                         try {
                             const payoutRes = await fetch(`/api/v1/receipts/?action=payout&id=${ticketId}`);
                             if (payoutRes.ok) {
                                 const payoutHtml = await payoutRes.text();
-                                console.log(`✅ [PAY] HTML du décaissement reçu pour le ticket #${ticketId}`);
+                                console.log(`✅ [PAY] HTML du décaissement reçu pour le ticket #${ticketId}, impression silencieuse...`);
                                 
-                                // Essayer printJS d'abord
-                                if (typeof window.printJS === 'function') {
-                                    console.log(`✅ [PAY] printJS disponible, déclenchement de l'impression`);
-                                    window.printJS({ printable: payoutHtml, type: 'raw-html' });
+                                // Utiliser l'impression silencieuse
+                                if (typeof window.silentPrint === 'function') {
+                                    await window.silentPrint(payoutHtml);
+                                    console.log(`✅ [PAY] Impression du décaissement terminée`);
                                 } else {
-                                    // Fallback: créer une iframe et imprimer
-                                    console.log(`⚠️ [PAY] printJS non disponible, utilisation fallback iframe`);
-                                    const printWindow = window.open('', '', 'height=600,width=800');
-                                    if (printWindow) {
-                                        printWindow.document.write(payoutHtml);
-                                        printWindow.document.close();
-                                        // Attendre le chargement du contenu
-                                        setTimeout(() => {
-                                            printWindow.print();
-                                            // Ne pas fermer la fenêtre immédiatement pour laisser le temps d'imprimer
-                                            setTimeout(() => printWindow.close(), 500);
-                                        }, 250);
-                                    } else {
-                                        console.warn('⚠️ [PAY] Impossible d\'ouvrir la fenêtre d\'impression');
-                                    }
+                                    console.warn('⚠️ [PAY] silentPrint non disponible');
                                 }
                             } else {
                                 console.warn(`⚠️ [PAY] Impossible de récupérer le décaissement (HTTP ${payoutRes.status})`);
@@ -1659,33 +1645,19 @@ class App {
                             throw new Error(data.error || data.message || "Erreur lors du paiement");
                         }
                         
-                        // 2️⃣ ✅ IMPRESSION DU DÉCAISSEMENT APRÈS LE PAIEMENT
+                        // 2️⃣ ✅ IMPRESSION SILENCIEUSE DU DÉCAISSEMENT APRÈS LE PAIEMENT
                         try {
                             const payoutRes = await fetch(`/api/v1/receipts/?action=payout&id=${id}`);
                             if (payoutRes.ok) {
                                 const payoutHtml = await payoutRes.text();
-                                console.log(`✅ [PAY-DASH] HTML du décaissement reçu pour le ticket #${id}`);
+                                console.log(`✅ [PAY-DASH] HTML du décaissement reçu pour le ticket #${id}, impression silencieuse...`);
                                 
-                                // Essayer printJS d'abord
-                                if (typeof window.printJS === 'function') {
-                                    console.log(`✅ [PAY-DASH] printJS disponible, déclenchement de l'impression`);
-                                    window.printJS({ printable: payoutHtml, type: 'raw-html' });
+                                // Utiliser l'impression silencieuse
+                                if (typeof window.silentPrint === 'function') {
+                                    await window.silentPrint(payoutHtml);
+                                    console.log(`✅ [PAY-DASH] Impression du décaissement terminée`);
                                 } else {
-                                    // Fallback: créer une iframe et imprimer
-                                    console.log(`⚠️ [PAY-DASH] printJS non disponible, utilisation fallback iframe`);
-                                    const printWindow = window.open('', '', 'height=600,width=800');
-                                    if (printWindow) {
-                                        printWindow.document.write(payoutHtml);
-                                        printWindow.document.close();
-                                        // Attendre le chargement du contenu
-                                        setTimeout(() => {
-                                            printWindow.print();
-                                            // Ne pas fermer la fenêtre immédiatement pour laisser le temps d'imprimer
-                                            setTimeout(() => printWindow.close(), 500);
-                                        }, 250);
-                                    } else {
-                                        console.warn('⚠️ [PAY-DASH] Impossible d\'ouvrir la fenêtre d\'impression');
-                                    }
+                                    console.warn('⚠️ [PAY-DASH] silentPrint non disponible');
                                 }
                             } else {
                                 console.warn(`⚠️ [PAY-DASH] Impossible de récupérer le décaissement (HTTP ${payoutRes.status})`);
@@ -3340,36 +3312,83 @@ class App {
             if (typeof cancelTicket === 'function') return cancelTicket(id);
             console.error('cancelTicket function not available');
         };
-        // Impression centralisée via printJS (printJS est garanti)
+        // Fonction d'impression silencieuse (sans fenêtre visible)
+        window.silentPrint = (html) => {
+            return new Promise((resolve, reject) => {
+                try {
+                    // Créer un iframe caché
+                    const iframe = document.createElement('iframe');
+                    iframe.style.position = 'fixed';
+                    iframe.style.right = '0';
+                    iframe.style.bottom = '0';
+                    iframe.style.width = '0';
+                    iframe.style.height = '0';
+                    iframe.style.border = 'none';
+                    iframe.style.opacity = '0';
+                    iframe.style.pointerEvents = 'none';
+                    
+                    document.body.appendChild(iframe);
+                    
+                    // Obtenir la référence au document de l'iframe
+                    let iframeDoc = iframe.contentWindow || iframe.contentDocument;
+                    if (iframeDoc.document) {
+                        iframeDoc = iframeDoc.document;
+                    }
+                    
+                    // Écrire le HTML dans l'iframe
+                    iframeDoc.open();
+                    iframeDoc.write(html);
+                    iframeDoc.close();
+                    
+                    let printed = false;
+                    
+                    // Fonction pour effectuer l'impression
+                    const doPrint = () => {
+                        if (printed) return;
+                        printed = true;
+                        try {
+                            iframe.contentWindow.focus();
+                            iframe.contentWindow.print();
+                            // Nettoyer l'iframe après impression
+                            setTimeout(() => {
+                                if (iframe.parentNode) {
+                                    document.body.removeChild(iframe);
+                                }
+                                resolve();
+                            }, 1000);
+                        } catch (printErr) {
+                            if (iframe.parentNode) {
+                                document.body.removeChild(iframe);
+                            }
+                            reject(printErr);
+                        }
+                    };
+                    
+                    // Attendre que le contenu soit chargé, puis imprimer
+                    iframe.onload = () => {
+                        setTimeout(doPrint, 100);
+                    };
+                    
+                    // Fallback si onload ne se déclenche pas rapidement
+                    setTimeout(doPrint, 200);
+                } catch (err) {
+                    reject(err);
+                }
+            });
+        };
+
+        // Impression centralisée silencieuse
         window.printTicket = async (id) => {
             try {
                 const res = await fetch(`/api/v1/receipts/?action=print&id=${id}`);
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 const html = await res.text();
                 
-                console.log(`✅ [PRINT] HTML du ticket #${id} reçu`);
+                console.log(`✅ [PRINT] HTML du ticket #${id} reçu, impression silencieuse...`);
                 
-                // Essayer printJS d'abord
-                if (typeof window.printJS === 'function') {
-                    console.log(`✅ [PRINT] printJS disponible, déclenchement de l'impression`);
-                    window.printJS({ printable: html, type: 'raw-html' });
-                } else {
-                    // Fallback: créer une fenêtre et imprimer
-                    console.log(`⚠️ [PRINT] printJS non disponible, utilisation fallback iframe`);
-                    const printWindow = window.open('', '', 'height=600,width=800');
-                    if (printWindow) {
-                        printWindow.document.write(html);
-                        printWindow.document.close();
-                        // Attendre le chargement du contenu
-                        setTimeout(() => {
-                            printWindow.print();
-                            // Ne pas fermer la fenêtre immédiatement pour laisser le temps d'imprimer
-                            setTimeout(() => printWindow.close(), 500);
-                        }, 250);
-                    } else {
-                        throw new Error('Impossible d\'ouvrir la fenêtre d\'impression');
-                    }
-                }
+                // Utiliser l'impression silencieuse
+                await window.silentPrint(html);
+                console.log(`✅ [PRINT] Impression du ticket #${id} terminée`);
             } catch (err) {
                 console.error('❌ [PRINT] Erreur printTicket:', err);
                 if (window.app && typeof window.app.showToast === 'function') {

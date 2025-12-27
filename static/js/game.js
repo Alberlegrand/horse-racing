@@ -206,15 +206,27 @@ GameScreen.prototype._removeReceipt = function (receiptId) {
 };
 
 /**
- * @param receiptId {number}
- */
+ * @param receiptId {number}
+ */
 GameScreen.prototype._printReceipt = function (receiptId) {
-    if (window.gameConfig && window.gameConfig.enableReceiptPrinting) {
-        let createdTime = new Date().toLocaleString();
-        $.get(this._receiptUrl + "/?action=print&id=" + receiptId + "&createdTime=" + createdTime, function (response) {
-            printJS({printable: response, type: 'raw-html'});
-        });
-    }
+    if (window.gameConfig && window.gameConfig.enableReceiptPrinting) {
+        let createdTime = new Date().toLocaleString();
+        $.get(this._receiptUrl + "/?action=print&id=" + receiptId + "&createdTime=" + createdTime, (response) => {
+            // Utiliser l'impression silencieuse si disponible
+            if (typeof window.silentPrint === 'function') {
+                window.silentPrint(response).catch(err => {
+                    console.error('❌ [GAME] Erreur impression silencieuse:', err);
+                });
+            } else {
+                // Fallback vers printJS si silentPrint n'est pas disponible
+                if (typeof printJS === 'function') {
+                    printJS({printable: response, type: 'raw-html'});
+                } else {
+                    console.warn('⚠️ [GAME] Aucune fonction d\'impression disponible');
+                }
+            }
+        });
+    }
 };
 
 /** @type {() => Big} */

@@ -172,10 +172,11 @@ export default function createReceiptsRouter(broadcast) {
         }
       }
 
-      const createdTime =
-        receipt.created_time
-          ? new Date(receipt.created_time).toLocaleString('fr-FR')
-          : new Date().toLocaleString('fr-FR');
+      const receiptDate = receipt.created_time
+        ? new Date(receipt.created_time)
+        : new Date();
+      const createdDate = receiptDate.toLocaleDateString('fr-FR');
+      const createdTime = receiptDate.toLocaleTimeString('fr-FR');
 
       let totalMise = 0;
       let totalGainPotentiel = 0;
@@ -212,11 +213,8 @@ export default function createReceiptsRouter(broadcast) {
         
         return `
           <div class="bet-row">
-            <div class="bet-description">
-              ${description}
-              <div class="bet-detail">Cote: x${coeff.toFixed(2)}</div>
-            </div>
-            <div class="bet-price">${mise.toFixed(2)} HTG</div>
+            <span>${description}</span>
+            <span style="font-weight:bold;">${mise.toFixed(2)}</span>
           </div>
         `;
       }).join('');
@@ -227,332 +225,160 @@ export default function createReceiptsRouter(broadcast) {
         return res.status(500).send("<h1>Erreur: Aucun pari trouvé pour ce ticket</h1>");
       }
 
-      // === Gabarit du reçu HTML (Style professionnel type reçu de caisse) ===
-      const receiptHTML = `
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Ticket #${receipt.id}</title>
-        <style>
-          /* --- Configuration d'impression --- */
-          @media print {
-            @page {
-              size: 58mm auto;
-              margin: 0;
-            }
-            body {
-              margin: 0;
-              padding: 0;
-              -webkit-print-color-adjust: exact;
-              print-color-adjust: exact;
-              width: 52mm; /* Augmenté de 50mm à 52mm */
-              overflow: hidden; /* Empêcher le débordement */
-            }
-            .receipt-container {
-              border: none;
-              width: 52mm !important;
-              max-width: 52mm !important;
-              padding: 3mm 1.5mm !important; /* Marges ajustées */
-            }
-            /* ✅ Forcer tous les textes en noir lors de l'impression */
-            * {
-              color: #000 !important;
-            }
-          }
+// === Gabarit du reçu HTML (Basé sur GOOJPRT PT-210, adapté pour 46mm) ===
+const receiptHTML = `
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Ticket #${receipt.id}</title>
+<style>
+/* RESET POUR IMPRESSION */
+* { margin: 0; padding: 0; box-sizing: border-box; }
 
-          /* --- Styles de base --- */
-          * {
-            font-family: 'Courier New', 'Monaco', monospace !important;
-            color: #000 !important; /* ✅ TOUS les textes en noir */
-            box-sizing: border-box;
-            margin: 0;
-            padding: 0;
-          }
-          
-          body {
-            background: #fff;
-            margin: 0;
-            padding: 0;
-            font-size: 10px; /* Augmenté de 9px à 10px */
-            line-height: 1.3;
-            color: #000 !important;
-          }
-          
-          .receipt-container {
-            width: 52mm; /* Augmenté de 50mm à 52mm pour plus d'espace */
-            max-width: 52mm;
-            margin: 0 auto;
-            padding: 3mm 1.5mm; /* Marges : 3mm haut/bas, 1.5mm gauche/droite */
-            box-sizing: border-box;
-            overflow: hidden; /* Empêcher le débordement */
-          }
-          
-          /* ✅ Forcer tous les éléments en noir */
-          span, div, p, h1, h2, h3, h4, h5, h6 {
-            color: #000 !important;
-          }
+@media print {
+  @page { size: 48mm auto; margin: 0; }
+  * {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+  }
+  body { 
+    width: 100% !important;
+    max-width: 48mm !important;
+    margin: 0 !important; 
+    padding: 0 !important; 
+    background: #fff !important;
+    overflow-x: hidden !important;
+  }
+  .receipt-container {
+    /* Largeur 100% avec max-width 38mm, marge gauche 3mm */
+    width: 100% !important; 
+    max-width: 38mm !important;
+    margin: 0 !important;
+    margin-left: 8mm !important;
+    padding: 0 !important;
+    box-sizing: border-box !important;
+    overflow-x: hidden !important;
+  }
+}
 
-          /* --- En-tête style reçu --- */
-          .shop-header {
-            text-align: center;
-            margin-bottom: 8px;
-          }
-          
-          .shop-name {
-            font-size: 13px; /* Augmenté de 12px à 13px */
-            font-weight: bold;
-            margin-bottom: 3px;
-            color: #000 !important;
-            letter-spacing: 0.3px;
-          }
-          
-          .shop-address {
-            font-size: 9px; /* Augmenté de 8px à 9px */
-            line-height: 1.3;
-            margin-bottom: 2px;
-            color: #000 !important;
-          }
-          
-          .shop-phone {
-            font-size: 9px; /* Augmenté de 8px à 9px */
-            margin-bottom: 3px;
-            color: #000 !important;
-          }
-          
-          .asterisk-line {
-            text-align: center;
-            font-size: 8px;
-            letter-spacing: 1px;
-            margin: 6px 0;
-            color: #000 !important;
-          }
-          
-          .receipt-title {
-            text-align: center;
-            font-size: 12px; /* Augmenté de 11px à 12px */
-            font-weight: bold;
-            margin: 5px 0;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            color: #000 !important;
-          }
+/* STYLE DU TICKET */
+body {
+  font-family: "Courier New", Courier, monospace;
+  font-size: 9pt;
+  line-height: 1.1;
+  color: #000;
+}
 
-          /* --- Informations ticket --- */
-          .ticket-info {
-            margin: 6px 0;
-            font-size: 10px; /* Augmenté de 9px à 10px */
-            line-height: 1.5;
-          }
-          
-          .info-line {
-            display: flex;
-            justify-content: space-between;
-            padding: 2px 0;
-          }
-          
-          .info-label {
-            font-weight: normal;
-            color: #000 !important;
-          }
-          
-          .info-value {
-            font-weight: bold;
-            color: #000 !important;
-          }
+.receipt-container { 
+  width: 100%;
+  max-width: 38mm;
+  margin: 0;
+  margin-left: 8mm;
+  padding: 0;
+  box-sizing: border-box;
+}
 
-          /* --- Liste des paris (style colonnes) --- */
-          .bets-section {
-            margin: 8px 0;
-          }
-          
-          .bets-header {
-            display: flex;
-            justify-content: space-between;
-            font-size: 9px; /* Augmenté de 8px à 9px */
-            font-weight: bold;
-            padding: 3px 0;
-            border-bottom: 1px solid #000;
-            margin-bottom: 3px;
-            color: #000 !important;
-          }
-          
-          .bets-header span {
-            color: #000 !important;
-          }
-          
-          .bets-list {
-            margin-bottom: 5px;
-          }
-          
-          .bet-row {
-            display: flex;
-            justify-content: space-between;
-            align-items: flex-start;
-            font-size: 9px; /* Augmenté de 8px à 9px */
-            padding: 2px 0;
-            border-bottom: 1px dotted #000;
-            color: #000 !important;
-            gap: 2px; /* Espacement entre description et prix */
-          }
-          
-          .bet-row:last-child {
-            border-bottom: none;
-          }
-          
-          .bet-description {
-            flex: 1;
-            text-align: left;
-            color: #000 !important;
-            word-wrap: break-word;
-            overflow-wrap: break-word;
-            max-width: 65%; /* Ajusté pour laisser plus d'espace au prix */
-            padding-right: 2px;
-          }
-          
-          .bet-price {
-            text-align: right;
-            font-weight: bold;
-            color: #000 !important;
-            min-width: 17mm; /* Augmenté de 16mm à 17mm */
-            flex-shrink: 0;
-            white-space: nowrap; /* Empêcher le retour à la ligne du prix */
-          }
-          
-          .bet-detail {
-            font-size: 8px; /* Légèrement augmenté */
-            color: #000 !important;
-            margin-top: 1px;
-            padding-left: 4px;
-          }
+.header-section { text-align: center; margin-bottom: 4px; }
+.shop-name { font-size: 11pt; font-weight: bold; }
+.shop-phone { font-size: 8pt; }
 
-          /* --- Totaux --- */
-          .totals-section {
-            margin: 8px 0;
-            padding-top: 4px;
-            border-top: 1px solid #000;
-          }
-          
-          .total-row {
-            display: flex;
-            justify-content: space-between;
-            font-size: 10px; /* Augmenté de 9px à 10px */
-            padding: 2px 0;
-            font-weight: bold;
-            color: #000 !important;
-          }
-          
-          .total-label {
-            font-weight: bold;
-            color: #000 !important;
-          }
-          
-          .total-value {
-            font-weight: bold;
-            font-size: 11px; /* Augmenté de 10px à 11px */
-            color: #000 !important;
-            white-space: nowrap; /* Empêcher le retour à la ligne */
-          }
+.separator-line {
+  text-align: center;
+  font-size: 7pt;
+  margin: 2px 0;
+  white-space: nowrap;
+  overflow: hidden;
+}
 
-          /* --- Pied de page --- */
-          .footer {
-            margin-top: 10px;
-            text-align: center;
-          }
-          
-          .thank-you {
-            font-size: 11px; /* Augmenté de 10px à 11px */
-            font-weight: bold;
-            margin: 6px 0;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            color: #000 !important;
-          }
-          
-          .barcode {
-            margin: 5px 0;
-            text-align: center;
-            font-family: 'Courier New', monospace;
-            font-size: 8px; /* Augmenté de 7px à 8px */
-            letter-spacing: 1px;
-            color: #000 !important;
-          }
-        </style>
-      </head>
-      <body>
-        <div class="receipt-container">
-          
-          <!-- En-tête style reçu -->
-          <div class="shop-header">
-            <div class="shop-name">${SYSTEM_NAME}</div>
-            <div class="shop-address">${CURRENT_GAME.displayName}</div>
-            <div class="shop-phone">Telp. -</div>
-          </div>
-          
-          <div class="asterisk-line">***</div>
-          
-          <div class="receipt-title">BET RECEIPT</div>
-          
-          <div class="asterisk-line">***</div>
+.receipt-title { 
+  text-align: center; 
+  font-size: 10pt; 
+  font-weight: bold; 
+  margin: 4px 0;
+  border: 1px solid #000;
+  padding: 2px;
+}
 
-          <!-- Informations ticket -->
-          <div class="ticket-info">
-            <div class="info-line">
-              <span class="info-label">Ticket:</span>
-              <span class="info-value">#${receipt.id || receipt.receipt_id || receiptId}</span>
-            </div>
-            <div class="info-line">
-              <span class="info-label">Round:</span>
-              <span class="info-value">#${round?.id || receipt.round_id || gameState.currentRound?.id || 'N/A'}</span>
-            </div>
-            <div class="info-line">
-              <span class="info-label">Date:</span>
-              <span class="info-value">${escapeHtml(createdTime)}</span>
-            </div>
-          </div>
+.info-section { margin: 3px 0; }
+.info-row { display: flex; justify-content: space-between; width: 100%; margin-bottom: 1px; }
+.info-value { font-weight: bold; }
+.info-date { font-size: 7.5pt; }
+.info-date .info-value { font-size: 7.5pt; }
 
-          <div class="asterisk-line">***</div>
+.bets-section { margin: 5px 0; }
+.bets-header { 
+  display: flex; 
+  justify-content: space-between; 
+  font-weight: bold; 
+  border-bottom: 1px dashed #000;
+  margin-bottom: 2px;
+  font-size: 8pt;
+}
+.bet-row { display: flex; justify-content: space-between; font-size: 8.5pt; }
 
-          <!-- Liste des paris (style colonnes) -->
-          <div class="bets-section">
-            <div class="bets-header">
-              <span>Description</span>
-              <span>Price</span>
-            </div>
-            <div class="bets-list">
-              ${betsRowsHTML}
-            </div>
-          </div>
+.totals-section { 
+  margin-top: 5px; 
+  border-top: 1px solid #000; 
+  padding-top: 2px; 
+}
+.total-row { display: flex; justify-content: space-between; font-size: 10pt; font-weight: bold; }
 
-          <div class="asterisk-line">***</div>
+.footer-section { text-align: center; margin-top: 8px; }
+.thank-you { font-size: 9pt; font-weight: bold; }
+.barcode { font-size: 7pt; margin-top: 2px; letter-spacing: 1px; }
+</style>
+</head>
+<body>
+<div class="receipt-container">
+  <!-- En-tête -->
+  <div class="header-section">
+    <div class="shop-name">${SYSTEM_NAME}</div>
+    <div class="shop-phone">${CURRENT_GAME}</div>
+  </div>
 
-          <!-- Totaux -->
-          <div class="totals-section">
-            <div class="total-row">
-              <span class="total-label">Total:</span>
-              <span class="total-value">${totalMise.toFixed(2)} HTG</span>
-            </div>
-            ${totalGainPotentiel > 0 ? `
-            <div class="total-row">
-              <span class="total-label">Gain potentiel:</span>
-              <span class="total-value">${totalGainPotentiel.toFixed(2)} HTG</span>
-            </div>
-            ` : ''}
-          </div>
+  <div class="separator-line">-------------------------------</div>
+  <div class="receipt-title">REÇU DE PARI</div>
+  <div class="separator-line">-------------------------------</div>
 
-          <div class="asterisk-line">****</div>
+  <!-- Infos Ticket -->
+  <div class="info-section">
+    <div class="info-row"><span>Ticket:</span><span class="info-value">#${receipt.id || receipt.receipt_id || receiptId}</span></div>
+    <div class="info-row"><span>Round:</span><span class="info-value">#${round?.id || receipt.round_id || gameState.currentRound?.id || 'N/A'}</span></div>
+    <div class="info-row info-date"><span>Date:</span><span class="info-value">${escapeHtml(createdDate)}</span></div>
+    <div class="info-row info-date"><span>Heure:</span><span class="info-value">${escapeHtml(createdTime)}</span></div>
+  </div>
 
-          <!-- Pied de page -->
-          <div class="footer">
-            <div class="thank-you">THANK YOU!</div>
-            <div class="barcode">${String(receipt.id || receipt.receipt_id || receiptId).padStart(8, '0')}</div>
-          </div>
+  <div class="separator-line">-------------------------------</div>
 
-        </div>
-      </body>
-      </html>
-      `;
+  <!-- Détails Paris -->
+  <div class="bets-section">
+    <div class="bets-header"><span>Détails</span><span>Mise</span></div>
+    ${betsRowsHTML}
+  </div>
+
+  <!-- Totaux -->
+  <div class="totals-section">
+    <div class="total-row"><span>TOTAL</span><span>${totalMise.toFixed(2)} HTG</span></div>
+    ${totalGainPotentiel > 0 ? `
+    <div class="total-row"><span>Gain</span><span>${totalGainPotentiel.toFixed(2)} HTG</span></div>
+    ` : ''}
+  </div>
+
+  <div class="separator-line">-------------------------------</div>
+
+  <!-- Pied de page -->
+  <div class="footer-section">
+    <div class="thank-you">MERCI & BONNE CHANCE!</div>
+    <div class="barcode">${String(receipt.id || receipt.receipt_id || receiptId).padStart(8, '0')}</div>
+  </div>
+</div>
+</body>
+</html>
+`;
+
+
 
       res.setHeader("Content-Type", "text/html");
       return res.send(receiptHTML);
@@ -621,9 +447,11 @@ export default function createReceiptsRouter(broadcast) {
         return res.status(404).send("<h1>Ticket non trouvé</h1>");
       }
 
-      const createdTime = receipt.created_time
-        ? new Date(receipt.created_time).toLocaleString('fr-FR')
-        : new Date().toLocaleString('fr-FR');
+      const receiptDate = receipt.created_time
+        ? new Date(receipt.created_time)
+        : new Date();
+      const createdDate = receiptDate.toLocaleDateString('fr-FR');
+      const createdTime = receiptDate.toLocaleTimeString('fr-FR');
 
       // Déterminer le résultat (receipt.prize est en système, convertir en publique)
       const prizeSystem = parseFloat(receipt.prize || 0);
@@ -656,31 +484,24 @@ export default function createReceiptsRouter(broadcast) {
         const name = escapeHtml(String(participant.name || ''));
 
         return `
-          <div class="bet-detail-card">
-            <div class="bet-detail-header">
-              <span class="bet-detail-number">Pari ${index + 1}</span>
-              <span class="bet-detail-separator">•</span>
-              <span class="bet-detail-name">N°${number} ${name}</span>
+          <div class="bet-detail-item">
+            <div class="bet-detail-row">
+              <span class="info-label">Pari ${index + 1}: N°${number} ${name}</span>
             </div>
-            <div class="bet-detail-content">
-              <div class="bet-detail-info">
-                <span class="bet-detail-label">Mise:</span>
-                <span class="bet-detail-value">${mise.toFixed(2)} HTG</span>
-              </div>
-              <div class="bet-detail-info">
-                <span class="bet-detail-label">Cote:</span>
-                <span class="bet-detail-value">x${coeff.toFixed(2)}</span>
-              </div>
-              <div class="bet-detail-info bet-detail-result ${isWin ? 'bet-won' : 'bet-lost'}">
-                <span class="bet-detail-label">Résultat:</span>
-                <span class="bet-detail-value">${isWin ? '✓ GAGNÉ' : '✗ PERDU'}</span>
-              </div>
-              ${isWin ? `
-              <div class="bet-detail-info bet-detail-gain">
-                <span class="bet-detail-label">Gain:</span>
-                <span class="bet-detail-value bet-gain-highlight">${gain.toFixed(2)} HTG</span>
-              </div>` : ''}
+            <div class="bet-detail-row">
+              <span class="info-label">Mise:</span> <span class="info-value">${mise.toFixed(2)} HTG</span>
             </div>
+            <div class="bet-detail-row">
+              <span class="info-label">Cote:</span> <span class="info-value">x${coeff.toFixed(2)}</span>
+            </div>
+            <div class="bet-detail-row">
+              <span class="info-label">Résultat:</span> <span class="info-value">${isWin ? '✓ GAGNÉ' : '✗ PERDU'}</span>
+            </div>
+            ${isWin ? `
+            <div class="bet-detail-row">
+              <span class="info-value">Gain:</span> <span class="info-value">${gain.toFixed(2)} HTG</span>
+            </div>
+            ` : ''}
           </div>`;
       }).join('');
 
@@ -696,264 +517,142 @@ export default function createReceiptsRouter(broadcast) {
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Décaissement #${receipt.id}</title>
   <style>
-    /* -------------------------------
-       IMPRESSION 55MM - NOIR ET BLANC
-       Lisible, centré, marges sûres
-    -------------------------------- */
     * {
-      box-sizing: border-box;
-      background: #fff !important;
-      color: #000 !important;
-      font-family: 'Arial', sans-serif !important;
-      text-shadow: none !important;
-      box-shadow: none !important;
-    }
-
-    body {
       margin: 0;
-      padding: 4mm 3mm; /* Marges de sécurité pour éviter les coupures */
-      width: 49mm; /* Réduction pour ne pas coller aux bords physiques du rouleau */
-      font-size: 11px;
-      line-height: 1.3;
+      padding: 0;
+      box-sizing: border-box;
     }
 
-    .payout-container {
-      width: 100%;
-      margin: 0 auto;
-    }
+    /* RESET POUR IMPRESSION */
+    * { margin: 0; padding: 0; box-sizing: border-box; }
 
-    /* En-tête amélioré */
-    .header {
-      text-align: center;
-      margin-bottom: 4mm;
-    }
-
-    .header h2 {
-      font-size: 15px;
-      margin: 0 0 3mm 0;
-      font-weight: bold;
-      letter-spacing: 0.5px;
-    }
-    
-    .header-info {
-      margin-top: 2mm;
-      text-align: left;
-      padding: 0 2mm;
-    }
-    
-    .info-total {
-      background: #f5f5f5;
-      padding: 2mm;
-      border: 1px solid #000;
-      border-radius: 2px;
-      margin: 2mm 0;
-    }
-    
-    .info-value {
-      font-weight: bold;
-      font-size: 11px;
-    }
-
-    /* Boîte de statut améliorée */
-    .status-box {
-      border: 2px solid #000;
-      text-align: center;
-      padding: 4mm 2mm;
-      margin: 4mm 0;
-      font-size: 12px;
-      font-weight: bold;
-      border-radius: 3px;
-      letter-spacing: 0.5px;
-    }
-    
-    .status-box.won {
-      background: #e8f5e9;
-    }
-    
-    .status-box.lost {
-      background: #ffebee;
-    }
-
-    /* Lignes d'informations */
-    .info-line {
-      display: flex;
-      justify-content: space-between;
-      border-bottom: 1px dotted #000;
-      padding: 1.5mm 0;
-      font-size: 10px;
-      align-items: center;
-    }
-
-    .info-label {
-      font-weight: bold;
-      color: #000 !important;
-    }
-    
-    /* Détails des paris améliorés */
-    .bet-detail-card {
-      margin-bottom: 3mm;
-      padding: 2.5mm;
-      border: 1px solid #000;
-      border-radius: 2px;
-      background: #fafafa;
-    }
-    
-    .bet-detail-header {
-      display: flex;
-      align-items: center;
-      font-size: 10px;
-      font-weight: bold;
-      margin-bottom: 2mm;
-      padding-bottom: 1.5mm;
-      border-bottom: 1px solid #ccc;
-    }
-    
-    .bet-detail-number {
-      color: #000 !important;
-      font-size: 9px;
-      margin-right: 3px;
-    }
-    
-    .bet-detail-separator {
-      margin: 0 4px;
-      color: #000 !important;
-    }
-    
-    .bet-detail-name {
-      flex: 1;
-      color: #000 !important;
-    }
-    
-    .bet-detail-content {
-      margin-top: 1.5mm;
-    }
-    
-    .bet-detail-info {
-      display: flex;
-      justify-content: space-between;
-      font-size: 9.5px;
-      padding: 1mm 0;
-      border-bottom: 1px dotted #ccc;
-    }
-    
-    .bet-detail-info:last-child {
-      border-bottom: none;
-    }
-    
-    .bet-detail-label {
-      font-weight: normal;
-      color: #000 !important;
-    }
-    
-    .bet-detail-value {
-      font-weight: bold;
-      color: #000 !important;
-    }
-    
-    .bet-detail-result {
-      margin-top: 1mm;
-      padding-top: 1.5mm;
-      border-top: 1px dashed #999;
-    }
-    
-    .bet-won .bet-detail-value {
-      color: #000 !important;
-    }
-    
-    .bet-lost .bet-detail-value {
-      color: #000 !important;
-    }
-    
-    .bet-detail-gain {
-      margin-top: 1mm;
-      padding-top: 1.5mm;
-      border-top: 2px solid #000;
-    }
-    
-    .bet-gain-highlight {
-      font-size: 11px;
-      color: #000 !important;
-    }
-
-    /* Section Montant améliorée */
-    .payout-amount {
-      text-align: center;
-      margin: 4mm 0;
-      border: 3px solid #000;
-      border-radius: 4px;
-      padding: 4mm 2mm;
-      background: #fff;
-      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-    }
-
-    .payout-amount-label {
-      font-size: 10px;
-      margin-bottom: 3mm;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-      color: #000 !important;
-    }
-
-    .payout-amount-value {
-      font-size: 20px;
-      font-weight: bold;
-      color: #000 !important;
-      line-height: 1.2;
-    }
-
-    /* Détails des paris */
-    h3 {
-      font-size: 11px;
-      margin: 3mm 0 1.5mm 0;
-      text-align: left;
-      font-weight: bold;
-      border-bottom: 1px solid #000;
-      padding-bottom: 1mm;
-    }
-
-    /* Informations gagnant améliorées */
-    .winner-info {
-      border: 2px solid #006600;
-      padding: 3mm;
-      font-size: 11px;
-      margin: 4mm 0;
-      border-radius: 3px;
-      background: #e8f5e9;
-      text-align: center;
-    }
-    
-    .winner-info strong {
-      display: block;
-      margin-bottom: 2mm;
-      font-size: 10px;
-      text-transform: uppercase;
-      color: #000 !important;
-    }
-
-    /* Ligne séparatrice */
-    .divider {
-      border-top: 1px solid #000;
-      margin: 2.5mm 0;
-    }
-
-    /* Pied de page */
-    .footer {
-      text-align: center;
-      font-size: 9px;
-      margin-top: 4mm;
-      line-height: 1.4;
-    }
-
-    /* Impression stricte */
     @media print {
-      @page {
-        size: 55mm auto;
+      @page { size: 48mm auto; margin: 0; }
+      * {
         margin: 0;
+        padding: 0;
+        box-sizing: border-box;
       }
+      body { 
+        width: 100% !important;
+        max-width: 48mm !important;
+        margin: 0 !important; 
+        padding: 0 !important; 
+        background: #fff !important;
+        overflow-x: hidden !important;
+      }
+      .payout-container {
+        /* Largeur 100% avec max-width 38mm, marge gauche 3mm */
+        width: 100% !important; 
+        max-width: 38mm !important;
+        margin: 0 !important;
+        margin-left: 8mm !important;
+        padding: 0 !important;
+        box-sizing: border-box !important;
+        overflow-x: hidden !important;
+      }
+    }
+
+    /* STYLE DU TICKET */
+    body {
+      font-family: "Courier New", Courier, monospace;
+      font-size: 9pt;
+      line-height: 1.1;
+      color: #000;
+    }
+
+    .payout-container { 
+      width: 100%;
+      max-width: 38mm;
+      margin: 0;
+      margin-left: 8mm;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    .header-section { text-align: center; margin-bottom: 4px; }
+    .shop-name { font-size: 11pt; font-weight: bold; }
+    .shop-phone { font-size: 8pt; }
+
+    .separator-line {
+      text-align: center;
+      font-size: 7pt;
+      margin: 2px 0;
+      white-space: nowrap;
+      overflow: hidden;
+    }
+
+    .receipt-title { 
+      text-align: center; 
+      font-size: 10pt; 
+      font-weight: bold; 
+      margin: 4px 0;
+      border: 1px solid #000;
+      padding: 2px;
+    }
+
+    .info-section { margin: 3px 0; }
+    .info-row { display: flex; justify-content: space-between; width: 100%; margin-bottom: 1px; }
+    .info-value { font-weight: bold; }
+    .info-date { font-size: 7.5pt; }
+    .info-date .info-value { font-size: 7.5pt; }
+
+    .status-section {
+      text-align: center;
+      margin: 4px 0;
+      font-size: 9pt;
+      font-weight: bold;
+      text-transform: uppercase;
+    }
+
+    .bet-detail-section { margin: 5px 0; }
+    .bet-detail-title {
+      text-align: center;
+      font-size: 8pt;
+      font-weight: bold;
+      margin-bottom: 2px;
+      text-transform: uppercase;
+    }
+    .bet-detail-row { display: flex; justify-content: space-between; font-size: 8.5pt; }
+
+    .winner-section {
+      text-align: center;
+      margin: 4px 0;
+      font-size: 8.5pt;
+    }
+
+    .payout-amount-section { 
+      margin-top: 5px; 
+      border-top: 1px solid #000; 
+      padding-top: 2px; 
+    }
+    .payout-amount-label {
+      text-align: center;
+      font-size: 8pt;
+      font-weight: bold;
+      margin-bottom: 2px;
+    }
+    .payout-amount-value {
+      text-align: center;
+      font-size: 10pt;
+      font-weight: bold;
+    }
+
+    .footer-section { text-align: center; margin-top: 8px; }
+    .footer-text { font-size: 7pt; margin: 2px 0; }
+
+    @media screen {
       body {
-        width: 49mm; /* laisse ~3mm de marge de sécurité de chaque côté */
-        padding: 4mm 3mm;
-        font-size: 11px;
+        background: #f5f5f5;
+        padding: 10px;
+      }
+      
+      .payout-container {
+        background: white;
+        border: 1px solid #ddd;
+        box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        border-radius: 4px;
+        max-width: 80mm;
       }
     }
   </style>
@@ -961,66 +660,59 @@ export default function createReceiptsRouter(broadcast) {
 
 <body>
   <div class="payout-container">
-    <div class="header">
-      <h2>💵 DECAISSEMENT</h2>
-      <div class="header-info">
-        <div class="info-line">
-          <span class="info-label">Ticket:</span>
-          <span>#${receipt.id}</span>
-        </div>
-        <div class="info-line">
-          <span class="info-label">Tour:</span>
-          <span>#${round.id}</span>
-        </div>
-        <div class="info-line">
-          <span class="info-label">Date:</span>
-          <span>${escapeHtml(createdTime)}</span>
-        </div>
-      </div>
+    <!-- En-tête -->
+    <div class="header-section">
+      <div class="shop-name">${SYSTEM_NAME}</div>
+      <div class="shop-phone">Telp. -</div>
     </div>
 
-    <hr class="divider">
+    <div class="separator-line">-------------------------------</div>
+    <div class="receipt-title">DECAISSEMENT</div>
+    <div class="separator-line">-------------------------------</div>
 
-    <div class="status-box ${hasWon ? 'won' : 'lost'}">
-      ${hasWon ? '🎉 TICKET GAGNANT 🎉' : '❌ TICKET PERDANT'}
+    <!-- Infos Ticket -->
+    <div class="info-section">
+      <div class="info-row"><span>Ticket:</span><span class="info-value">#${receipt.id}</span></div>
+      <div class="info-row"><span>Tour:</span><span class="info-value">#${round.id}</span></div>
+      <div class="info-row info-date"><span>Date:</span><span class="info-value">${escapeHtml(createdDate)}</span></div>
+      <div class="info-row info-date"><span>Heure:</span><span class="info-value">${escapeHtml(createdTime)}</span></div>
     </div>
 
-    <div class="info-line info-total">
-      <span class="info-label">Mise totale:</span>
-      <span class="info-value">${totalMise.toFixed(2)} HTG</span>
+    <div class="separator-line">-------------------------------</div>
+
+    <!-- Statut -->
+    <div class="status-section">
+      ${hasWon ? 'TICKET GAGNANT' : 'TICKET PERDANT'}
     </div>
 
-    <h3>Détail des paris</h3>
-    ${betsDetailHTML}
+    <!-- Mise totale -->
+    <div class="info-section">
+      <div class="info-row"><span>Mise totale:</span><span class="info-value">${totalMise.toFixed(2)} HTG</span></div>
+    </div>
+
+    <!-- Détail des paris -->
+    <div class="bet-detail-section">
+      <div class="bet-detail-title">Détail des paris</div>
+      ${betsDetailHTML}
+    </div>
 
     ${hasWon ? `
-    <div class="winner-info">
-      <strong>Gagnant de la course :</strong><br>
-      ${escapeHtml(winnerName)}
-    </div>` : ''}
+    <div class="winner-section">
+      <div>Gagnant: ${escapeHtml(winnerName)}</div>
+    </div>
+    ` : ''}
 
-    <div class="payout-amount">
-      <div class="payout-amount-label">MONTANT DU DECAISSEMENT</div>
+    <!-- Montant du décaissement -->
+    <div class="payout-amount-section">
+      <div class="payout-amount-label">Montant du décaissement</div>
       <div class="payout-amount-value">${payoutAmountComputed.toFixed(2)} HTG</div>
     </div>
 
-    <hr class="divider">
+    <div class="separator-line">-------------------------------</div>
 
-    <div class="info-line">
-      <span class="info-label">Statut du paiement :</span>
-      <span>${receipt.isPaid ? 'Payé' : 'En attente'}</span>
-    </div>
-
-    ${receipt.isPaid && receipt.paid_at ? `
-    <div class="info-line">
-      <span class="info-label">Date de paiement :</span>
-      <span>${new Date(receipt.paid_at).toLocaleString('fr-FR')}</span>
-    </div>` : ''}
-
-    <hr class="divider">
-
-    <div class="footer">
-      <p>Ce document prouve le résultat du ticket.<br>Conservez-le comme justificatif.</p>
+    <!-- Pied de page -->
+    <div class="footer-section">
+      <div class="footer-text">Conservez ce document comme justificatif.</div>
     </div>
   </div>
 </body>
