@@ -1,42 +1,25 @@
 import express from "express";
-import jwt from "jsonwebtoken";
 import { requireAuthHTML, requireRoleHTML } from "../middleware/session.js";
 import * as accountModel from "../models/accountModel.js";
+import { pool } from "../config/db.js";
 
 const router = express.Router();
 
 /**
  * GET /api/v1/accounts/me
  * Récupère le compte du caissier connecté
+ * IMPORTANT: Cette route doit être définie AVANT /:userId pour éviter les conflits
  */
-router.get("/me", async (req, res) => {
+router.get("/me", requireRoleHTML("cashier"), async (req, res) => {
   try {
-    // ✅ Vérifier l'authentification - chercher le JWT dans le cookie
-    const cookie = req.cookies?.authSession;
-    console.log('🔍 Cookie authSession présent?', !!cookie);
-    console.log('🔍 Cookies disponibles:', Object.keys(req.cookies || {}));
+    console.log("🔍 [ACCOUNTS] Route /me appelée");
+    console.log("🔍 [ACCOUNTS] req.user:", req.user);
     
-    if (!cookie) {
-      console.error('❌ Pas de cookie authSession trouvé');
-      return res.status(401).json({ error: "Authentification requise - cookie manquant" });
-    }
-
-    // ✅ Vérifier le JWT
-    let decoded;
-    try {
-      const JWT_SECRET = process.env.JWT_SECRET || "your-secret-key-change-in-production";
-      decoded = jwt.verify(cookie, JWT_SECRET);
-      console.log('✅ JWT valide, decoded:', decoded);
-    } catch (jwtErr) {
-      console.error('❌ JWT invalide:', jwtErr.message);
-      return res.status(401).json({ error: "Session expirée ou invalide" });
-    }
-
-    const userId = decoded.userId || decoded.user_id || decoded.id;
+    const userId = req.user?.user_id || req.user?.userId;
     
     if (!userId) {
-      console.error("❌ Pas d'ID utilisateur dans le JWT:", decoded);
-      return res.status(401).json({ error: "ID utilisateur non trouvé dans le JWT" });
+      console.error("❌ Pas d'ID utilisateur dans req.user:", req.user);
+      return res.status(401).json({ error: "ID utilisateur non trouvé" });
     }
 
     console.log(`🔍 Recherche du compte pour l'utilisateur ${userId}`);
@@ -374,6 +357,59 @@ router.post("/me/statement", requireAuthHTML, requireRoleHTML("cashier"), async 
     });
   } catch (err) {
     console.error("❌ Erreur dans POST /me/statement:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * GET /api/v1/accounts/me/report
+ * Génère un rapport de caisse pour une période avec statistiques de tickets
+ * Query params: fromDate, toDate (format ISO 8601 ou timestamp)
+ */
+router.get("/me/report", requireAuthHTML, requireRoleHTML("cashier"), async (req, res) => {
+  try {
+    const userId = req.user.user_id;
+    const { fromDate, toDate } = req.query;
+
+    if (!fromDate || !toDate) {
+      return res.status(400).json({ error: "Dates de début et fin requises (fromDate, toDate)" });
+    }
+
+    const from = new Date(fromDate);
+    const to = new Date(toDate);
+
+    if (isNaN(from.getTime()) || isNaN(to.getTime())) {
+      return res.status(400).json({ error: "Format de date invalide" });
+    }
+
+    if (from >= to) {
+      return res.status(400).json({ error: "La date de début doit être antérieure à la date de fin" });
+    }
+
+    const report = await accountModel.getCashierReportStats(userId, from, to);
+
+    // Récupérer aussi les informations du compte et de l'utilisateur
+    const account = await accountModel.getAccountByUserId(userId);
+    const userResult = await pool.query(
+      `SELECT username, email FROM users WHERE user_id = $1`,
+      [userId]
+    );
+    const user = userResult.rows[0] || {};
+
+    res.json({
+      success: true,
+      report: {
+        ...report,
+        cashier: {
+          username: user.username || 'N/A',
+          email: user.email || 'N/A',
+          accountId: account?.account_id || null,
+          accountStatus: account?.status || 'closed'
+        }
+      }
+    });
+  } catch (err) {
+    console.error("❌ Erreur dans GET /me/report:", err);
     res.status(500).json({ error: err.message });
   }
 });

@@ -1,4 +1,5 @@
 import { pool } from "../config/db.js";
+import { systemToPublic } from "../utils.js";
 
 /**
  * Récupère le compte de caisse d'un utilisateur par son ID
@@ -362,6 +363,118 @@ export const getAccountStats = async (userId) => {
     };
   } catch (err) {
     console.error("❌ Erreur dans getAccountStats:", err);
+    throw err;
+  }
+};
+
+/**
+ * Récupère les statistiques de tickets pour une période
+ * Inclut: tickets imprimés, gagnés, perdus, annulés, total misé, total payé
+ */
+export const getCashierReportStats = async (userId, fromDate, toDate) => {
+  try {
+    // 1. Récupérer les transactions de type "payout" du caissier pendant la période
+    const payoutTransactions = await pool.query(
+      `SELECT reference, amount, created_at
+       FROM account_transactions at
+       JOIN cashier_accounts ca ON at.account_id = ca.account_id
+       WHERE ca.user_id = $1 
+       AND at.transaction_type = 'payout'
+       AND at.created_at >= $2 
+       AND at.created_at < $3
+       ORDER BY at.created_at DESC`,
+      [userId, fromDate, toDate]
+    );
+
+    // 2. Extraire les IDs de tickets depuis les références (format: "Receipt #123")
+    const receiptIds = [];
+    let totalPaid = 0;
+    payoutTransactions.rows.forEach(tx => {
+      if (tx.reference && tx.reference.startsWith('Receipt #')) {
+        const receiptId = parseInt(tx.reference.replace('Receipt #', ''), 10);
+        if (!isNaN(receiptId)) {
+          receiptIds.push(receiptId);
+        }
+      }
+      totalPaid += parseFloat(tx.amount) || 0;
+    });
+
+    // 3. Récupérer les statistiques des tickets payés par ce caissier
+    let paidTicketsStats = {
+      total: 0,
+      won: 0,
+      lost: 0,
+      cancelled: 0,
+      totalWagered: 0,
+      totalPrize: 0
+    };
+
+    if (receiptIds.length > 0) {
+      const placeholders = receiptIds.map((_, i) => `$${i + 1}`).join(',');
+      const ticketsResult = await pool.query(
+        `SELECT 
+           COUNT(*) as total,
+           SUM(CASE WHEN status = 'won' OR status = 'paid' THEN 1 ELSE 0 END) as won,
+           SUM(CASE WHEN status = 'lost' THEN 1 ELSE 0 END) as lost,
+           SUM(CASE WHEN status = 'cancelled' THEN 1 ELSE 0 END) as cancelled,
+           COALESCE(SUM(total_amount), 0) as total_wagered,
+           COALESCE(SUM(prize), 0) as total_prize
+         FROM receipts
+         WHERE receipt_id IN (${placeholders})`,
+        receiptIds
+      );
+
+      const stats = ticketsResult.rows[0];
+      paidTicketsStats = {
+        total: parseInt(stats.total, 10) || 0,
+        won: parseInt(stats.won, 10) || 0,
+        lost: parseInt(stats.lost, 10) || 0,
+        cancelled: parseInt(stats.cancelled, 10) || 0,
+        totalWagered: systemToPublic(parseFloat(stats.total_wagered) || 0),
+        totalPrize: systemToPublic(parseFloat(stats.total_prize) || 0)
+      };
+    }
+
+    // 4. Récupérer les statistiques de tous les tickets créés pendant la période
+    // (tickets imprimés par tous les joueurs, pas seulement ceux payés par ce caissier)
+    const allTicketsResult = await pool.query(
+      `SELECT 
+         COUNT(*) as total_printed,
+         SUM(CASE WHEN status = 'won' OR status = 'paid' THEN 1 ELSE 0 END) as won,
+         SUM(CASE WHEN status = 'lost' THEN 1 ELSE 0 END) as lost,
+         SUM(CASE WHEN status = 'cancelled' THEN 1 ELSE 0 END) as cancelled,
+         COALESCE(SUM(total_amount), 0) as total_wagered_all
+       FROM receipts
+       WHERE created_at >= $1 
+       AND created_at < $2`,
+      [fromDate, toDate]
+    );
+
+    const allTicketsStats = allTicketsResult.rows[0];
+
+    // 5. Récupérer le solde actuel du compte
+    const account = await getAccountByUserId(userId);
+    const currentBalance = account ? parseFloat(account.current_balance) || 0 : 0;
+
+    return {
+      currentBalance,
+      ticketsPrinted: parseInt(allTicketsStats.total_printed, 10) || 0,
+      ticketsWon: parseInt(allTicketsStats.won, 10) || 0,
+      ticketsLost: parseInt(allTicketsStats.lost, 10) || 0,
+      ticketsCancelled: parseInt(allTicketsStats.cancelled, 10) || 0,
+      totalWagered: systemToPublic(parseFloat(allTicketsStats.total_wagered_all) || 0),
+      totalPaid,
+      paidTicketsCount: paidTicketsStats.total,
+      paidTicketsWon: paidTicketsStats.won,
+      paidTicketsLost: paidTicketsStats.lost,
+      paidTicketsCancelled: paidTicketsStats.cancelled,
+      period: {
+        from: fromDate,
+        to: toDate
+      }
+    };
+  } catch (err) {
+    console.error("❌ Erreur dans getCashierReportStats:", err);
     throw err;
   }
 };

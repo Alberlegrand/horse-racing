@@ -731,4 +731,287 @@ router.get('/cashiers/:userId/account', async (req, res) => {
   }
 });
 
+// ===== FINANCIAL MANAGEMENT =====
+/**
+ * GET /api/v1/admin/finance/overview
+ * Récupère le solde total du système et les statistiques financières
+ */
+router.get('/finance/overview', async (req, res) => {
+  try {
+    // Calculer le solde total de tous les comptes caissiers
+    const totalBalanceResult = await pool.query(
+      `SELECT 
+         COALESCE(SUM(current_balance), 0) as total_balance,
+         COALESCE(SUM(opening_balance), 0) as total_opening_balance,
+         COUNT(*) as total_accounts,
+         COUNT(CASE WHEN status = 'open' THEN 1 END) as open_accounts,
+         COUNT(CASE WHEN status = 'closed' THEN 1 END) as closed_accounts
+       FROM cashier_accounts`
+    );
+
+    // Calculer les transactions totales
+    const transactionsResult = await pool.query(
+      `SELECT 
+         COALESCE(SUM(CASE WHEN transaction_type IN ('deposit', 'cash-in', 'pay-receipt', 'opening') THEN amount ELSE 0 END), 0) as total_in,
+         COALESCE(SUM(CASE WHEN transaction_type IN ('withdrawal', 'cash-out', 'payout', 'closing') THEN amount ELSE 0 END), 0) as total_out,
+         COUNT(*) as total_transactions
+       FROM account_transactions`
+    );
+
+    // Calculer les revenus depuis les tickets
+    const revenueResult = await pool.query(
+      `SELECT 
+         COALESCE(SUM(total_amount), 0) as total_revenue,
+         COALESCE(SUM(CASE WHEN status = 'won' THEN total_amount ELSE 0 END), 0) as total_payouts,
+         COUNT(*) as total_receipts
+       FROM receipts`
+    );
+
+    const totalBalance = totalBalanceResult.rows[0];
+    const transactions = transactionsResult.rows[0];
+    const revenue = revenueResult.rows[0];
+
+    res.json({
+      success: true,
+      overview: {
+        totalBalance: parseFloat(totalBalance.total_balance || 0),
+        totalOpeningBalance: parseFloat(totalBalance.total_opening_balance || 0),
+        totalAccounts: parseInt(totalBalance.total_accounts || 0),
+        openAccounts: parseInt(totalBalance.open_accounts || 0),
+        closedAccounts: parseInt(totalBalance.closed_accounts || 0),
+        totalIn: parseFloat(transactions.total_in || 0),
+        totalOut: parseFloat(transactions.total_out || 0),
+        totalTransactions: parseInt(transactions.total_transactions || 0),
+        totalRevenue: parseFloat(revenue.total_revenue || 0),
+        totalPayouts: parseFloat(revenue.total_payouts || 0),
+        totalReceipts: parseInt(revenue.total_receipts || 0),
+        netProfit: parseFloat(revenue.total_revenue || 0) - parseFloat(revenue.total_payouts || 0)
+      }
+    });
+  } catch (e) {
+    console.error('[ADMIN] Finance overview error:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+/**
+ * GET /api/v1/admin/finance/cashiers
+ * Récupère le capital de chaque caisse avec filtres
+ */
+router.get('/finance/cashiers', async (req, res) => {
+  try {
+    const { status, dateFrom, dateTo, minBalance, maxBalance } = req.query;
+
+    let query = `
+      SELECT 
+        ca.account_id,
+        ca.user_id,
+        u.username,
+        u.email,
+        ca.current_balance,
+        ca.opening_balance,
+        ca.status,
+        ca.opening_time,
+        ca.closing_time,
+        ca.created_at,
+        ca.updated_at,
+        (SELECT COUNT(*) FROM account_transactions WHERE account_id = ca.account_id) as transaction_count,
+        (SELECT COALESCE(SUM(CASE WHEN transaction_type IN ('deposit', 'cash-in', 'pay-receipt', 'opening') THEN amount ELSE 0 END), 0) 
+         FROM account_transactions WHERE account_id = ca.account_id) as total_in,
+        (SELECT COALESCE(SUM(CASE WHEN transaction_type IN ('withdrawal', 'cash-out', 'payout', 'closing') THEN amount ELSE 0 END), 0) 
+         FROM account_transactions WHERE account_id = ca.account_id) as total_out
+      FROM cashier_accounts ca
+      JOIN users u ON ca.user_id = u.user_id
+      WHERE 1=1
+    `;
+
+    const params = [];
+    let paramIndex = 1;
+
+    if (status) {
+      query += ` AND ca.status = $${paramIndex}`;
+      params.push(status);
+      paramIndex++;
+    }
+
+    if (minBalance !== undefined) {
+      query += ` AND ca.current_balance >= $${paramIndex}`;
+      params.push(parseFloat(minBalance));
+      paramIndex++;
+    }
+
+    if (maxBalance !== undefined) {
+      query += ` AND ca.current_balance <= $${paramIndex}`;
+      params.push(parseFloat(maxBalance));
+      paramIndex++;
+    }
+
+    if (dateFrom) {
+      query += ` AND ca.created_at >= $${paramIndex}`;
+      params.push(dateFrom);
+      paramIndex++;
+    }
+
+    if (dateTo) {
+      query += ` AND ca.created_at <= $${paramIndex}`;
+      params.push(dateTo);
+      paramIndex++;
+    }
+
+    query += ` ORDER BY ca.current_balance DESC`;
+
+    const result = await pool.query(query, params);
+
+    const cashiers = result.rows.map(row => ({
+      accountId: row.account_id,
+      userId: row.user_id,
+      username: row.username,
+      email: row.email,
+      currentBalance: parseFloat(row.current_balance || 0),
+      openingBalance: parseFloat(row.opening_balance || 0),
+      status: row.status,
+      openingTime: row.opening_time,
+      closingTime: row.closing_time,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+      transactionCount: parseInt(row.transaction_count || 0),
+      totalIn: parseFloat(row.total_in || 0),
+      totalOut: parseFloat(row.total_out || 0)
+    }));
+
+    res.json({
+      success: true,
+      cashiers,
+      total: cashiers.length,
+      totalBalance: cashiers.reduce((sum, c) => sum + c.currentBalance, 0)
+    });
+  } catch (e) {
+    console.error('[ADMIN] Finance cashiers error:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+/**
+ * GET /api/v1/admin/finance/transactions
+ * Récupère les transactions avec filtres
+ */
+router.get('/finance/transactions', async (req, res) => {
+  try {
+    const { 
+      userId, 
+      accountId, 
+      type, 
+      dateFrom, 
+      dateTo, 
+      minAmount, 
+      maxAmount,
+      limit = 100,
+      offset = 0
+    } = req.query;
+
+    let query = `
+      SELECT 
+        at.transaction_id,
+        at.account_id,
+        at.user_id,
+        u.username,
+        at.transaction_type,
+        at.amount,
+        at.previous_balance,
+        at.new_balance,
+        at.reference,
+        at.description,
+        at.created_at
+      FROM account_transactions at
+      JOIN cashier_accounts ca ON at.account_id = ca.account_id
+      JOIN users u ON ca.user_id = u.user_id
+      WHERE 1=1
+    `;
+
+    const params = [];
+    let paramIndex = 1;
+
+    if (userId) {
+      query += ` AND ca.user_id = $${paramIndex}`;
+      params.push(parseInt(userId, 10));
+      paramIndex++;
+    }
+
+    if (accountId) {
+      query += ` AND at.account_id = $${paramIndex}`;
+      params.push(parseInt(accountId, 10));
+      paramIndex++;
+    }
+
+    if (type) {
+      query += ` AND at.transaction_type = $${paramIndex}`;
+      params.push(type);
+      paramIndex++;
+    }
+
+    if (dateFrom) {
+      query += ` AND at.created_at >= $${paramIndex}`;
+      params.push(dateFrom);
+      paramIndex++;
+    }
+
+    if (dateTo) {
+      query += ` AND at.created_at <= $${paramIndex}`;
+      params.push(dateTo);
+      paramIndex++;
+    }
+
+    if (minAmount !== undefined) {
+      query += ` AND at.amount >= $${paramIndex}`;
+      params.push(parseFloat(minAmount));
+      paramIndex++;
+    }
+
+    if (maxAmount !== undefined) {
+      query += ` AND at.amount <= $${paramIndex}`;
+      params.push(parseFloat(maxAmount));
+      paramIndex++;
+    }
+
+    query += ` ORDER BY at.created_at DESC LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`;
+    params.push(parseInt(limit, 10), parseInt(offset, 10));
+
+    const result = await pool.query(query, params);
+
+    const transactions = result.rows.map(row => ({
+      transactionId: row.transaction_id,
+      accountId: row.account_id,
+      userId: row.user_id,
+      username: row.username,
+      type: row.transaction_type,
+      amount: parseFloat(row.amount || 0),
+      previousBalance: parseFloat(row.previous_balance || 0),
+      newBalance: parseFloat(row.new_balance || 0),
+      reference: row.reference,
+      description: row.description,
+      createdAt: row.created_at
+    }));
+
+    // Get total count
+    const countQuery = query.replace(/ORDER BY.*$/, '').replace(/LIMIT.*$/, '');
+    const countResult = await pool.query(
+      `SELECT COUNT(*) as total FROM (${countQuery}) as subquery`,
+      params.slice(0, -2)
+    );
+
+    res.json({
+      success: true,
+      transactions,
+      pagination: {
+        limit: parseInt(limit, 10),
+        offset: parseInt(offset, 10),
+        total: parseInt(countResult.rows[0].total || 0)
+      }
+    });
+  } catch (e) {
+    console.error('[ADMIN] Finance transactions error:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 export default router;

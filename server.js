@@ -533,8 +533,9 @@ app.use("/api/v1/diagnostic/", verifyToken, diagnosticRouter);
 app.use("/api/v1/money/", verifyToken, requireRole('cashier', 'admin'), moneyRouter);
 
 // ✅ NOUVEAU: Routes de gestion des comptes de caisse
-// ✅ CORRECTION: Protection par verifyToken pour isolation des données
-app.use("/api/v1/accounts/", verifyToken, accountsRouter);
+// ✅ CORRECTION: Les routes utilisent requireAuthHTML et requireRoleHTML pour l'authentification
+app.use("/api/v1/accounts/", accountsRouter);
+console.log("✅ Routes /api/v1/accounts/ enregistrées");
 
 // ✅ NOUVEAU: Routes de configuration système
 app.use("/api/v1/system/", systemRouter);

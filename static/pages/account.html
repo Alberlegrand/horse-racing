@@ -4,7 +4,10 @@
             <h2 class="font-semibold text-2xl">Gestion de la Caisse</h2>
             <div id="roundStatus" class="text-sm text-slate-300">(Round: inconnue)</div>
         </div>
-        <button id="refreshCashierBtn" class="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 rounded text-sm">🔄 Rafraîchir</button>
+        <div class="flex items-center gap-2">
+            <button id="reportCashierBtn" class="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 rounded text-sm">📊 Rapport de Caisse</button>
+            <button id="refreshCashierBtn" class="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 rounded text-sm">🔄 Rafraîchir</button>
+        </div>
     </div>
 
     <!-- Solde actuel et statistiques clés -->
@@ -108,4 +111,355 @@
             <div class="p-2 text-center text-slate-500">Chargement...</div>
         </div>
     </div>
+
+    <!-- Modal pour sélectionner la période du rapport -->
+    <div id="reportModal" class="fixed inset-0 bg-black/60 hidden items-center justify-center z-50">
+        <div class="bg-slate-900 rounded-lg p-5 w-full max-w-md border border-slate-800">
+            <h4 class="font-semibold mb-4 text-lg">Générer un Rapport de Caisse</h4>
+            <form id="reportForm">
+                <div class="mb-4">
+                    <label class="block text-sm text-slate-300 mb-2">Date et Heure de Début</label>
+                    <input type="datetime-local" id="reportFromDate" class="w-full px-3 py-2 bg-slate-800 border border-slate-600 rounded text-white" required>
+                </div>
+                <div class="mb-4">
+                    <label class="block text-sm text-slate-300 mb-2">Date et Heure de Fin</label>
+                    <input type="datetime-local" id="reportToDate" class="w-full px-3 py-2 bg-slate-800 border border-slate-600 rounded text-white" required>
+                </div>
+                <div class="flex justify-end gap-2">
+                    <button type="button" id="cancelReportBtn" class="px-4 py-2 rounded bg-slate-800 hover:bg-slate-700 text-sm">Annuler</button>
+                    <button type="submit" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded text-sm">📄 Générer et Imprimer</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Rapport d'impression (caché par défaut) -->
+    <div id="reportPrintContainer" style="display: none;">
+        <div id="reportContent" style="padding: 20px; background: white; color: black; font-family: Arial, sans-serif;">
+            <!-- Le contenu du rapport sera injecté ici -->
+        </div>
+    </div>
 </div>
+
+<style>
+    /* Styles pour l'impression du rapport */
+    @media print {
+        body * {
+            visibility: hidden;
+        }
+        #reportPrintContainer,
+        #reportPrintContainer * {
+            visibility: visible;
+        }
+        #reportPrintContainer {
+            position: absolute;
+            left: 0;
+            top: 0;
+            width: 100%;
+        }
+        .no-print {
+            display: none !important;
+        }
+    }
+</style>
+
+<script>
+(function() {
+    // Initialiser le modal de rapport quand la page account est chargée
+    function initReportModal() {
+        const reportBtn = document.getElementById('reportCashierBtn');
+        const reportModal = document.getElementById('reportModal');
+        const cancelReportBtn = document.getElementById('cancelReportBtn');
+        const reportForm = document.getElementById('reportForm');
+
+        if (!reportBtn || !reportModal) return;
+
+        // Ouvrir le modal
+        reportBtn.addEventListener('click', () => {
+            // Définir les valeurs par défaut (aujourd'hui, de minuit à maintenant)
+            const now = new Date();
+            const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0);
+            
+            // Formater pour datetime-local (YYYY-MM-DDTHH:mm)
+            const formatDateTimeLocal = (date) => {
+                const year = date.getFullYear();
+                const month = String(date.getMonth() + 1).padStart(2, '0');
+                const day = String(date.getDate()).padStart(2, '0');
+                const hours = String(date.getHours()).padStart(2, '0');
+                const minutes = String(date.getMinutes()).padStart(2, '0');
+                return `${year}-${month}-${day}T${hours}:${minutes}`;
+            };
+
+            document.getElementById('reportFromDate').value = formatDateTimeLocal(todayStart);
+            document.getElementById('reportToDate').value = formatDateTimeLocal(now);
+            reportModal.classList.remove('hidden');
+            reportModal.classList.add('flex');
+        });
+
+        // Fermer le modal
+        cancelReportBtn?.addEventListener('click', () => {
+            reportModal.classList.add('hidden');
+            reportModal.classList.remove('flex');
+        });
+
+        // Soumettre le formulaire
+        reportForm?.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const fromDate = document.getElementById('reportFromDate').value;
+            const toDate = document.getElementById('reportToDate').value;
+            
+            if (!fromDate || !toDate) {
+                alert('❌ Veuillez sélectionner les dates de début et de fin');
+                return;
+            }
+
+            try {
+                await generateAndPrintReport(fromDate, toDate);
+                reportModal.classList.add('hidden');
+                reportModal.classList.remove('flex');
+            } catch (err) {
+                alert('❌ ' + err.message);
+            }
+        });
+    }
+
+    async function generateAndPrintReport(fromDate, toDate) {
+        try {
+            // Convertir les dates au format ISO pour l'API
+            const fromISO = new Date(fromDate).toISOString();
+            const toISO = new Date(toDate).toISOString();
+
+            // Appeler l'API pour générer le rapport
+            const response = await fetch(`/api/v1/accounts/me/report?fromDate=${encodeURIComponent(fromISO)}&toDate=${encodeURIComponent(toISO)}`, {
+                method: 'GET',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                credentials: 'include'
+            });
+
+            if (!response.ok) {
+                const error = await response.json();
+                throw new Error(error.error || 'Erreur lors de la génération du rapport');
+            }
+
+            const data = await response.json();
+            const report = data.report;
+
+            // Générer le HTML du rapport
+            const reportHTML = generateReportHTML(report, fromDate, toDate);
+
+            // Afficher le rapport dans le conteneur d'impression
+            const printContainer = document.getElementById('reportPrintContainer');
+            const reportContent = document.getElementById('reportContent');
+            if (printContainer && reportContent) {
+                reportContent.innerHTML = reportHTML;
+                printContainer.style.display = 'block';
+
+                // Imprimer le rapport
+                window.print();
+
+                // Masquer le conteneur après l'impression
+                setTimeout(() => {
+                    printContainer.style.display = 'none';
+                }, 1000);
+            }
+        } catch (err) {
+            console.error('Erreur génération rapport:', err);
+            throw err;
+        }
+    }
+
+    function generateReportHTML(report, fromDate, toDate) {
+        const formatDate = (dateStr) => {
+            const date = new Date(dateStr);
+            return date.toLocaleString('fr-FR', {
+                timeZone: 'America/Port-au-Prince',
+                year: 'numeric',
+                month: '2-digit',
+                day: '2-digit',
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit'
+            });
+        };
+
+        const formatCurrency = (amount) => {
+            return parseFloat(amount || 0).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ' ') + ' HTG';
+        };
+
+        return `
+            <style>
+                @media print {
+                    body { margin: 0; padding: 0; }
+                    .no-print { display: none; }
+                }
+                .report-header {
+                    text-align: center;
+                    border-bottom: 2px solid #000;
+                    padding-bottom: 15px;
+                    margin-bottom: 20px;
+                }
+                .report-title {
+                    font-size: 24px;
+                    font-weight: bold;
+                    margin-bottom: 10px;
+                }
+                .report-subtitle {
+                    font-size: 16px;
+                    color: #666;
+                }
+                .report-section {
+                    margin-bottom: 25px;
+                }
+                .report-section-title {
+                    font-size: 18px;
+                    font-weight: bold;
+                    border-bottom: 1px solid #ccc;
+                    padding-bottom: 5px;
+                    margin-bottom: 15px;
+                }
+                .report-grid {
+                    display: grid;
+                    grid-template-columns: 1fr 1fr;
+                    gap: 15px;
+                    margin-bottom: 15px;
+                }
+                .report-item {
+                    padding: 10px;
+                    background: #f5f5f5;
+                    border-radius: 5px;
+                }
+                .report-item-label {
+                    font-size: 12px;
+                    color: #666;
+                    margin-bottom: 5px;
+                }
+                .report-item-value {
+                    font-size: 18px;
+                    font-weight: bold;
+                    color: #000;
+                }
+                .report-table {
+                    width: 100%;
+                    border-collapse: collapse;
+                    margin-top: 15px;
+                }
+                .report-table th,
+                .report-table td {
+                    padding: 10px;
+                    text-align: left;
+                    border-bottom: 1px solid #ddd;
+                }
+                .report-table th {
+                    background: #333;
+                    color: white;
+                    font-weight: bold;
+                }
+                .report-footer {
+                    margin-top: 30px;
+                    padding-top: 15px;
+                    border-top: 1px solid #ccc;
+                    text-align: center;
+                    font-size: 12px;
+                    color: #666;
+                }
+                .text-success { color: #10b981; }
+                .text-danger { color: #ef4444; }
+                .text-warning { color: #f59e0b; }
+            </style>
+            <div class="report-header">
+                <div class="report-title">RAPPORT DE CAISSE</div>
+                <div class="report-subtitle">HITBET777 - Système de Paris</div>
+                <div style="margin-top: 10px; font-size: 14px;">
+                    <div><strong>Caissier:</strong> ${report.cashier.username || 'N/A'}</div>
+                    <div><strong>Période:</strong> ${formatDate(fromDate)} - ${formatDate(toDate)}</div>
+                    <div><strong>Généré le:</strong> ${formatDate(new Date().toISOString())}</div>
+                </div>
+            </div>
+
+            <div class="report-section">
+                <div class="report-section-title">Solde et Résumé</div>
+                <div class="report-grid">
+                    <div class="report-item">
+                        <div class="report-item-label">Solde Actuel</div>
+                        <div class="report-item-value ${report.currentBalance >= 0 ? 'text-success' : 'text-danger'}">
+                            ${formatCurrency(report.currentBalance)}
+                        </div>
+                    </div>
+                    <div class="report-item">
+                        <div class="report-item-label">Total Misé</div>
+                        <div class="report-item-value">${formatCurrency(report.totalWagered)}</div>
+                    </div>
+                    <div class="report-item">
+                        <div class="report-item-label">Total Payé</div>
+                        <div class="report-item-value text-danger">${formatCurrency(report.totalPaid)}</div>
+                    </div>
+                    <div class="report-item">
+                        <div class="report-item-label">Solde Net</div>
+                        <div class="report-item-value ${(report.totalWagered - report.totalPaid) >= 0 ? 'text-success' : 'text-danger'}">
+                            ${formatCurrency(report.totalWagered - report.totalPaid)}
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="report-section">
+                <div class="report-section-title">Statistiques des Tickets Imprimés</div>
+                <div class="report-grid">
+                    <div class="report-item">
+                        <div class="report-item-label">Total Tickets Imprimés</div>
+                        <div class="report-item-value">${report.ticketsPrinted}</div>
+                    </div>
+                    <div class="report-item">
+                        <div class="report-item-label">Tickets Gagnés</div>
+                        <div class="report-item-value text-success">${report.ticketsWon}</div>
+                    </div>
+                    <div class="report-item">
+                        <div class="report-item-label">Tickets Perdus</div>
+                        <div class="report-item-value text-danger">${report.ticketsLost}</div>
+                    </div>
+                    <div class="report-item">
+                        <div class="report-item-label">Tickets Annulés</div>
+                        <div class="report-item-value text-warning">${report.ticketsCancelled}</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="report-section">
+                <div class="report-section-title">Tickets Payés par ce Caissier</div>
+                <div class="report-grid">
+                    <div class="report-item">
+                        <div class="report-item-label">Total Tickets Payés</div>
+                        <div class="report-item-value">${report.paidTicketsCount}</div>
+                    </div>
+                    <div class="report-item">
+                        <div class="report-item-label">Tickets Gagnés Payés</div>
+                        <div class="report-item-value text-success">${report.paidTicketsWon}</div>
+                    </div>
+                    <div class="report-item">
+                        <div class="report-item-label">Tickets Perdus Payés</div>
+                        <div class="report-item-value text-danger">${report.paidTicketsLost}</div>
+                    </div>
+                    <div class="report-item">
+                        <div class="report-item-label">Tickets Annulés Payés</div>
+                        <div class="report-item-value text-warning">${report.paidTicketsCancelled}</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="report-footer">
+                <div>Rapport généré automatiquement par le système HITBET777</div>
+                <div>Ce document est confidentiel et ne doit être utilisé qu'à des fins de gestion interne</div>
+            </div>
+        `;
+    }
+
+    // Initialiser quand le DOM est prêt
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', initReportModal);
+    } else {
+        initReportModal();
+    }
+})();
+</script>

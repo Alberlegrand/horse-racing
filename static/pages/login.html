@@ -6,14 +6,74 @@
   <title>Connexion — HITBET777</title>
   <!-- Tailwind via CDN for quick prototyping -->
   <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
   <style>
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(20px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    @keyframes slideIn {
+      from { opacity: 0; transform: translateX(-20px); }
+      to { opacity: 1; transform: translateX(0); }
+    }
+
+    .login-container {
+      animation: fadeIn 0.6s ease-out;
+    }
+
+    .form-group {
+      animation: slideIn 0.6s ease-out;
+      animation-fill-mode: both;
+    }
+
+    .form-group:nth-child(1) { animation-delay: 0.1s; }
+    .form-group:nth-child(2) { animation-delay: 0.2s; }
+    .form-group:nth-child(3) { animation-delay: 0.3s; }
+
+    .btn-login {
+      transition: all 0.3s ease;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .btn-login:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 10px 25px rgba(16, 185, 129, 0.4);
+    }
+
+    .btn-login:active {
+      transform: translateY(0);
+    }
+
+    .input-field {
+      transition: all 0.3s ease;
+    }
+
+    .input-field:focus {
+      transform: translateY(-2px);
+      box-shadow: 0 5px 15px rgba(16, 185, 129, 0.2);
+    }
+
+    .bg-gradient-login {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 50%, #f093fb 100%);
+      background-size: 200% 200%;
+      animation: gradientShift 15s ease infinite;
+    }
+
+    @keyframes gradientShift {
+      0% { background-position: 0% 50%; }
+      50% { background-position: 100% 50%; }
+      100% { background-position: 0% 50%; }
+    }
+
     /* ============================================
        RESPONSIVE MOBILE LANDSCAPE (Mode Paysage)
        ============================================ */
     @media (max-width: 900px) and (orientation: landscape) {
       .max-w-md {
         max-width: 90%;
-        padding: 1rem;
+        padding: 1.5rem;
       }
 
       h1 {
@@ -36,7 +96,7 @@
 
     @media (max-width: 700px) and (orientation: landscape) {
       .max-w-md {
-        padding: 0.75rem;
+        padding: 1rem;
       }
 
       h1 {
@@ -60,43 +120,63 @@
     }
   </style>
 </head>
-<body class="bg-slate-900 text-slate-100 min-h-screen flex items-center justify-center">
-  <div class="w-full max-w-md p-8 bg-slate-800/70 backdrop-blur rounded-xl shadow-lg">
-    <div class="text-center mb-6">
-      <h1 class="text-2xl font-semibold">Se connecter</h1>
-      <p class="text-sm text-slate-300 mt-1">Accédez au tableau de bord du caissier</p>
+<body class="bg-gradient-login text-slate-100 min-h-screen flex items-center justify-center p-4">
+  <div class="w-full max-w-md login-container">
+    <div class="bg-white/10 backdrop-blur-lg rounded-2xl shadow-2xl p-8 border border-white/20">
+      <!-- Logo & Header -->
+      <div class="text-center mb-8">
+        <div class="inline-flex items-center justify-center w-16 h-16 bg-white/20 rounded-full mb-4">
+          <i class="fas fa-horse-head text-3xl text-white"></i>
+        </div>
+        <h1 class="text-3xl font-bold text-white mb-2">HITBET777</h1>
+        <p class="text-sm text-white/80">Système de gestion</p>
+      </div>
+
+      <div class="text-center mb-6">
+        <h2 class="text-2xl font-semibold text-white mb-2">Connexion</h2>
+        <p class="text-sm text-white/70">Accédez à votre espace</p>
+      </div>
+
+      <form id="loginForm" class="space-y-5">
+        <div class="form-group">
+          <label for="username" class="block text-sm font-medium text-white/90 mb-2">
+            <i class="fas fa-user mr-2"></i>Identifiant
+          </label>
+          <input id="username" name="username" type="text" required
+                 class="input-field w-full px-4 py-3 rounded-lg bg-white/10 border border-white/20 text-white placeholder-white/50 focus:outline-none focus:ring-2 focus:ring-white/50 focus:border-white/50"
+                 placeholder="Votre nom d'utilisateur" />
+        </div>
+
+        <div class="form-group">
+          <label for="password" class="block text-sm font-medium text-white/90 mb-2">
+            <i class="fas fa-lock mr-2"></i>Mot de passe
+          </label>
+          <input id="password" name="password" type="password" required
+                 class="input-field w-full px-4 py-3 rounded-lg bg-white/10 border border-white/20 text-white placeholder-white/50 focus:outline-none focus:ring-2 focus:ring-white/50 focus:border-white/50"
+                 placeholder="••••••••" />
+        </div>
+
+        <div class="flex items-center justify-between form-group">
+          <label class="inline-flex items-center text-sm text-white/80 cursor-pointer">
+            <input id="remember" type="checkbox" class="h-4 w-4 text-emerald-400 bg-white/10 border-white/20 rounded focus:ring-2 focus:ring-white/50" />
+            <span class="ml-2">Se souvenir de moi</span>
+          </label>
+          <a href="#" class="text-sm text-white/80 hover:text-white transition-colors">Mot de passe oublié ?</a>
+        </div>
+
+        <div class="form-group">
+          <button type="submit" class="btn-login w-full py-3 rounded-lg bg-white text-slate-900 font-semibold text-lg shadow-lg hover:bg-white/90">
+            <i class="fas fa-sign-in-alt mr-2"></i>Se connecter
+          </button>
+        </div>
+
+        <div id="loginMessage" class="text-center text-sm text-red-300 mt-2 min-h-[20px]"></div>
+      </form>
+
+      <div class="mt-6 text-center">
+        <p class="text-xs text-white/60">Besoin d'aide ? <a href="#" class="text-white/80 hover:text-white transition-colors">Contactez l'administrateur</a></p>
+      </div>
     </div>
-
-    <form id="loginForm" class="space-y-4">
-
-      <div>
-        <label for="username" class="block text-sm text-slate-300 mb-1">Identifiant</label>
-        <input id="username" name="username" type="text" required
-               class="w-full px-3 py-2 rounded-md bg-slate-700 border border-slate-600 focus:outline-none focus:ring-2 focus:ring-emerald-400" placeholder="Votre nom d'utilisateur" />
-      </div>
-
-      <div>
-        <label for="password" class="block text-sm text-slate-300 mb-1">Mot de passe</label>
-        <input id="password" name="password" type="password" required
-               class="w-full px-3 py-2 rounded-md bg-slate-700 border border-slate-600 focus:outline-none focus:ring-2 focus:ring-emerald-400" placeholder="••••••••" />
-      </div>
-
-      <div class="flex items-center justify-between">
-        <label class="inline-flex items-center text-sm text-slate-300">
-          <input id="remember" type="checkbox" class="form-checkbox h-4 w-4 text-emerald-400 bg-slate-700 rounded" />
-          <span class="ml-2">Se souvenir</span>
-        </label>
-        <a href="#" class="text-sm text-emerald-300 hover:underline">Mot de passe oublié ?</a>
-      </div>
-
-      <div>
-        <button type="submit" class="w-full py-2 rounded-md bg-emerald-500 hover:bg-emerald-600 font-semibold text-slate-900">Se connecter</button>
-      </div>
-
-      <div id="loginMessage" class="text-center text-sm text-rose-400 mt-2"></div>
-    </form>
-
-    <div class="mt-6 text-center text-xs text-slate-400">Besoin d'aide ? Contactez l'administrateur.</div>
   </div>
 
   <script>
