@@ -20,7 +20,7 @@ const adminPool = new Pool({
 });
 
   try {
-    const databaseName = "hitbet";
+    const databaseName = "hitbet777";
     const checkDb = await adminPool.query(
       "SELECT 1 FROM pg_database WHERE datname = $1",
       [databaseName]
