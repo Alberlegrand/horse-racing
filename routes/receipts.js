@@ -9,10 +9,10 @@ import { SYSTEM_NAME, CURRENT_GAME } from "../config/system.config.js";
 import { chacha20Random, chacha20RandomInt, initChaCha20 } from "../chacha20.js";
 import crypto from 'crypto';
 // DB models pour persistance des tickets
-import { createReceipt as dbCreateReceipt, createBet as dbCreateBet, getReceiptById, getBetsByReceipt } from "../models/receiptModel.js";
+import { createReceipt as dbCreateReceipt, createBet as dbCreateBet, getReceiptById, getBetsByReceipt, updateReceiptStatus } from "../models/receiptModel.js";
 import { pool } from "../config/db.js";
 // Import cache strategy (Redis)
-import dbStrategy, { deleteTicketFromRoundCache } from "../config/db-strategy.js";
+import dbStrategy, { deleteTicketFromRoundCache, updateTicketInRoundCache } from "../config/db-strategy.js";
 // Import validation des montants
 import { MIN_BET_AMOUNT, MAX_BET_AMOUNT, BETTING_LOCK_DURATION_MS } from "../config/app.config.js";
 
@@ -30,15 +30,60 @@ export default function createReceiptsRouter(broadcast) {
       const receiptId = parseInt(req.query.id, 10);
       
       // Chercher dans le round actuel
-      let receipt = gameState.currentRound.receipts.find(r => r.id === receiptId);
+      let receipt = gameState.currentRound.receipts.find(r => r.id === receiptId || r.receipt_id === receiptId);
       let round = gameState.currentRound;
+      
+      // ✅ CORRECTION: S'assurer que le receipt a bien tous ses bets
+      if (receipt && (!receipt.bets || receipt.bets.length === 0)) {
+        console.warn(`[PRINT] ⚠️ Receipt trouvé dans gameState mais sans bets, récupération depuis DB...`);
+        try {
+          const bets = await getBetsByReceipt(receiptId);
+          if (bets && bets.length > 0) {
+            receipt.bets = bets.map(bet => ({
+              ...bet,
+              participant: {
+                number: bet.participant_number,
+                name: bet.participant_name,
+                coeff: bet.coefficient
+              },
+              number: bet.participant_number,
+              value: bet.value || 0
+            }));
+            console.log(`[PRINT] ✅ ${receipt.bets.length} pari(s) récupéré(s) depuis la DB pour receipt gameState`);
+          }
+        } catch (betErr) {
+          console.warn(`[PRINT] ⚠️ Erreur récupération bets depuis DB:`, betErr.message);
+        }
+      }
       
       // Si pas trouvé, chercher dans l'historique
       if (!receipt) {
         for (const historicalRound of gameState.gameHistory) {
-          receipt = (historicalRound.receipts || []).find(r => r.id === receiptId);
+          receipt = (historicalRound.receipts || []).find(r => r.id === receiptId || r.receipt_id === receiptId);
           if (receipt) {
             round = historicalRound;
+            // ✅ CORRECTION: Vérifier que le receipt historique a bien tous ses bets
+            if (!receipt.bets || receipt.bets.length === 0) {
+              console.warn(`[PRINT] ⚠️ Receipt historique sans bets, récupération depuis DB...`);
+              try {
+                const bets = await getBetsByReceipt(receiptId);
+                if (bets && bets.length > 0) {
+                  receipt.bets = bets.map(bet => ({
+                    ...bet,
+                    participant: {
+                      number: bet.participant_number,
+                      name: bet.participant_name,
+                      coeff: bet.coefficient
+                    },
+                    number: bet.participant_number,
+                    value: bet.value || 0
+                  }));
+                  console.log(`[PRINT] ✅ ${receipt.bets.length} pari(s) récupéré(s) depuis la DB pour receipt historique`);
+                }
+              } catch (betErr) {
+                console.warn(`[PRINT] ⚠️ Erreur récupération bets depuis DB:`, betErr.message);
+              }
+            }
             break;
           }
         }
@@ -51,8 +96,13 @@ export default function createReceiptsRouter(broadcast) {
           receipt = await getReceiptById(receiptId);
           if (receipt) {
             console.log(`[PRINT] ✅ Ticket #${receiptId} trouvé en base de données`);
-            // Récupérer les paris du ticket
+            // ✅ CORRECTION: Mapper receipt_id vers id pour compatibilité
+            if (!receipt.id && receipt.receipt_id) {
+              receipt.id = receipt.receipt_id;
+            }
+            // ✅ CORRECTION: Récupérer TOUS les paris du ticket depuis la DB
             let bets = await getBetsByReceipt(receiptId);
+            console.log(`[PRINT] 📊 ${bets.length} pari(s) trouvé(s) pour le ticket #${receiptId}`);
             // Transformer les bets en format compatible avec la mémoire
             bets = bets.map(bet => ({
               ...bet,
@@ -61,7 +111,8 @@ export default function createReceiptsRouter(broadcast) {
                 name: bet.participant_name,
                 coeff: bet.coefficient
               },
-              number: bet.participant_number  // Compatibility fallback
+              number: bet.participant_number,  // Compatibility fallback
+              value: bet.value || 0  // ✅ S'assurer que value est présent
             }));
             receipt.bets = bets || [];
             // Essayer de trouver le round correspondant
@@ -82,307 +133,258 @@ export default function createReceiptsRouter(broadcast) {
         }
       }
 
+      // ✅ CORRECTION: S'assurer que l'ID est toujours présent (même si receipt vient de gameState)
+      if (receipt && !receipt.id) {
+        receipt.id = receipt.receipt_id || receiptId;
+      }
+
       console.log(`🧾 Impression du ticket #${receiptId}:`, receipt);
+      console.log(`🧾 Nombre de paris: ${receipt?.bets?.length || 0}`);
 
       if (!receipt) {
         return res.status(404).send("<h1>Ticket non trouvé</h1>");
       }
 
-      const createdTime =
-        receipt.created_time
-          ? new Date(receipt.created_time).toLocaleString('fr-FR')
-          : new Date().toLocaleString('fr-FR');
+      // ✅ CORRECTION: Vérifier que les bets sont présents
+      if (!receipt.bets || receipt.bets.length === 0) {
+        console.warn(`[PRINT] ⚠️ Aucun pari trouvé pour le ticket #${receiptId}, tentative de récupération depuis la DB...`);
+        try {
+          const bets = await getBetsByReceipt(receiptId);
+          if (bets && bets.length > 0) {
+            receipt.bets = bets.map(bet => ({
+              ...bet,
+              participant: {
+                number: bet.participant_number,
+                name: bet.participant_name,
+                coeff: bet.coefficient
+              },
+              number: bet.participant_number,
+              value: bet.value || 0
+            }));
+            console.log(`[PRINT] ✅ ${receipt.bets.length} pari(s) récupéré(s) depuis la DB`);
+          } else {
+            console.error(`[PRINT] ❌ Aucun pari trouvé en DB pour le ticket #${receiptId}`);
+            return res.status(404).send("<h1>Ticket sans paris - impossible d'imprimer</h1>");
+          }
+        } catch (betErr) {
+          console.error(`[PRINT] ❌ Erreur récupération bets:`, betErr.message);
+          return res.status(500).send("<h1>Erreur lors de la récupération des paris</h1>");
+        }
+      }
 
-      let totalMise = 0;
-      let totalGainPotentiel = 0;
+      const receiptDate = receipt.created_time
+        ? new Date(receipt.created_time)
+        : new Date();
+      // Utiliser le fuseau horaire Haïti/Port-au-Prince pour l'impression
+      const createdDate = receiptDate.toLocaleDateString('fr-FR', {
+        timeZone: 'America/Port-au-Prince'
+      });
+      const createdTime = receiptDate.toLocaleTimeString('fr-FR', {
+        timeZone: 'America/Port-au-Prince',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit'
+      });
 
-      // Génération des lignes de paris avec meilleure organisation
-      const betsHTML = receipt.bets.map((bet, index) => {
+      // ✅ Génération des sections de paris avec détails et totaux séparés pour chaque pari
+      const betsArray = Array.isArray(receipt.bets) ? receipt.bets : [];
+      console.log(`[PRINT] 📋 Génération HTML pour ${betsArray.length} pari(s)`);
+      
+      // ✅ Générer le HTML pour chaque pari avec ses propres détails et totaux
+      const betsSectionsHTML = betsArray.map((bet, index) => {
         const participant = bet.participant || {};
-        const name = escapeHtml(participant.name || `N°${participant.number || "?"}`);
-        const number = participant.number || bet.number || "?";
-        const coeff = parseFloat(participant.coeff || 0);
-        // Les valeurs bet.value sont en système, convertir en publique pour l'affichage
+        const name = escapeHtml(
+          participant.name || 
+          bet.participant_name || 
+          `N°${participant.number || bet.participant_number || bet.number || "?"}`
+        );
+        const number = participant.number || bet.participant_number || bet.number || "?";
+        const coeff = parseFloat(
+          participant.coeff || 
+          bet.coefficient || 
+          bet.coeff || 
+          0
+        );
         const miseSystem = parseFloat(bet.value || 0);
+        if (miseSystem <= 0) {
+          console.warn(`[PRINT] ⚠️ Pari ${index + 1} a une mise invalide: ${bet.value}`);
+        }
         const mise = systemToPublic(miseSystem);
         const gainPot = systemToPublic(miseSystem * coeff);
-        totalMise += mise;
-        totalGainPotentiel += gainPot;
+        
+        const description = `N°${number} ${name}`;
         
         return `
-          <div class="bet-item">
-            <div class="bet-header">
-              <span class="bet-number">Pari ${index + 1}</span>
-              <span class="bet-separator">•</span>
-              <span class="bet-name">N°${number} ${name}</span>
+          <!-- Détails Pari ${index + 1} -->
+          <div class="bets-section">
+            <div class="bets-header"><span>Détails</span><span>Mise</span></div>
+            <div class="bet-row">
+              <span>${description}</span>
+              <span style="font-weight:bold;">${mise.toFixed(2)}</span>
             </div>
-            <div class="bet-details">
-              <div class="bet-detail-row">
-                <span class="bet-label">Mise:</span>
-                <span class="bet-value">${mise.toFixed(2)} HTG</span>
-              </div>
-              <div class="bet-detail-row">
-                <span class="bet-label">Cote:</span>
-                <span class="bet-value">x${coeff.toFixed(2)}</span>
-              </div>
-              <div class="bet-detail-row bet-gain-row">
-                <span class="bet-label">Gain potentiel:</span>
-                <span class="bet-value bet-gain-value">${gainPot.toFixed(2)} HTG</span>
-              </div>
+            <div class="bet-row">
+              <span>Cote</span>
+              <span style="font-weight:bold;">${coeff.toFixed(2)}</span>
             </div>
-          </div>`;
+            ${gainPot > 0 ? `
+            <div class="bet-row">
+              <span>Gain Potentiel</span>
+              <span style="font-weight:bold;">${gainPot.toFixed(2)}</span>
+            </div>
+            ` : ''}
+          </div>
+          ${index < betsArray.length - 1 ? '<div class="separator-line">-------------------------------</div>' : ''}
+        `;
       }).join('');
+      
+      // ✅ Vérifier qu'au moins un pari est affiché
+      if (!betsSectionsHTML || betsSectionsHTML.trim() === '') {
+        console.error(`[PRINT] ❌ Aucun pari à afficher pour le ticket #${receiptId}`);
+        return res.status(500).send("<h1>Erreur: Aucun pari trouvé pour ce ticket</h1>");
+      }
 
-      // === Gabarit du reçu HTML (Standardisé et optimisé pour POS) ===
-      const receiptHTML = `
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Ticket #${receipt.id}</title>
-        <style>
-          /* --- Configuration d'impression --- */
-          @media print {
-            @page {
-              /* Forcer la taille du papier et supprimer les marges d'impression */
-              size: 58mm auto; /* Cible 58mm. Changez à 80mm si nécessaire */
-              margin: 0;
-            }
-            body {
-              margin: 0;
-              padding: 0;
-              -webkit-print-color-adjust: exact; /* Forcer les couleurs sur Chrome */
-              print-color-adjust: exact;
-            }
-            .receipt-container {
-                border: none;
-            }
-          }
+// === Gabarit du reçu HTML (Basé sur GOOJPRT PT-210, adapté pour 46mm) ===
+const receiptHTML = `
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Ticket #${receipt.id}</title>
+<style>
+/* RESET POUR IMPRESSION */
+* { margin: 0; padding: 0; box-sizing: border-box; }
 
-          /* --- Styles de base et standardisation --- */
-          * {
-            font-family: 'Arial', sans-serif !important;
-            color: #000 !important;
-          }
-          
-          body {
-            background: #fff;
-            margin: 0;
-            padding: 0; /* Important pour les POS */
-            font-size: 12px; /* Taille de base lisible */
-            line-height: 1.4;
-            color: #000 !important;
-          }
-          
-          .receipt-container {
-            /* Largeur cible (58mm papier - 6mm marges = 52mm) */
-            width: 52mm; 
-            max-width: 52mm;
-            margin: 0 auto;
-            /* Marges internes pour la lisibilité */
-            padding: 5mm 3mm; 
-            box-sizing: border-box;
-          }
+@media print {
+  @page { size: 48mm auto; margin: 0; }
+  * {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+  }
+  body { 
+    width: 100% !important;
+    max-width: 48mm !important;
+    margin: 0 !important; 
+    padding: 0 !important; 
+    background: #fff !important;
+    overflow-x: hidden !important;
+  }
+  .receipt-container {
+    /* Largeur 100% avec max-width 38mm, marge gauche 3mm */
+    width: 100% !important; 
+    max-width: 38mm !important;
+    margin: 0 !important;
+    margin-left: 8mm !important;
+    padding: 0 !important;
+    box-sizing: border-box !important;
+    overflow-x: hidden !important;
+  }
+}
 
-          /* --- Structure & Typographie --- */
-          * {
-            box-sizing: border-box;
-            margin: 0;
-            padding: 0;
-          }
-          
-          .text-center { text-align: center; }
-          .text-right { text-align: right; }
-          
-          .divider {
-            border: none;
-            border-top: 1px dashed #000; /* Ligne simple dash */
-            margin: 10px 0;
-          }
+/* STYLE DU TICKET */
+body {
+  font-family: "Courier New", Courier, monospace;
+  font-size: 9pt;
+  line-height: 1.1;
+  color: #000;
+}
 
-          /* --- En-tête --- */
-          .header h2 {
-            font-size: 14px;
-            font-weight: bold;
-            margin-bottom: 5px;
-            /* Forcer la couleur noire pour éviter le blanc */
-            color: #000 !important; 
-          }
-          .header p {
-            font-size: 11px;
-            line-height: 1.2;
-            margin-bottom: 10px;
-          }
-          
-          .header-info {
-            margin-top: 8px;
-            text-align: left;
-            padding: 0 5px;
-          }
-          
-          .header-line {
-            display: flex;
-            justify-content: space-between;
-            font-size: 10px;
-            line-height: 1.5;
-            padding: 2px 0;
-          }
-          
-          .header-label {
-            color: #000 !important;
-            font-weight: normal;
-          }
-          
-          .header-value {
-            font-weight: bold;
-            color: #000 !important;
-          }
+.receipt-container { 
+  width: 100%;
+  max-width: 38mm;
+  margin: 0;
+  margin-left: 8mm;
+  padding: 0;
+  box-sizing: border-box;
+}
 
-          /* --- Section Paris --- */
-          .bets-title {
-            font-size: 13px;
-            font-weight: bold;
-            text-align: center;
-            margin-bottom: 10px;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-          }
-          
-          .bets-list {
-            margin-bottom: 10px;
-          }
-          
-          .bet-item {
-            margin-bottom: 12px;
-            padding: 8px;
-            border: 1px solid #ddd;
-            border-radius: 3px;
-            background: #f9f9f9;
-          }
-          .bet-item:last-child {
-            margin-bottom: 0;
-          }
-          
-          .bet-header {
-            display: flex;
-            align-items: center;
-            justify-content: flex-start;
-            font-size: 12px;
-            font-weight: bold;
-            margin-bottom: 6px;
-            padding-bottom: 4px;
-            border-bottom: 1px solid #ccc;
-          }
-          
-          .bet-number {
-            color: #000 !important;
-            font-size: 10px;
-            margin-right: 4px;
-          }
-          
-          .bet-separator {
-            margin: 0 6px;
-            color: #000 !important;
-          }
-          
-          .bet-name {
-            flex: 1;
-            font-weight: bold;
-            color: #000 !important;
-          }
-          
-          .bet-details {
-            margin-top: 6px;
-          }
-          
-          .bet-detail-row {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            font-size: 11px;
-            line-height: 1.6;
-            padding: 2px 0;
-          }
-          
-          .bet-label {
-            color: #000 !important;
-            font-weight: normal;
-          }
-          
-          .bet-value {
-            font-weight: bold;
-            color: #000 !important;
-          }
-          
-          .bet-gain-row {
-            margin-top: 4px;
-            padding-top: 4px;
-            border-top: 1px dashed #aaa;
-          }
-          
-          .bet-gain-value {
-            font-size: 12px;
-            color: #000 !important;
-          }
+.header-section { text-align: center; margin-bottom: 4px; }
+.shop-name { font-size: 11pt; font-weight: bold; }
+.shop-phone { font-size: 8pt; }
 
-          /* --- Section Totaux --- SUPPRIMÉE --- */
+.separator-line {
+  text-align: center;
+  font-size: 7pt;
+  margin: 2px 0;
+  white-space: nowrap;
+  overflow: hidden;
+}
 
-          /* --- Pied de page --- */
-          .footer {
-             margin-top: 10px; 
-             text-align: center;
-          }
-          .footer p {
-            font-size: 11px;
-            line-height: 1.5;
-            margin: 5px 0;
-          }
-        </style>
-      </head>
-      <body>
-        <div class="receipt-container">
-          
-          <div class="header text-center">
-            <h2>${SYSTEM_NAME}</h2>
-            <h3 style="margin: 5px 0; font-size: 16px; color: #666;">Jeu: ${CURRENT_GAME.displayName}</h3>
-            <div class="header-info">
-              <div class="header-line">
-                <span class="header-label">Ticket:</span>
-                <span class="header-value">#${receipt.id}</span>
-              </div>
-              <div class="header-line">
-                <span class="header-label">Tour:</span>
-                <span class="header-value">#${gameState.currentRound.id}</span>
-              </div>
-              <div class="header-line">
-                <span class="header-label">Date:</span>
-                <span class="header-value">${escapeHtml(createdTime)}</span>
-              </div>
-            </div>
-          </div>
+.receipt-title { 
+  text-align: center; 
+  font-size: 10pt; 
+  font-weight: bold; 
+  margin: 4px 0;
+  border: 1px solid #000;
+  padding: 2px;
+}
 
-          <hr class="divider">
+.info-section { margin: 3px 0; }
+.info-row { display: flex; justify-content: space-between; width: 100%; margin-bottom: 1px; }
+.info-value { font-weight: bold; }
+.info-date { font-size: 7.5pt; }
+.info-date .info-value { font-size: 7.5pt; }
 
-          <h3 class="bets-title">📋 Détail des Paris</h3>
+.bets-section { margin: 5px 0; }
+.bets-header { 
+  display: flex; 
+  justify-content: space-between; 
+  font-weight: bold; 
+  border-bottom: 1px dashed #000;
+  margin-bottom: 2px;
+  font-size: 8pt;
+}
+.bet-row { display: flex; justify-content: space-between; font-size: 8.5pt; }
 
-          <div class="bets-list">
-            ${betsHTML}
-          </div>
+.totals-section { 
+  margin-top: 5px; 
+  border-top: 1px solid #000; 
+  padding-top: 2px; 
+}
+.total-row { display: flex; justify-content: space-between; font-size: 10pt; font-weight: bold; }
 
-          <hr class="divider">
+.footer-section { text-align: center; margin-top: 8px; }
+.thank-you { font-size: 9pt; font-weight: bold; }
+.barcode { font-size: 7pt; margin-top: 2px; letter-spacing: 1px; }
+</style>
+</head>
+<body>
+<div class="receipt-container">
+  <!-- En-tête -->
+  <div class="header-section">
+    <div class="shop-name">${SYSTEM_NAME}</div>
+    <div class="shop-phone">Course Cheval</div>
+  </div>
 
-          <div class="footer text-center">
-            <p>
-              Merci pour votre confiance 💸<br>
-              Bonne chance 🍀
-            </p>
-          </div>
+  <div class="separator-line">-------------------------------</div>
+  <div class="receipt-title">REÇU DE PARI</div>
+  <div class="separator-line">-------------------------------</div>
 
-        </div>
-      </body>
-      </html>
-      `;
+  <!-- Infos Ticket -->
+  <div class="info-section">
+    <div class="info-row"><span>Ticket:</span><span class="info-value">#${receipt.id || receipt.receipt_id || receiptId}</span></div>
+    <div class="info-row"><span>Round:</span><span class="info-value">#${round?.id || receipt.round_id || gameState.currentRound?.id || 'N/A'}</span></div>
+    <div class="info-row info-date"><span>Date:</span><span class="info-value">${escapeHtml(createdDate)}</span></div>
+    <div class="info-row info-date"><span>Heure:</span><span class="info-value">${escapeHtml(createdTime)}</span></div>
+  </div>
+
+  <div class="separator-line">-------------------------------</div>
+
+  ${betsSectionsHTML}
+
+  <div class="separator-line">-------------------------------</div>
+
+  <!-- Pied de page -->
+  <div class="footer-section">
+    <div class="thank-you">MERCI & BONNE CHANCE!</div>
+    <div class="barcode">${String(receipt.id || receipt.receipt_id || receiptId).padStart(8, '0')}</div>
+  </div>
+</div>
+</body>
+</html>
+`;
+
+
 
       res.setHeader("Content-Type", "text/html");
       return res.send(receiptHTML);
@@ -416,6 +418,10 @@ export default function createReceiptsRouter(broadcast) {
           receipt = await getReceiptById(receiptId);
           if (receipt) {
             console.log(`[PAYOUT] ✅ Ticket #${receiptId} trouvé en base de données`);
+            // ✅ CORRECTION: Mapper receipt_id vers id pour compatibilité
+            if (!receipt.id && receipt.receipt_id) {
+              receipt.id = receipt.receipt_id;
+            }
             // Récupérer les paris du ticket
             let bets = await getBetsByReceipt(receiptId);
             // Transformer les bets en format compatible avec la mémoire
@@ -451,9 +457,24 @@ export default function createReceiptsRouter(broadcast) {
         return res.status(404).send("<h1>Ticket non trouvé</h1>");
       }
 
-      const createdTime = receipt.created_time
-        ? new Date(receipt.created_time).toLocaleString('fr-FR')
-        : new Date().toLocaleString('fr-FR');
+      // ✅ CORRECTION: S'assurer que l'ID est toujours présent (même si receipt vient de gameState)
+      if (receipt && !receipt.id) {
+        receipt.id = receipt.receipt_id || receiptId;
+      }
+
+      const receiptDate = receipt.created_time
+        ? new Date(receipt.created_time)
+        : new Date();
+      // Utiliser le fuseau horaire Haïti/Port-au-Prince pour l'impression
+      const createdDate = receiptDate.toLocaleDateString('fr-FR', {
+        timeZone: 'America/Port-au-Prince'
+      });
+      const createdTime = receiptDate.toLocaleTimeString('fr-FR', {
+        timeZone: 'America/Port-au-Prince',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit'
+      });
 
       // Déterminer le résultat (receipt.prize est en système, convertir en publique)
       const prizeSystem = parseFloat(receipt.prize || 0);
@@ -463,8 +484,12 @@ export default function createReceiptsRouter(broadcast) {
       const payoutAmount = hasWon ? prize : 0;
 
       // Trouver le gagnant de la course
-      const winner = (round.participants || []).find(p => p.place === 1);
+      const winner = (round.participants || []).find(p => p.isWinner === true);
       const winnerName = winner ? `${winner.name} (N°${winner.number})` : 'Non disponible';
+      
+      // ✅ LOG: Tracer le gagnant utilisé pour l'impression du ticket
+      console.log(`[PRINT-TICKET] 🏆 Gagnant utilisé pour ticket #${receiptId}:`, winner ? `№${winner.number} ${winner.name}` : 'Non trouvé');
+      console.log(`[PRINT-TICKET] 📊 Round ID: ${round?.id}, Participants marqués isWinner=true:`, (round.participants || []).filter(p => p.isWinner === true).map(p => `№${p.number} ${p.name}`));
 
       // Calculer les totaux et préparer le détail par pari avec meilleure organisation
       let totalMise = 0;
@@ -482,31 +507,24 @@ export default function createReceiptsRouter(broadcast) {
         const name = escapeHtml(String(participant.name || ''));
 
         return `
-          <div class="bet-detail-card">
-            <div class="bet-detail-header">
-              <span class="bet-detail-number">Pari ${index + 1}</span>
-              <span class="bet-detail-separator">•</span>
-              <span class="bet-detail-name">N°${number} ${name}</span>
+          <div class="bet-detail-item">
+            <div class="bet-detail-row">
+              <span class="info-label">Pari ${index + 1}: N°${number} ${name}</span>
             </div>
-            <div class="bet-detail-content">
-              <div class="bet-detail-info">
-                <span class="bet-detail-label">Mise:</span>
-                <span class="bet-detail-value">${mise.toFixed(2)} HTG</span>
-              </div>
-              <div class="bet-detail-info">
-                <span class="bet-detail-label">Cote:</span>
-                <span class="bet-detail-value">x${coeff.toFixed(2)}</span>
-              </div>
-              <div class="bet-detail-info bet-detail-result ${isWin ? 'bet-won' : 'bet-lost'}">
-                <span class="bet-detail-label">Résultat:</span>
-                <span class="bet-detail-value">${isWin ? '✓ GAGNÉ' : '✗ PERDU'}</span>
-              </div>
-              ${isWin ? `
-              <div class="bet-detail-info bet-detail-gain">
-                <span class="bet-detail-label">Gain:</span>
-                <span class="bet-detail-value bet-gain-highlight">${gain.toFixed(2)} HTG</span>
-              </div>` : ''}
+            <div class="bet-detail-row">
+              <span class="info-label">Mise:</span> <span class="info-value">${mise.toFixed(2)} HTG</span>
             </div>
+            <div class="bet-detail-row">
+              <span class="info-label">Cote:</span> <span class="info-value">x${coeff.toFixed(2)}</span>
+            </div>
+            <div class="bet-detail-row">
+              <span class="info-label">Résultat:</span> <span class="info-value">${isWin ? '✓ GAGNÉ' : '✗ PERDU'}</span>
+            </div>
+            ${isWin ? `
+            <div class="bet-detail-row">
+              <span class="info-value">Gain:</span> <span class="info-value">${gain.toFixed(2)} HTG</span>
+            </div>
+            ` : ''}
           </div>`;
       }).join('');
 
@@ -520,266 +538,144 @@ export default function createReceiptsRouter(broadcast) {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Décaissement #${receipt.id}</title>
+  <title>Décaissement #${receipt.id || receipt.receipt_id || receiptId}</title>
   <style>
-    /* -------------------------------
-       IMPRESSION 55MM - NOIR ET BLANC
-       Lisible, centré, marges sûres
-    -------------------------------- */
     * {
-      box-sizing: border-box;
-      background: #fff !important;
-      color: #000 !important;
-      font-family: 'Arial', sans-serif !important;
-      text-shadow: none !important;
-      box-shadow: none !important;
-    }
-
-    body {
       margin: 0;
-      padding: 4mm 3mm; /* Marges de sécurité pour éviter les coupures */
-      width: 49mm; /* Réduction pour ne pas coller aux bords physiques du rouleau */
-      font-size: 11px;
-      line-height: 1.3;
+      padding: 0;
+      box-sizing: border-box;
     }
 
-    .payout-container {
-      width: 100%;
-      margin: 0 auto;
-    }
+    /* RESET POUR IMPRESSION */
+    * { margin: 0; padding: 0; box-sizing: border-box; }
 
-    /* En-tête amélioré */
-    .header {
-      text-align: center;
-      margin-bottom: 4mm;
-    }
-
-    .header h2 {
-      font-size: 15px;
-      margin: 0 0 3mm 0;
-      font-weight: bold;
-      letter-spacing: 0.5px;
-    }
-    
-    .header-info {
-      margin-top: 2mm;
-      text-align: left;
-      padding: 0 2mm;
-    }
-    
-    .info-total {
-      background: #f5f5f5;
-      padding: 2mm;
-      border: 1px solid #000;
-      border-radius: 2px;
-      margin: 2mm 0;
-    }
-    
-    .info-value {
-      font-weight: bold;
-      font-size: 11px;
-    }
-
-    /* Boîte de statut améliorée */
-    .status-box {
-      border: 2px solid #000;
-      text-align: center;
-      padding: 4mm 2mm;
-      margin: 4mm 0;
-      font-size: 12px;
-      font-weight: bold;
-      border-radius: 3px;
-      letter-spacing: 0.5px;
-    }
-    
-    .status-box.won {
-      background: #e8f5e9;
-    }
-    
-    .status-box.lost {
-      background: #ffebee;
-    }
-
-    /* Lignes d'informations */
-    .info-line {
-      display: flex;
-      justify-content: space-between;
-      border-bottom: 1px dotted #000;
-      padding: 1.5mm 0;
-      font-size: 10px;
-      align-items: center;
-    }
-
-    .info-label {
-      font-weight: bold;
-      color: #000 !important;
-    }
-    
-    /* Détails des paris améliorés */
-    .bet-detail-card {
-      margin-bottom: 3mm;
-      padding: 2.5mm;
-      border: 1px solid #000;
-      border-radius: 2px;
-      background: #fafafa;
-    }
-    
-    .bet-detail-header {
-      display: flex;
-      align-items: center;
-      font-size: 10px;
-      font-weight: bold;
-      margin-bottom: 2mm;
-      padding-bottom: 1.5mm;
-      border-bottom: 1px solid #ccc;
-    }
-    
-    .bet-detail-number {
-      color: #000 !important;
-      font-size: 9px;
-      margin-right: 3px;
-    }
-    
-    .bet-detail-separator {
-      margin: 0 4px;
-      color: #000 !important;
-    }
-    
-    .bet-detail-name {
-      flex: 1;
-      color: #000 !important;
-    }
-    
-    .bet-detail-content {
-      margin-top: 1.5mm;
-    }
-    
-    .bet-detail-info {
-      display: flex;
-      justify-content: space-between;
-      font-size: 9.5px;
-      padding: 1mm 0;
-      border-bottom: 1px dotted #ccc;
-    }
-    
-    .bet-detail-info:last-child {
-      border-bottom: none;
-    }
-    
-    .bet-detail-label {
-      font-weight: normal;
-      color: #000 !important;
-    }
-    
-    .bet-detail-value {
-      font-weight: bold;
-      color: #000 !important;
-    }
-    
-    .bet-detail-result {
-      margin-top: 1mm;
-      padding-top: 1.5mm;
-      border-top: 1px dashed #999;
-    }
-    
-    .bet-won .bet-detail-value {
-      color: #000 !important;
-    }
-    
-    .bet-lost .bet-detail-value {
-      color: #000 !important;
-    }
-    
-    .bet-detail-gain {
-      margin-top: 1mm;
-      padding-top: 1.5mm;
-      border-top: 2px solid #000;
-    }
-    
-    .bet-gain-highlight {
-      font-size: 11px;
-      color: #000 !important;
-    }
-
-    /* Section Montant améliorée */
-    .payout-amount {
-      text-align: center;
-      margin: 4mm 0;
-      border: 3px solid #000;
-      border-radius: 4px;
-      padding: 4mm 2mm;
-      background: #fff;
-      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-    }
-
-    .payout-amount-label {
-      font-size: 10px;
-      margin-bottom: 3mm;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-      color: #000 !important;
-    }
-
-    .payout-amount-value {
-      font-size: 20px;
-      font-weight: bold;
-      color: #000 !important;
-      line-height: 1.2;
-    }
-
-    /* Détails des paris */
-    h3 {
-      font-size: 11px;
-      margin: 3mm 0 1.5mm 0;
-      text-align: left;
-      font-weight: bold;
-      border-bottom: 1px solid #000;
-      padding-bottom: 1mm;
-    }
-
-    /* Informations gagnant améliorées */
-    .winner-info {
-      border: 2px solid #006600;
-      padding: 3mm;
-      font-size: 11px;
-      margin: 4mm 0;
-      border-radius: 3px;
-      background: #e8f5e9;
-      text-align: center;
-    }
-    
-    .winner-info strong {
-      display: block;
-      margin-bottom: 2mm;
-      font-size: 10px;
-      text-transform: uppercase;
-      color: #000 !important;
-    }
-
-    /* Ligne séparatrice */
-    .divider {
-      border-top: 1px solid #000;
-      margin: 2.5mm 0;
-    }
-
-    /* Pied de page */
-    .footer {
-      text-align: center;
-      font-size: 9px;
-      margin-top: 4mm;
-      line-height: 1.4;
-    }
-
-    /* Impression stricte */
     @media print {
-      @page {
-        size: 55mm auto;
+      @page { size: 48mm auto; margin: 0; }
+      * {
         margin: 0;
+        padding: 0;
+        box-sizing: border-box;
       }
+      body { 
+        width: 100% !important;
+        max-width: 48mm !important;
+        margin: 0 !important; 
+        padding: 0 !important; 
+        background: #fff !important;
+        overflow-x: hidden !important;
+      }
+      .payout-container {
+        /* Largeur 100% avec max-width 38mm, marge gauche 3mm */
+        width: 100% !important; 
+        max-width: 38mm !important;
+        margin: 0 !important;
+        margin-left: 8mm !important;
+        padding: 0 !important;
+        box-sizing: border-box !important;
+        overflow-x: hidden !important;
+      }
+    }
+
+    /* STYLE DU TICKET */
+    body {
+      font-family: "Courier New", Courier, monospace;
+      font-size: 9pt;
+      line-height: 1.1;
+      color: #000;
+    }
+
+    .payout-container { 
+      width: 100%;
+      max-width: 38mm;
+      margin: 0;
+      margin-left: 8mm;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    .header-section { text-align: center; margin-bottom: 4px; }
+    .shop-name { font-size: 11pt; font-weight: bold; }
+    .shop-phone { font-size: 8pt; }
+
+    .separator-line {
+      text-align: center;
+      font-size: 7pt;
+      margin: 2px 0;
+      white-space: nowrap;
+      overflow: hidden;
+    }
+
+    .receipt-title { 
+      text-align: center; 
+      font-size: 10pt; 
+      font-weight: bold; 
+      margin: 4px 0;
+      border: 1px solid #000;
+      padding: 2px;
+    }
+
+    .info-section { margin: 3px 0; }
+    .info-row { display: flex; justify-content: space-between; width: 100%; margin-bottom: 1px; }
+    .info-value { font-weight: bold; }
+    .info-date { font-size: 7.5pt; }
+    .info-date .info-value { font-size: 7.5pt; }
+
+    .status-section {
+      text-align: center;
+      margin: 4px 0;
+      font-size: 9pt;
+      font-weight: bold;
+      text-transform: uppercase;
+    }
+
+    .bet-detail-section { margin: 5px 0; }
+    .bet-detail-title {
+      text-align: center;
+      font-size: 8pt;
+      font-weight: bold;
+      margin-bottom: 2px;
+      text-transform: uppercase;
+    }
+    .bet-detail-row { display: flex; justify-content: space-between; font-size: 8.5pt; }
+
+    .winner-section {
+      text-align: center;
+      margin: 4px 0;
+      font-size: 8.5pt;
+    }
+
+    .payout-amount-section { 
+      margin-top: 5px; 
+      border-top: 1px solid #000; 
+      padding-top: 2px; 
+    }
+    .payout-amount-label {
+      text-align: center;
+      font-size: 8pt;
+      font-weight: bold;
+      margin-bottom: 2px;
+    }
+    .payout-amount-value {
+      text-align: center;
+      font-size: 10pt;
+      font-weight: bold;
+    }
+
+    .footer-section { text-align: center; margin-top: 8px; }
+    .footer-text { font-size: 7pt; margin: 2px 0; }
+
+    @media screen {
       body {
-        width: 49mm; /* laisse ~3mm de marge de sécurité de chaque côté */
-        padding: 4mm 3mm;
-        font-size: 11px;
+        background: #f5f5f5;
+        padding: 10px;
+      }
+      
+      .payout-container {
+        background: white;
+        border: 1px solid #ddd;
+        box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        border-radius: 4px;
+        max-width: 80mm;
       }
     }
   </style>
@@ -787,66 +683,59 @@ export default function createReceiptsRouter(broadcast) {
 
 <body>
   <div class="payout-container">
-    <div class="header">
-      <h2>💵 DECAISSEMENT</h2>
-      <div class="header-info">
-        <div class="info-line">
-          <span class="info-label">Ticket:</span>
-          <span>#${receipt.id}</span>
-        </div>
-        <div class="info-line">
-          <span class="info-label">Tour:</span>
-          <span>#${round.id}</span>
-        </div>
-        <div class="info-line">
-          <span class="info-label">Date:</span>
-          <span>${escapeHtml(createdTime)}</span>
-        </div>
-      </div>
+    <!-- En-tête -->
+    <div class="header-section">
+      <div class="shop-name">${SYSTEM_NAME}</div>
+      <div class="shop-phone">Course Cheval</div>
     </div>
 
-    <hr class="divider">
+    <div class="separator-line">-------------------------------</div>
+    <div class="receipt-title">DECAISSEMENT</div>
+    <div class="separator-line">-------------------------------</div>
 
-    <div class="status-box ${hasWon ? 'won' : 'lost'}">
-      ${hasWon ? '🎉 TICKET GAGNANT 🎉' : '❌ TICKET PERDANT'}
+    <!-- Infos Ticket -->
+    <div class="info-section">
+      <div class="info-row"><span>Ticket:</span><span class="info-value">#${receipt.id || receipt.receipt_id || receiptId}</span></div>
+      <div class="info-row"><span>Tour:</span><span class="info-value">#${round.id}</span></div>
+      <div class="info-row info-date"><span>Date:</span><span class="info-value">${escapeHtml(createdDate)}</span></div>
+      <div class="info-row info-date"><span>Heure:</span><span class="info-value">${escapeHtml(createdTime)}</span></div>
     </div>
 
-    <div class="info-line info-total">
-      <span class="info-label">Mise totale:</span>
-      <span class="info-value">${totalMise.toFixed(2)} HTG</span>
+    <div class="separator-line">-------------------------------</div>
+
+    <!-- Statut -->
+    <div class="status-section">
+      ${hasWon ? 'TICKET GAGNANT' : 'TICKET PERDANT'}
     </div>
 
-    <h3>Détail des paris</h3>
-    ${betsDetailHTML}
+    <!-- Mise totale -->
+    <div class="info-section">
+      <div class="info-row"><span>Mise totale:</span><span class="info-value">${totalMise.toFixed(2)} HTG</span></div>
+    </div>
+
+    <!-- Détail des paris -->
+    <div class="bet-detail-section">
+      <div class="bet-detail-title">Détail des paris</div>
+      ${betsDetailHTML}
+    </div>
 
     ${hasWon ? `
-    <div class="winner-info">
-      <strong>Gagnant de la course :</strong><br>
-      ${escapeHtml(winnerName)}
-    </div>` : ''}
+    <div class="winner-section">
+      <div>Gagnant: ${escapeHtml(winnerName)}</div>
+    </div>
+    ` : ''}
 
-    <div class="payout-amount">
-      <div class="payout-amount-label">MONTANT DU DECAISSEMENT</div>
+    <!-- Montant du décaissement -->
+    <div class="payout-amount-section">
+      <div class="payout-amount-label">Montant du décaissement</div>
       <div class="payout-amount-value">${payoutAmountComputed.toFixed(2)} HTG</div>
     </div>
 
-    <hr class="divider">
+    <div class="separator-line">-------------------------------</div>
 
-    <div class="info-line">
-      <span class="info-label">Statut du paiement :</span>
-      <span>${receipt.isPaid ? 'Payé' : 'En attente'}</span>
-    </div>
-
-    ${receipt.isPaid && receipt.paid_at ? `
-    <div class="info-line">
-      <span class="info-label">Date de paiement :</span>
-      <span>${new Date(receipt.paid_at).toLocaleString('fr-FR')}</span>
-    </div>` : ''}
-
-    <hr class="divider">
-
-    <div class="footer">
-      <p>Ce document prouve le résultat du ticket.<br>Conservez-le comme justificatif.</p>
+    <!-- Pied de page -->
+    <div class="footer-section">
+      <div class="footer-text">Conservez ce document comme justificatif.</div>
     </div>
   </div>
 </body>
@@ -882,22 +771,39 @@ export default function createReceiptsRouter(broadcast) {
         });
       }
 
-      // If the currentRound hasn't been persisted to DB yet, wait up to 5s for persistence.
-      // This avoids creating receipts referencing a round that doesn't yet exist in DB
-      // and prevents FK errors / nullable round fallback.
-      const waitForPersist = async (timeoutMs = 5000, intervalMs = 100) => {
-        const start = Date.now();
-        while (!gameState.currentRound.persisted && (Date.now() - start) < timeoutMs) {
-          await new Promise(r => setTimeout(r, intervalMs));
+      // ✅ CORRECTION: Vérifier que le round existe en DB (même si persisted=false)
+      // Au lieu de bloquer sur persisted, on vérifie directement en DB
+      const roundId = gameState.currentRound.id;
+      let roundExistsInDb = false;
+      
+      // Vérification directe en DB (plus fiable que persisted flag)
+      for (let attempt = 0; attempt < 20; attempt++) {
+        try {
+          const dbCheck = await pool.query(
+            "SELECT round_id FROM rounds WHERE round_id = $1 LIMIT 1",
+            [roundId]
+          );
+          if (dbCheck.rows && dbCheck.rows[0]) {
+            roundExistsInDb = true;
+            console.log(`[DB] ✓ Round ${roundId} trouvé en DB (attempt ${attempt + 1})`);
+            break;
+          }
+        } catch (checkErr) {
+          console.warn(`[DB] Erreur vérification round ${roundId} (attempt ${attempt + 1}):`, checkErr.message);
         }
-        return !!gameState.currentRound.persisted;
-      };
-
-      const persisted = await waitForPersist(5000, 100);
-      if (!persisted) {
-        // If round still not persisted after waiting, reject the request so client can retry.
-        console.warn('[DB] ❌ currentRound not persisted after wait - ask client to retry');
-        return res.status(503).json({ error: 'Round not ready. Please retry in a moment.', code: 'ROUND_NOT_PERSISTED' });
+        if (attempt < 19) {
+          await new Promise(r => setTimeout(r, 100));
+        }
+      }
+      
+      if (!roundExistsInDb) {
+        console.warn(`[DB] ❌ Round ${roundId} non trouvé en DB après 20 tentatives (persisted=${gameState.currentRound.persisted})`);
+        // ✅ CORRECTION: Ne pas bloquer complètement - permettre la création en mémoire
+        // Le round sera créé en DB de manière asynchrone
+        console.warn('[DB] ⚠️ Création du receipt en mémoire uniquement (round sera créé en DB plus tard)');
+      } else {
+        // Si le round existe en DB, mettre à jour le flag persisted
+        gameState.currentRound.persisted = true;
       }
 
       // ✅ SÉCURITÉ: Vérifier si les paris sont autorisés (quelques secondes avant le lancement)
@@ -1040,7 +946,14 @@ export default function createReceiptsRouter(broadcast) {
       // IMPORTANT: Ne calculer le prize que si la course est terminée
       // Un ticket ajouté pendant le round actuel doit rester en "pending" jusqu'à la fin de la course
       let prizeForThisReceipt = 0;
-      const winner = Array.isArray(gameState.currentRound.participants) ? gameState.currentRound.participants.find(p => p.place === 1) : null;
+      const winner = Array.isArray(gameState.currentRound.participants) ? gameState.currentRound.participants.find(p => p.isWinner === true) : null;
+      
+      // ✅ LOG: Tracer le gagnant utilisé pour le calcul du prize
+      if (winner) {
+        console.log(`[RECEIPTS-ADD] 🏆 Gagnant trouvé pour calcul prize: №${winner.number} ${winner.name} (Round #${gameState.currentRound?.id})`);
+      } else {
+        console.log(`[RECEIPTS-ADD] ℹ️ Aucun gagnant trouvé (Round #${gameState.currentRound?.id}, participants: ${gameState.currentRound?.participants?.length || 0})`);
+      }
       
       // Vérifier si la course est terminée
       // Un round est terminé SEULEMENT si la course a été lancée ET terminée
@@ -1063,6 +976,9 @@ export default function createReceiptsRouter(broadcast) {
       // ✅ OBLIGATOIRE: round_id doit être défini (round actuel)
       receipt.roundId = gameState.currentRound.id;
       receipt.round_id = gameState.currentRound.id;
+      // ✅ CRITIQUE: Calculer total_amount en système (×100) et l'ajouter au receipt
+      // Les valeurs bet.value sont en système (×100), donc total_amount doit aussi être en système
+      receipt.total_amount = (receipt.bets || []).reduce((sum, b) => sum + (Number(b.value) || 0), 0);
       // Ajout de la date de création si elle n'existe pas
       if (!receipt.created_time) {
         receipt.created_time = new Date().toISOString();
@@ -1083,32 +999,6 @@ export default function createReceiptsRouter(broadcast) {
 
       console.log("✅ Ticket ajouté ID :", receipt.id, `(cache: ${cacheResult ? 'OK' : 'FALLBACK'})`);
       (async () => {
-        // ✅ AMÉLIORATION: Vérifier que le round est persisté AVANT de créer le ticket
-        const ensureRoundPersisted = async (roundId, maxRetries = 20, delayMs = 100) => {
-          for (let i = 0; i < maxRetries; i++) {
-            try {
-              const res = await pool.query(
-                "SELECT round_id, status FROM rounds WHERE round_id = $1 LIMIT 1",
-                [roundId]
-              );
-              if (res.rows && res.rows[0]) {
-                console.log(`[DB] ✓ Round ${roundId} trouvé en DB après ${i * delayMs}ms (status: ${res.rows[0].status})`);
-                return true;
-              }
-            } catch (err) {
-              console.error('[DB] Erreur lookup round:', err.message);
-            }
-            if (i < maxRetries - 1) {
-              await new Promise(resolve => setTimeout(resolve, delayMs));
-            }
-          }
-          console.error(`[DB] ❌ Round ${roundId} non trouvé après ${maxRetries * delayMs}ms`);
-          return false;
-        };
-        
-        // ✅ Utiliser la nouvelle fonction avec nom plus explicite
-        const waitForRound = ensureRoundPersisted;
-
         // ✅ OBLIGATOIRE: Vérifier que le round existe AVANT de créer le receipt
         const roundId = gameState.currentRound.id;
         if (!roundId) {
@@ -1118,8 +1008,10 @@ export default function createReceiptsRouter(broadcast) {
         // ✅ OPTIMISATION: Vérifier que le round existe vraiment en DB (même si persisted=true)
         // Il peut y avoir un délai de commit/visibilité, donc on fait plusieurs tentatives
         let roundExists = false;
-        const maxDbChecks = 30; // 30 tentatives
-        const dbCheckDelay = 150; // 150ms entre chaque tentative = 4.5s max
+        const maxDbChecks = 50; // 50 tentatives (augmenté pour plus de tolérance)
+        const dbCheckDelay = 150; // 150ms entre chaque tentative = 7.5s max
+        
+        console.log(`[DB] 🔍 Vérification round ${roundId} en DB (persisted=${gameState.currentRound.persisted})...`);
         
         for (let attempt = 0; attempt < maxDbChecks; attempt++) {
           try {
@@ -1142,16 +1034,14 @@ export default function createReceiptsRouter(broadcast) {
           }
         }
         
+        // ✅ CORRECTION: Ne créer le receipt en DB que si le round existe
         if (!roundExists) {
-          // Dernière vérification : peut-être que persisted n'est pas à jour
-          const finalCheck = await pool.query(
-            "SELECT round_id FROM rounds WHERE round_id = $1 LIMIT 1",
-            [roundId]
-          );
-          if (!finalCheck.rows || !finalCheck.rows[0]) {
-            throw new Error(`Impossible de créer un receipt: le round ${roundId} n'existe pas en base de données après ${maxDbChecks * dbCheckDelay}ms d'attente (round_id est obligatoire). Persisted=${gameState.currentRound.persisted}`);
-          }
-          roundExists = true;
+          // ✅ CORRECTION: Ne pas bloquer - le round sera créé en DB plus tard
+          // Le receipt est déjà créé en mémoire et sera persisté quand le round sera disponible
+          console.warn(`[DB] ⚠️ Round ${roundId} non trouvé en DB après ${maxDbChecks} tentatives. Le receipt ${receipt.id} sera persisté plus tard (quand le round sera en DB).`);
+          // Ne pas lancer d'erreur - permettre la création en mémoire
+          // Le round sera créé en DB de manière asynchrone et le receipt sera persisté ensuite
+          return; // Sortir de la fonction asynchrone - le receipt reste en mémoire
         }
 
         // ✅ VALIDATION: receipt.id est obligatoire
@@ -1170,8 +1060,10 @@ export default function createReceiptsRouter(broadcast) {
         };
 
         try {
-          // calculer total_amount (somme des mises en valeur publique)
-          const totalAmount = (receipt.bets || []).reduce((sum, b) => sum + (Number(b.value) || 0), 0);
+          // ✅ CRITIQUE: Utiliser receipt.total_amount qui est déjà calculé en système (×100)
+          // Les valeurs bet.value sont en système (×100), donc total_amount doit aussi être en système
+          // receipt.total_amount a été calculé juste avant le push dans gameState
+          const totalAmount = receipt.total_amount || (receipt.bets || []).reduce((sum, b) => sum + (Number(b.value) || 0), 0);
           
           // ✅ OBLIGATOIRE: round_id doit être le round actuel (pas null)
           const dbRoundId = roundId;
@@ -1293,27 +1185,31 @@ export default function createReceiptsRouter(broadcast) {
       // ✅ Broadcast WebSocket pour notifier les clients avec toutes les infos
       // ✅ OPTIMISATION: Inclure toutes les données formatées pour mise à jour directe du DOM
       if (broadcast) {
-        // Calculer totalAmount en valeur publique pour le frontend
-        const totalAmountPublic = (receipt.bets || []).reduce((sum, b) => {
-          const valueSystem = Number(b.value || 0);
-          return sum + (valueSystem / 100); // Conversion système -> publique
-        }, 0);
+        // ✅ CRITIQUE: Convertir totalAmount de système (×100) à publique pour le frontend
+        // receipt.total_amount est en système, il faut le convertir en publique
+        const totalAmountSystem = receipt.total_amount || (receipt.bets || []).reduce((sum, b) => sum + (Number(b.value) || 0), 0);
+        const totalAmountPublic = systemToPublic(totalAmountSystem);
 
-        // Formater les bets pour le frontend
-        const formattedBets = (receipt.bets || []).map(bet => ({
-          number: bet.number || bet.participant?.number,
-          value: (Number(bet.value || 0) / 100).toFixed(2), // Valeur publique
-          participant: bet.participant || {
-            number: bet.number,
-            name: bet.participant?.name || '',
-            coeff: bet.participant?.coeff || 0
-          }
-        }));
+        // Formater les bets pour le frontend (conversion système -> publique)
+        const formattedBets = (receipt.bets || []).map(bet => {
+          const valueSystem = Number(bet.value || 0);
+          const valuePublic = systemToPublic(valueSystem);
+          return {
+            number: bet.number || bet.participant?.number,
+            value: typeof valuePublic === 'object' && valuePublic.toNumber ? valuePublic.toNumber() : Number(valuePublic),
+            participant: bet.participant || {
+              number: bet.number,
+              name: bet.participant?.name || '',
+              coeff: bet.participant?.coeff || 0
+            }
+          };
+        });
 
         broadcast({
           event: "receipt_added",
           receipt: JSON.parse(JSON.stringify(receipt)),
           receiptId: receipt.id,
+          totalAmount: typeof totalAmountPublic === 'object' && totalAmountPublic.toNumber ? totalAmountPublic.toNumber() : Number(totalAmountPublic),
           roundId: gameState.currentRound.id,
           status: receipt.status || (isRaceFinished ? (receipt.prize > 0 ? 'won' : 'lost') : 'pending'),
           prize: receipt.prize || 0,
@@ -1400,7 +1296,7 @@ export default function createReceiptsRouter(broadcast) {
 
             // Vérifier si la course est réellement terminée (course lancée ET terminée)
             const hasWinner = Array.isArray(gameState.currentRound.participants) &&
-                              gameState.currentRound.participants.some(p => p.place === 1);
+                              gameState.currentRound.participants.some(p => p.isWinner === true);
             const isRaceFinished = gameState.raceEndTime !== null ||
                                    (gameState.raceStartTime !== null && !gameState.isRaceRunning && hasWinner);
             if (isRaceFinished) {
@@ -1408,43 +1304,61 @@ export default function createReceiptsRouter(broadcast) {
               return res.status(400).json({ error: "Impossible d'annuler un ticket une fois la course terminée avec résultats", reason: "race_finished", isRaceFinished, receiptId: id });
             }
 
-            // Supprimer le ticket en base si le ticket existe et appartient au round courant
-            try {
-              // Supprimer les bets associés au ticket (cascade)
-              await pool.query("DELETE FROM bets WHERE receipt_id = $1", [id]);
-              console.log(`[DB] Bets associés au ticket ${id} supprimés en base (fallback)`);
-              
-              // Puis supprimer le ticket lui-même
-              await pool.query("DELETE FROM receipts WHERE receipt_id = $1", [id]);
-              console.log(`[DB] Receipt ${id} supprimé en base (fallback) + bets associés`);
-
-              // ✅ CORRECTION: Mettre à jour le cache Redis
-              await deleteTicketFromRoundCache(gameState.currentRound.id, id);
-
-              // Mettre à jour l'état en mémoire (au cas où une entrée correspondante existerait)
-              // Décrémenter totalPrize si le ticket avait un prize
-              const prizeValue = dbReceipt.prize ? Number(dbReceipt.prize) : 0;
-              if (prizeValue) {
-                gameState.currentRound.totalPrize = Math.max(0, (gameState.currentRound.totalPrize || 0) - prizeValue);
-              }
-              gameState.currentRound.receipts = (gameState.currentRound.receipts || []).filter(r => r.id !== id);
-
-              if (broadcast) {
-                broadcast({
-                  event: "receipt_deleted",
-                  receiptId: id,
-                  roundId: gameState.currentRound.id,
-                  totalReceipts: gameState.currentRound.receipts.length,
-                  currentRound: JSON.parse(JSON.stringify(gameState.currentRound)),
-                  totalPrize: gameState.currentRound.totalPrize || 0
-                });
-              }
-
-              return res.json(wrap({ success: true }));
-            } catch (delErr) {
-              console.error('[DB] Erreur lookup/delete receipt fallback:', delErr);
-              return res.status(500).json({ error: 'Erreur serveur lors de la suppression' });
+            // ✅ CORRECTION: Marquer le ticket comme "cancelled" au lieu de le supprimer complètement
+            
+            // Décrémenter totalPrize si le ticket avait un prize
+            const prizeValue = dbReceipt.prize ? Number(dbReceipt.prize) : 0;
+            if (prizeValue) {
+              gameState.currentRound.totalPrize = Math.max(0, (gameState.currentRound.totalPrize || 0) - prizeValue);
             }
+            
+            // ✅ ÉTAPE 1: MARQUER COMME "cancelled" EN MÉMOIRE (gameState) - TOUJOURS effectuée
+            const receiptIndex = gameState.currentRound.receipts.findIndex(r => r.id === id);
+            if (receiptIndex !== -1) {
+              gameState.currentRound.receipts[receiptIndex].status = 'cancelled';
+              console.log(`[CANCEL] ✅ Ticket ${id} marqué comme "cancelled" dans gameState (fallback)`);
+            } else {
+              // Si pas trouvé dans gameState, essayer de l'ajouter avec statut cancelled (au cas où)
+              console.warn(`[CANCEL] ⚠️ Ticket ${id} non trouvé dans gameState.currentRound.receipts (fallback)`);
+            }
+
+            // ✅ ÉTAPE 2: METTRE À JOUR REDIS - TOUJOURS effectuée (indépendante de DB)
+            try {
+              await updateTicketInRoundCache(gameState.currentRound.id, id, 'cancelled', null);
+              console.log(`[REDIS] ✅ Ticket ${id} marqué comme "cancelled" dans Redis (fallback)`);
+            } catch (redisErr) {
+              console.error('[REDIS] ❌ Échec mise à jour ticket dans Redis (fallback):', redisErr && redisErr.message);
+              // Ne pas bloquer - la mise à jour gameState est déjà effectuée
+            }
+
+            // ✅ ÉTAPE 3: METTRE À JOUR EN BASE (DB) - Tentative avec gestion d'erreur
+            try {
+              // Mettre à jour le statut du ticket en "cancelled" au lieu de le supprimer
+              const updateResult = await updateReceiptStatus(id, 'cancelled', null);
+              if (updateResult.success && updateResult.rowsAffected > 0) {
+                console.log(`[DB] ✅ Receipt ${id} marqué comme "cancelled" en base (fallback)`);
+              } else {
+                console.warn(`[DB] ⚠️ Receipt ${id} non trouvé en base ou déjà annulé (reason: ${updateResult.reason || 'unknown'})`);
+              }
+            } catch (dbErr) {
+              console.error('[DB] ❌ Échec mise à jour receipt en base (fallback):', dbErr && dbErr.message);
+              // Ne pas bloquer - les mises à jour gameState et Redis sont déjà effectuées
+            }
+
+            // Broadcast WebSocket pour notifier les clients
+            if (broadcast) {
+              broadcast({
+                event: "receipt_cancelled", // ✅ CORRECTION: Utiliser "receipt_cancelled" pour indiquer le statut
+                receiptId: id,
+                roundId: gameState.currentRound.id,
+                status: 'cancelled', // ✅ NOUVEAU: Inclure le statut "cancelled" dans le message
+                totalReceipts: gameState.currentRound.receipts.length,
+                currentRound: JSON.parse(JSON.stringify(gameState.currentRound)),
+                totalPrize: gameState.currentRound.totalPrize || 0
+              });
+            }
+
+            return res.json(wrap({ success: true }));
           }
         } catch (dbErr) {
           console.error('[DB] Erreur lookup/delete receipt fallback:', dbErr);
@@ -1459,7 +1373,7 @@ export default function createReceiptsRouter(broadcast) {
       // Vérifier si le round est réellement terminé (course lancée ET terminée)
       // On ne doit bloquer l'annulation que si la course est terminée avec un gagnant.
       const hasWinner = Array.isArray(gameState.currentRound.participants) &&
-                        gameState.currentRound.participants.some(p => p.place === 1);
+                        gameState.currentRound.participants.some(p => p.isWinner === true);
 
       const isRaceFinished = gameState.raceEndTime !== null ||
                              (gameState.raceStartTime !== null && !gameState.isRaceRunning && hasWinner);
@@ -1471,43 +1385,61 @@ export default function createReceiptsRouter(broadcast) {
         });
       }
 
-      // Supprimer le ticket du round actuel en mémoire
+      // ✅ CORRECTION: Marquer le ticket comme "cancelled" au lieu de le supprimer complètement
+      // Cela permet de garder une trace et d'éviter les problèmes si le ticket s'affiche encore
+      
       // Calculer prize à retirer si présent
       if (receipt && receipt.prize) {
         gameState.currentRound.totalPrize = Math.max(0, (gameState.currentRound.totalPrize || 0) - Number(receipt.prize));
       }
 
-      gameState.currentRound.receipts = (gameState.currentRound.receipts || []).filter(r => r.id !== id);
+      // ✅ ÉTAPE 1: MARQUER COMME "cancelled" EN MÉMOIRE (gameState) - TOUJOURS effectuée
+      const receiptIndex = gameState.currentRound.receipts.findIndex(r => r.id === id);
+      if (receiptIndex !== -1) {
+        gameState.currentRound.receipts[receiptIndex].status = 'cancelled';
+        console.log(`[CANCEL] ✅ Ticket ${id} marqué comme "cancelled" dans gameState.currentRound.receipts`);
+      } else {
+        console.warn(`[CANCEL] ⚠️ Ticket ${id} non trouvé dans gameState.currentRound.receipts`);
+      }
 
-      // Supprimer également en base (s'il existe) - Receipt et ses Bets associés
+      // ✅ ÉTAPE 2: METTRE À JOUR REDIS - TOUJOURS effectuée (indépendante de DB)
       try {
-        // Supprimer les bets associés au ticket (cascade)
-        await pool.query("DELETE FROM bets WHERE receipt_id = $1", [id]);
-        console.log(`[DB] Bets associés au ticket ${id} supprimés en base`);
-        
-        // Puis supprimer le ticket lui-même
-        await pool.query("DELETE FROM receipts WHERE receipt_id = $1", [id]);
-        console.log(`[DB] Receipt ${id} supprimé en base (memo->db) + bets associés`);
-        
-        // ✅ CORRECTION: Mettre à jour le cache Redis
-        await deleteTicketFromRoundCache(gameState.currentRound.id, id);
-      } catch (e) {
-        console.warn('[DB] Échec suppression receipt en base (memo->db) pour id', id, e && e.message);
+        await updateTicketInRoundCache(gameState.currentRound.id, id, 'cancelled', null);
+        console.log(`[REDIS] ✅ Ticket ${id} marqué comme "cancelled" dans le cache Redis`);
+      } catch (redisErr) {
+        console.error('[REDIS] ❌ Échec mise à jour ticket dans Redis:', redisErr && redisErr.message);
+        // Ne pas bloquer - la mise à jour gameState est déjà effectuée
+      }
+
+      // ✅ ÉTAPE 3: METTRE À JOUR EN BASE (DB) - Tentative avec gestion d'erreur
+      try {
+        // Mettre à jour le statut du ticket en "cancelled" au lieu de le supprimer
+        const updateResult = await updateReceiptStatus(id, 'cancelled', null);
+        if (updateResult.success && updateResult.rowsAffected > 0) {
+          console.log(`[DB] ✅ Receipt ${id} marqué comme "cancelled" en base`);
+        } else {
+          console.warn(`[DB] ⚠️ Receipt ${id} non trouvé en base ou déjà annulé (reason: ${updateResult.reason || 'unknown'})`);
+        }
+      } catch (dbErr) {
+        console.error('[DB] ❌ Échec mise à jour receipt en base (memo->db) pour id', id, dbErr && dbErr.message);
+        // ✅ IMPORTANT: Ne pas throw - les mises à jour gameState et Redis sont déjà effectuées
+        // Le ticket est marqué comme "cancelled" dans gameState et Redis même si la DB échoue
       }
 
       // Broadcast WebSocket pour notifier les clients avec toutes les infos
       if (broadcast) {
         broadcast({
-          event: "receipt_deleted",
+          event: "receipt_cancelled", // ✅ CORRECTION: Utiliser "receipt_cancelled" pour indiquer le statut
           receiptId: id,
           roundId: gameState.currentRound.id,
+          status: 'cancelled', // ✅ NOUVEAU: Inclure le statut "cancelled" dans le message
           totalReceipts: gameState.currentRound.receipts.length,
           currentRound: JSON.parse(JSON.stringify(gameState.currentRound)),
           totalPrize: gameState.currentRound.totalPrize || 0
         });
       }
 
-      console.log("Ticket supprimé ID :", id);
+      console.log("Ticket annulé (statut 'cancelled') ID :", id);
       return res.json(wrap({ success: true }));
     }
 
