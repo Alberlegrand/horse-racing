@@ -1021,13 +1021,20 @@ class App {
         // Référence pour WebSocket
         this.myBetsFetchMyBets = null;
 
-
-
         // Sélecteurs
         const dateFilter = document.getElementById('dateFilter');
         const statusFilter = document.getElementById('myBetsStatusFilter');
         const searchIdInput = document.getElementById('searchBetId');
         const refreshButton = document.getElementById('refreshMyBets');
+        
+        // ✅ Vérifications pour s'assurer que les éléments existent
+        if (!dateFilter || !statusFilter || !searchIdInput || !refreshButton) {
+            console.warn('⚠️ Certains éléments de filtrage ne sont pas trouvés dans le DOM');
+            console.warn('dateFilter:', dateFilter);
+            console.warn('statusFilter:', statusFilter);
+            console.warn('searchIdInput:', searchIdInput);
+            console.warn('refreshButton:', refreshButton);
+        }
         const totalBetAmountEl = document.getElementById('myTotalBetAmount');
         const potentialWinningsEl = document.getElementById('myPotentialWinnings');
         const winRateEl = document.getElementById('myWinRate');
@@ -1195,66 +1202,117 @@ class App {
             ticketsTableBody.innerHTML = tickets.map(ticket => createMyBetsTicketRow(ticket)).join('');
         };
 
-        // Fonction de récupération des tickets
-        const fetchMyBets = async (page = 1) => {
+        // 🎯 STOCKAGE LOCAL - Tous les tickets en mémoire pour filtrage client-side
+        let allTicketsData = [];
+
+        // Fonction pour charger TOUS les tickets (une seule fois au démarrage)
+        const loadAllTickets = async () => {
             try {
-                currentPage = page;
-                const filters = new URLSearchParams({
-                    page: currentPage.toString(),
-                    limit: '10'
-                });
-
-                if (dateFilter.value) {
-                    filters.append('date', dateFilter.value);
-                }
-                if (statusFilter.value) {
-                    filters.append('status', statusFilter.value);
-                }
-                if (searchIdInput.value) {
-                    filters.append('searchId', searchIdInput.value);
-                }
-
-                const response = await fetch(`${API_URL}?${filters.toString()}`);
+                console.log("📥 Chargement de tous les tickets...");
+                const response = await fetch(`${API_URL}?limit=1000`);
                 if (!response.ok) throw new Error('Erreur lors de la récupération des tickets');
 
                 const payload = await response.json();
-                // Some server endpoints return { data: {...} } without a 'success' flag.
-                // Support both formats: { success: boolean, data: {...} } and { data: {...} }.
                 if (typeof payload.success !== 'undefined' && payload.success === false) {
                     throw new Error(payload.error || 'Erreur inconnue');
                 }
 
                 const body = payload.data || payload;
-
-                // Mise à jour de la pagination
-                currentPage = body.pagination?.currentPage || currentPage;
-                totalPages = body.pagination?.totalPages || totalPages;
-
-                // Mise à jour des stats
-                if (body.stats) {
-                    totalBetAmountEl.textContent = `${(body.stats.totalBetAmount || 0).toFixed(2)} HTG`;
-                    potentialWinningsEl.textContent = `${(body.stats.potentialWinnings || 0).toFixed(2)} HTG`;
-                    pendingPaymentsEl.textContent = `${(body.stats.pendingPayments || 0).toFixed(2)} HTG`;
-                    paidWinningsEl.textContent = `${(body.stats.paidWinnings || 0).toFixed(2)} HTG`;
-                    winRateEl.textContent = `${body.stats.winRate || 0}%`;
-                }
-
-                // Mise à jour de l'interface de pagination
-                displayedRangeEl.textContent = body.pagination?.displayedRange || displayedRangeEl.textContent;
-                totalMyBetsEl.textContent = body.pagination?.totalItems ?? totalMyBetsEl.textContent;
-                currentPageEl.textContent = `Page ${currentPage}`;
                 
-                // Activer/désactiver les boutons de pagination
-                prevPageBtn.disabled = currentPage <= 1;
-                nextPageBtn.disabled = currentPage >= totalPages;
-
-                // Mise à jour de la table
-                updateTicketsTable(body.tickets || []);
+                // 🎯 Stocker tous les tickets en mémoire
+                allTicketsData = body.tickets || [];
+                console.log(`✅ ${allTicketsData.length} ticket(s) chargé(s)`);
+                
+                // Appliquer les filtres et afficher
+                applyFiltersClientSide();
                 
             } catch (error) {
-                console.error('Erreur fetchMyBets:', error);
+                console.error('Erreur loadAllTickets:', error);
                 this.showToast('Erreur lors de la récupération des tickets', 'error');
             }
+        };
+
+        // 🎯 FILTRAGE CLIENT-SIDE - Filtre et affiche localement
+        const applyFiltersClientSide = () => {
+            // 1. Filtrer les données
+            let filteredTickets = allTicketsData;
+
+            // Filtre par recherche (ID)
+            if (searchIdInput && searchIdInput.value) {
+                const searchTerm = searchIdInput.value.toLowerCase();
+                filteredTickets = filteredTickets.filter(t => 
+                    t.id.toString().includes(searchTerm) || 
+                    t.id.toString().toLowerCase().includes(searchTerm)
+                );
+            }
+
+            // Filtre par statut
+            if (statusFilter && statusFilter.value) {
+                filteredTickets = filteredTickets.filter(t => t.status === statusFilter.value);
+            }
+
+            // Filtre par date
+            if (dateFilter && dateFilter.value) {
+                filteredTickets = filteredTickets.filter(t => 
+                    t.date.startsWith(dateFilter.value)
+                );
+            }
+
+            // 2. Calculer les stats (basées sur les filtres appliqués)
+            const totalBetAmount = filteredTickets.reduce((sum, t) => sum + t.totalAmount, 0);
+            const pendingPayments = filteredTickets
+                .filter(t => t.status === 'won')
+                .reduce((sum, t) => sum + t.prize, 0);
+            const paidWinnings = filteredTickets
+                .filter(t => t.status === 'paid')
+                .reduce((sum, t) => sum + t.prize, 0);
+            const wonCount = filteredTickets.filter(t => t.status === 'won').length;
+            const lostCount = filteredTickets.filter(t => t.status === 'lost').length;
+            const winRate = (wonCount + lostCount > 0) ? (wonCount / (wonCount + lostCount)) * 100 : 0;
+            
+            // 3. Afficher les stats
+            if (totalBetAmountEl) totalBetAmountEl.textContent = `${totalBetAmount.toFixed(2)} HTG`;
+            if (pendingPaymentsEl) pendingPaymentsEl.textContent = `${pendingPayments.toFixed(2)} HTG`;
+            if (paidWinningsEl) paidWinningsEl.textContent = `${paidWinnings.toFixed(2)} HTG`;
+            if (winRateEl) winRateEl.textContent = `${winRate.toFixed(0)}%`;
+
+            // 4. Pagination côté client
+            currentPage = 1;
+            const itemsPerPage = 10;
+            totalPages = Math.ceil(filteredTickets.length / itemsPerPage);
+
+            // 5. Afficher les résultats paginés
+            displayTicketsPage(filteredTickets, currentPage, itemsPerPage);
+        };
+
+        // 🎯 AFFICHAGE - Affiche les tickets pour une page donnée
+        const displayTicketsPage = (filteredTickets, page, itemsPerPage) => {
+            const startIndex = (page - 1) * itemsPerPage;
+            const endIndex = startIndex + itemsPerPage;
+            const pageTickets = filteredTickets.slice(startIndex, endIndex);
+
+            // Mettre à jour le tableau
+            updateTicketsTable(pageTickets);
+
+            // Mettre à jour la pagination
+            if (ticketsTableBody) {
+                if (pageTickets.length === 0) {
+                    ticketsTableBody.innerHTML = `<tr><td colspan="8" class="p-4 text-center text-slate-400">Aucun ticket trouvé</td></tr>`;
+                }
+            }
+
+            if (displayedRangeEl) displayedRangeEl.textContent = `${startIndex + 1}-${startIndex + pageTickets.length}`;
+            if (totalMyBetsEl) totalMyBetsEl.textContent = filteredTickets.length;
+            if (currentPageEl) currentPageEl.textContent = `Page ${page}`;
+            
+            if (prevPageBtn) prevPageBtn.disabled = page <= 1;
+            if (nextPageBtn) nextPageBtn.disabled = page >= totalPages;
+        };
+
+        // Fonction de récupération des tickets (appelle loadAllTickets au démarrage)
+        const fetchMyBets = async (page = 1) => {
+            currentPage = page;
+            applyFiltersClientSide();
         };
 
         
@@ -1509,14 +1567,63 @@ class App {
         }
 
         // === Événements ===
-        refreshButton.addEventListener("click", () => fetchMyBets(1));
-        prevPageBtn.addEventListener("click", () => currentPage > 1 && fetchMyBets(currentPage - 1));
-        nextPageBtn.addEventListener("click", () => currentPage < totalPages && fetchMyBets(currentPage + 1));
+        if (refreshButton) {
+            refreshButton.addEventListener("click", () => {
+                console.log("🔄 Rafraîchir les paris");
+                loadAllTickets();
+            });
+        }
         
-        // Filtres
-        dateFilter.addEventListener("change", () => fetchMyBets(1));
-        statusFilter.addEventListener("change", () => fetchMyBets(1));
-        searchIdInput.addEventListener("input", debounce(() => fetchMyBets(1), 500));
+        if (prevPageBtn) {
+            prevPageBtn.addEventListener("click", () => {
+                if (currentPage > 1) {
+                    currentPage--;
+                    console.log(`◀️ Page précédente: ${currentPage}`);
+                    applyFiltersClientSide();
+                }
+            });
+        }
+        
+        if (nextPageBtn) {
+            nextPageBtn.addEventListener("click", () => {
+                if (currentPage < totalPages) {
+                    currentPage++;
+                    console.log(`▶️ Page suivante: ${currentPage}`);
+                    applyFiltersClientSide();
+                }
+            });
+        }
+        
+        // === Filtres (Client-Side) ===
+        if (dateFilter) {
+            dateFilter.addEventListener("change", () => {
+                console.log("📅 Filtre date changé:", dateFilter.value);
+                currentPage = 1; // Reset pagination
+                applyFiltersClientSide();
+            });
+        } else {
+            console.warn('⚠️ dateFilter non trouvé');
+        }
+        
+        if (statusFilter) {
+            statusFilter.addEventListener("change", () => {
+                console.log("📊 Filtre statut changé:", statusFilter.value);
+                currentPage = 1; // Reset pagination
+                applyFiltersClientSide();
+            });
+        } else {
+            console.warn('⚠️ statusFilter non trouvé');
+        }
+        
+        if (searchIdInput) {
+            searchIdInput.addEventListener("input", debounce(() => {
+                console.log("🔍 Recherche changée:", searchIdInput.value);
+                currentPage = 1; // Reset pagination
+                applyFiltersClientSide();
+            }, 300)); // Réduit à 300ms pour client-side (plus rapide)
+        } else {
+            console.warn('⚠️ searchIdInput non trouvé');
+        }
         
         // Fonction debounce pour la recherche
         function debounce(func, wait) {
@@ -1532,14 +1639,14 @@ class App {
         }
 
         // Stocker les fonctions pour WebSocket
-        this.myBetsFetchMyBets = fetchMyBets;
+        this.myBetsFetchMyBets = loadAllTickets; // Utilise loadAllTickets pour rechargement complet
         this.myBetsAddTicketToTable = addTicketToMyBetsTable; // ✅ NOUVEAU: Ajouter directement un ticket
         this.myBetsRemoveTicketFromTable = removeTicketFromMyBetsTable; // ✅ NOUVEAU: Supprimer directement un ticket
 
-        // Chargement initial
-        fetchMyBets(1);
+        // Chargement initial - Charger tous les tickets et les filtrer
+        loadAllTickets();
 
-        console.log('✅ Mes Paris initialisé avec WebSocket en temps réel');
+        console.log('✅ Mes Paris initialisé avec filtrage client-side');
     }
 
 

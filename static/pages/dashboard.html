@@ -71,27 +71,21 @@
             border: none;
         }
 
-        /* Tickets section fixed to bottom with small internal scroll */
+        /* Tickets section in normal flow after game visualization */
         .page-content.active {
-            padding-bottom: 120px;
-            /* space for the fixed tickets section */
             overflow: hidden;
         }
 
-        /* Section fixée en bas avec hauteur fixe */
+        /* Section tickets en flux normal après game visualization */
         #ticketsSection {
-            position: fixed;
-            bottom: 0;
-            left: 0;
-            right: 0;
-            height: 100px;
-            /* RÉDUIT - 2 tickets seulement */
-            z-index: 40;
+            height: 260px;
             background: rgba(17, 24, 39, 0.95);
             border-radius: 0.75rem 0.75rem 0 0;
             box-shadow: 0 -8px 24px rgba(2, 6, 23, 0.6);
             display: flex;
             flex-direction: column;
+            margin-top: 1rem;
+            border: 1px solid rgba(71, 85, 105, 0.3);
         }
 
         /* Header tickets */
