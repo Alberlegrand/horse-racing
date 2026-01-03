@@ -2,7 +2,7 @@
 
 import express from "express";
 // On suppose que gameState est un objet partagé que nous pouvons modifier
-import { gameState, startNewRound, createNewRound, wrap, BASE_PARTICIPANTS } from "../game.js";
+import { gameState, startNewRound, createNewRound, wrap, BASE_PARTICIPANTS, chooseProfitableWinner } from "../game.js";
 
 // Import ChaCha20 pour la sécurité des positions
 // ✅ PROBLÈME #24 CORRIGÉ: initChaCha20 supprimé (déjà appelé dans game.js au démarrage)
@@ -23,10 +23,6 @@ import {
     initRoundCache,
     getRoundParticipantsFromCache
 } from "../config/db-strategy.js";
-
-// Import pour invalider le cache HTTP
-import { invalidateCachePattern } from "../models/queryCache.js";
-import { cacheDelPattern } from "../config/redis.js";
 
 // Import de pool pour persister les rounds en DB
 import { pool } from "../config/db.js";
@@ -98,7 +94,7 @@ class RaceTimerManager {
      * Créer une séquence complète de timers pour une course
      * Timeline: T=0 race_start → T=10 create_new_round → T=20 finish_logic → T=25 cleanup
      */
-    startRaceSequence(raceId, callbacks, broadcastFn) {
+    startRaceSequence(raceId, callbacks) {
         console.log(`[TIMER] 🚀 Démarrage séquence course #${raceId}`);
         console.log(`[TIMER] 📋 CONFIGURATION: MOVIE_SCREEN_DURATION_MS=${MOVIE_SCREEN_DURATION_MS}ms (${MOVIE_SCREEN_DURATION_MS/1000}s), FINISH_SCREEN_DURATION_MS=${FINISH_SCREEN_DURATION_MS}ms (${FINISH_SCREEN_DURATION_MS/1000}s), TOTAL_RACE_TIME_MS=${TOTAL_RACE_TIME_MS}ms (${TOTAL_RACE_TIME_MS/1000}s)`);
         
@@ -113,9 +109,6 @@ class RaceTimerManager {
 
         // Marquer la course comme active
         this.activeRaces.add(raceId);
-        
-        // ✅ CRITIQUE: Capturer broadcast dans le scope pour l'utiliser dans setTimeout
-        const broadcast = broadcastFn || (() => {});
 
         try {
             // T=0: Race start
@@ -140,118 +133,23 @@ class RaceTimerManager {
 
             // T=35s: Nettoyage et réinitialisation
             console.log('[TIMER] ⏱️ Programmation T+35s: Nettoyage post-race');
-            gameState.timers.cleanup = setTimeout(async () => {
+            gameState.timers.cleanup = setTimeout(() => {
                 console.log(`[TIMER] T+35s: Nettoyage post-race`);
-                // ✅ CRITIQUE: Toujours nettoyer activeRaces même si onCleanup échoue
+                // ✅ CORRECTION: Toujours nettoyer activeRaces même si onCleanup échoue
                 try {
                     this.activeRaces.delete(raceId);
                     clearAllTimers();
-                    
-                    // ✅ CRITIQUE: S'assurer que le lock est libéré avant d'appeler onCleanup
-                    // Si le lock est bloqué, le libérer d'abord
-                    if (gameState.operationLock) {
-                        console.warn('[TIMER] ⚠️ operationLock actif au début de cleanup, libération forcée');
-                        gameState.operationLock = false;
-                    }
-                    
                     if (callbacks.onCleanup) {
-                        // ✅ CRITIQUE: Wrapper dans un try-catch pour garantir le nettoyage même en cas d'erreur
-                        try {
-                            await callbacks.onCleanup();
-                        } catch (cleanupCallbackErr) {
-                            console.error('[TIMER] ❌ Erreur dans callback onCleanup:', cleanupCallbackErr);
-                            // ✅ CRITIQUE: Libérer le lock et réinitialiser l'état même si onCleanup échoue
-                            gameState.operationLock = false;
-                            gameState.isRaceRunning = false;
-                            gameState.raceStartTime = null;
-                            gameState.raceEndTime = null;
-                            
-                            // ✅ CRITIQUE: S'assurer qu'un timer est créé même si onCleanup échoue
-                            // Sinon le système restera bloqué sans timer
-                            if (!gameState.nextRoundStartTime || gameState.nextRoundStartTime <= Date.now()) {
-                                console.warn('[TIMER] ⚠️ Timer manquant après erreur cleanup, création d\'urgence...');
-                                const now = Date.now();
-                                gameState.nextRoundStartTime = now + ROUND_WAIT_DURATION_MS;
-                                
-                                // Créer un nouveau round d'urgence si nécessaire
-                                if (!gameState.currentRound || !gameState.currentRound.id) {
-                                    console.warn('[TIMER] ⚠️ Round manquant après erreur cleanup, création d\'urgence...');
-                                    try {
-                                        const { createNewRound } = await import('../game.js');
-                                        await createNewRound({
-                                            broadcast: broadcast || (() => {}),
-                                            archiveCurrentRound: false,
-                                            checkLock: false // Pas de lock car déjà libéré
-                                        });
-                                    } catch (emergencyErr) {
-                                        console.error('[TIMER] ❌ Erreur création round d\'urgence:', emergencyErr);
-                                    }
-                                }
-                                
-                                // Broadcaster le timer d'urgence
-                                if (broadcast) {
-                                    broadcast({
-                                        event: 'timer_update',
-                                        serverTime: now,
-                                        roundId: gameState.currentRound?.id,
-                                        timer: {
-                                            timeLeft: ROUND_WAIT_DURATION_MS,
-                                            totalDuration: ROUND_WAIT_DURATION_MS,
-                                            startTime: now,
-                                            endTime: gameState.nextRoundStartTime
-                                        }
-                                    });
-                                }
-                            }
-                        }
+                        callbacks.onCleanup();
                     }
                 } catch (cleanupErr) {
                     console.error('[TIMER] ❌ Erreur dans cleanup:', cleanupErr);
-                    // ✅ CRITIQUE: Nettoyer quand même activeRaces pour éviter les blocages
+                    // Nettoyer quand même activeRaces pour éviter les blocages
                     this.activeRaces.delete(raceId);
                     clearAllTimers();
-                    // ✅ CRITIQUE: Libérer le lock si bloqué
+                    // Libérer le lock si bloqué
                     gameState.operationLock = false;
                     gameState.isRaceRunning = false;
-                    gameState.raceStartTime = null;
-                    gameState.raceEndTime = null;
-                    
-                    // ✅ CRITIQUE: S'assurer qu'un timer est créé même en cas d'erreur
-                    if (!gameState.nextRoundStartTime || gameState.nextRoundStartTime <= Date.now()) {
-                        console.warn('[TIMER] ⚠️ Timer manquant après erreur cleanup, création d\'urgence...');
-                        const now = Date.now();
-                        gameState.nextRoundStartTime = now + ROUND_WAIT_DURATION_MS;
-                        
-                        // Créer un nouveau round d'urgence si nécessaire
-                        if (!gameState.currentRound || !gameState.currentRound.id) {
-                            console.warn('[TIMER] ⚠️ Round manquant après erreur cleanup, création d\'urgence...');
-                            try {
-                                const { createNewRound } = await import('../game.js');
-                                await createNewRound({
-                                    broadcast: broadcast || (() => {}),
-                                    archiveCurrentRound: false,
-                                    checkLock: false
-                                });
-                            } catch (emergencyErr) {
-                                console.error('[TIMER] ❌ Erreur création round d\'urgence:', emergencyErr);
-                            }
-                        }
-                        
-                        // Broadcaster le timer d'urgence
-                        if (broadcast) {
-                            broadcast({
-                                event: 'timer_update',
-                                serverTime: now,
-                                roundId: gameState.currentRound?.id,
-                                timer: {
-                                    timeLeft: ROUND_WAIT_DURATION_MS,
-                                    totalDuration: ROUND_WAIT_DURATION_MS,
-                                    startTime: now,
-                                    endTime: gameState.nextRoundStartTime
-                                }
-                            });
-                        }
-                    }
                 }
             }, TOTAL_RACE_TIME_MS);
 
@@ -315,7 +213,10 @@ export default function createRoundsRouter(broadcast) {
     // ✅ NOUVEAU: Appelé à T=35s (onCleanup) - Utilise currentRound directement
     // ✅ CORRECTION #2: Plus de runningRoundData - Utiliser currentRound comme source unique
     const calculateRaceResults = async () => {
-        console.log('[RACE-RESULTS] Calcul des résultats de course');
+        // ⏰ TIMESTAMP ANTI-CACHE: 2026-01-03T02:15:00Z
+        console.log('\n\n█████████████████████████████████████████████████████████████████████████████████████████');
+        console.log('🎯🎯🎯 [RACE-RESULTS] DÉBUT calculateRaceResults() - NOUVELLE VERSION 2026-01-03T02:15:00Z 🎯🎯🎯');
+        console.log('█████████████████████████████████████████████████████████████████████████████████████████\n');
         
         // ✅ SOURCE UNIQUE: Utiliser currentRound directement
         // Le round actuel contient toutes les données nécessaires (tickets, participants, etc.)
@@ -335,23 +236,40 @@ export default function createRoundsRouter(broadcast) {
             return null;
         }
 
-        // ✅ LOGIQUE SIMPLIFIÉE: Le gagnant est déjà déterminé dans game.js lors de la création du round
-        // Le participant avec place: 1 est le gagnant (déterminé aléatoirement dans createNewRound)
-        const winner = participants.find(p => p.place === 1);
+        // ✅ STRATÉGIE DE RENTABILITÉ: Sélectionner le gagnant en garantissant 25% de marge
+        console.log('\n🎯🎯🎯 [RACE-FINISH] À T=35s: Vérification des places attribuées par profit-choice 🎯🎯🎯\n');
+        
+        // ✅ SIMPLIFICATION CRITIQUE: Les places sont DÉJÀ attribuées par profit-choice à T=0s (onRaceStart)
+        // À T=35s, nous ne faisons que confirmer et utiliser les places déjà assignées
+        
+        console.log(`[RACE-RESULTS] ℹ️ Les places finales ont été assignées par profit-choice à T=0s (race_start)`);
+        console.log(`[RACE-RESULTS] 📊 Participants actuels avec places:`);
+        
+        const currentParticipants = savedRoundData.participants || [];
+        currentParticipants
+            .sort((a, b) => a.place - b.place)
+            .forEach(p => {
+                const marker = p.place === 1 ? '🏆 GAGNANT' : `  Place ${p.place}`;
+                console.log(`[RACE-RESULTS]   ${marker}: №${p.number} ${p.name}`);
+            });
+        
+        // ✅ VÉRIFICATION: Le gagnant est celui avec place:1
+        const winner = currentParticipants.find(p => p.place === 1);
         
         if (!winner) {
-            console.error(`[RACE-RESULTS] ❌ ERREUR: Aucun participant avec place: 1 trouvé!`);
-            console.error(`[RACE-RESULTS] Participants disponibles:`, participants.map(p => `№${p.number} ${p.name} (place: ${p.place})`));
+            console.error('[RACE-RESULTS] ❌ ERREUR CRITIQUE: Aucun participant en place 1!');
+            console.error('[RACE-RESULTS] Participants:', currentParticipants.map(p => ({ number: p.number, place: p.place })));
             return null;
         }
         
-        console.log(`[RACE-RESULTS] 🏆 Gagnant trouvé: №${winner.number} ${winner.name} (place: 1)`);
+        console.log(`[RACE-RESULTS] 🏆 Gagnant confirmé: №${winner.number} ${winner.name} (place: ${winner.place})`);
+        console.log(`[RACE-RESULTS] ✅ Les places sont cohérentes et définies par profit-choice`);
+
+        // ✅ Les participants gardent les places attribuées par profit-choice
+        const updatedParticipants = currentParticipants;
         
-        const winnerWithPlace = { ...winner, place: 1, family: winner.family ?? 0 };
-        
-        // ✅ Les participants sont déjà corrects (places assignées dans game.js)
-        // Pas besoin de modifier les places, elles sont déjà correctes
-        savedRoundData.participants = participants;
+        // Copier et mettre à jour les participants dans savedRoundData
+        savedRoundData.participants = updatedParticipants;
 
         // Calculer les gains pour chaque ticket
         let totalPrizeAll = 0;
@@ -363,303 +281,38 @@ export default function createRoundsRouter(broadcast) {
             if (Array.isArray(receipt.bets)) {
                 receipt.bets.forEach(bet => {
                     if (Number(bet.number) === Number(winner.number)) {
-                        const betValue = Number(bet.value) || 0;
+                        const betValue = Number(bet.value) || 0;  // ✅ EN CENTIMES
                         const coeff = Number(winner.coeff) || 0;
-                        totalPrizeForReceipt += betValue * coeff;
+                        totalPrizeForReceipt += Math.floor(betValue * coeff);  // ✅ Résultat en centimes
                     }
                 });
             }
-            receipt.prize = totalPrizeForReceipt;
-            console.log(`[RACE-RESULTS] Ticket #${receipt.id} gain: ${receipt.prize} HTG`);
+            receipt.prize = totalPrizeForReceipt;  // ✅ EN CENTIMES
+            // ✅ CORRECTION: Afficher le payout en HTG pour clarté (diviser par 100)
+            console.log(`[RACE-RESULTS] Ticket #${receipt.id} gain: ${receipt.prize} centimes = ${(receipt.prize/100).toFixed(2)} HTG`);
             totalPrizeAll += totalPrizeForReceipt;
         });
 
-        savedRoundData.totalPrize = totalPrizeAll;
+        savedRoundData.totalPrize = totalPrizeAll;  // ✅ EN CENTIMES
         gameState.raceEndTime = Date.now();
         
         // ✅ Mettre à jour les statuts des tickets en DB
-        // ✅ CORRECTION CRITIQUE: Chercher les tickets depuis la DB au lieu de gameState
-        // Cela garantit qu'on utilise les vrais IDs (même si l'ID a été régénéré lors de la création)
-        
-        // ✅ ÉTAPE 1: Récupérer tous les tickets de ce round depuis la DB
-        let receiptsFromDb = [];
-        try {
-            const dbResult = await pool.query(
-                `SELECT receipt_id, round_id, user_id, total_amount, status, prize, created_at
-                 FROM receipts 
-                 WHERE round_id = $1 OR round_id IS NULL`,
-                [finishedRoundId]
-            );
-            receiptsFromDb = dbResult.rows || [];
-            console.log(`[RACE-RESULTS] 📊 ${receiptsFromDb.length} ticket(s) trouvé(s) en DB pour round ${finishedRoundId} (incluant round_id=NULL)`);
-        } catch (dbErr) {
-            console.error(`[RACE-RESULTS] ❌ Erreur récupération tickets depuis DB:`, dbErr.message);
-        }
-        
-        // ✅ ÉTAPE 2: Mapper les tickets de gameState avec ceux de la DB
-        // ✅ AMÉLIORATION: Matching amélioré avec fallback par receipt_id
-        const receiptsToUpdate = receipts.map(receipt => {
-            // Calculer total_amount depuis les bets pour matching (en système)
-            const receiptTotalAmount = (receipt.bets || []).reduce((sum, b) => sum + (Number(b.value) || 0), 0);
-            
-            // ✅ CORRECTION: Tentative 1: Match par receipt_id d'abord (le plus fiable)
-            let dbReceipt = null;
-            if (receipt.id) {
-                dbReceipt = receiptsFromDb.find(db => Number(db.receipt_id) === Number(receipt.id));
-                if (dbReceipt) {
-                    console.log(`[RACE-RESULTS] ✓ Matching par receipt_id pour ticket #${receipt.id}`);
-                }
-            }
-            
-            // ✅ CORRECTION: Tentative 2: Match par user_id + total_amount si receipt_id échoué
-            if (!dbReceipt) {
-                dbReceipt = receiptsFromDb.find(db => {
-                    // Match par user_id et total_amount (tolérance 0.01 pour arrondis)
-                    const userMatch = (db.user_id === receipt.user_id) || (!db.user_id && !receipt.user_id);
-                    const amountMatch = Math.abs(Number(db.total_amount) - receiptTotalAmount) < 0.01;
-                    return userMatch && amountMatch;
-                });
-                if (dbReceipt) {
-                    console.log(`[RACE-RESULTS] ✓ Matching par user_id+amount pour ticket #${receipt.id} (receipt_id=${dbReceipt.receipt_id})`);
-                }
-            }
-            
-            // ✅ CORRECTION: Tentative 3: Match par round_id + created_at si toujours pas trouvé
-            if (!dbReceipt && receipt.created_time) {
-                const receiptCreatedTime = new Date(receipt.created_time);
-                dbReceipt = receiptsFromDb.find(db => {
-                    const dbCreatedTime = db.created_at ? new Date(db.created_at) : null;
-                    if (!dbCreatedTime) return false;
-                    // Match si créé dans les 5 secondes
-                    const timeDiff = Math.abs(receiptCreatedTime.getTime() - dbCreatedTime.getTime());
-                    return timeDiff < 5000;
-                });
-                if (dbReceipt) {
-                    console.log(`[RACE-RESULTS] ✓ Matching par created_at pour ticket #${receipt.id} (receipt_id=${dbReceipt.receipt_id})`);
-                }
-            }
-            
-            return {
-                receipt: receipt, // Ticket depuis gameState (avec bets, prize calculé, etc.)
-                dbReceipt: dbReceipt, // Ticket depuis DB (avec vrai ID)
-                dbId: dbReceipt ? dbReceipt.receipt_id : receipt.id // Utiliser ID DB si disponible
-            };
-        });
-        
-        // ✅ ÉTAPE 3: Mettre à jour les statuts avec les vrais IDs de la DB
-        let updatedCount = 0;
-        let failedCount = 0;
-        const updatedReceipts = []; // ✅ NOUVEAU: Stocker les receipts mis à jour pour broadcast
-        
-        for (const { receipt, dbReceipt, dbId } of receiptsToUpdate) {
-            // ✅ CORRECTION: Si pas de dbReceipt, essayer de mettre à jour directement avec receipt.id
-            if (!dbReceipt) {
-                console.warn(`[RACE-RESULTS] ⚠️ Ticket non trouvé en DB pour receipt.id=${receipt.id}, tentative mise à jour directe...`);
-                
-                // Essayer de mettre à jour directement avec receipt.id
-                try {
-                    const newStatus = receipt.prize > 0 ? 'won' : 'lost';
-                    const updateResult = await updateReceiptStatus(receipt.id, newStatus, receipt.prize || 0);
-                    
-                    if (updateResult?.success && updateResult.rowsAffected > 0) {
-                        console.log(`[DB] ✓ Ticket #${receipt.id}: status mis à jour directement (status=${newStatus}, prize=${receipt.prize})`);
-                        updatedCount++;
-                        receipt.status = newStatus;
-                        
-                        // Mettre à jour le round_id si NULL
-                        await pool.query(
-                            `UPDATE receipts SET round_id = $1 WHERE receipt_id = $2 AND (round_id IS NULL OR round_id != $1)`,
-                            [finishedRoundId, receipt.id]
-                        );
-                        
-                        updatedReceipts.push({
-                            receiptId: receipt.id,
-                            roundId: finishedRoundId,
-                            status: newStatus,
-                            prize: receipt.prize || 0,
-                            receipt: JSON.parse(JSON.stringify(receipt))
-                        });
-                        
-                        if (finishedRoundId) {
-                            await updateTicketInRoundCache(finishedRoundId, receipt.id, newStatus, receipt.prize || 0);
-                        }
-                        continue; // Succès, passer au suivant
-                    } else {
-                        console.error(`[DB] ✗ Ticket #${receipt.id}: Échec mise à jour directe (${updateResult?.reason || 'unknown'})`);
-                        failedCount++;
-                        continue;
-                    }
-                } catch (directUpdateErr) {
-                    console.error(`[DB] ✗ Erreur mise à jour directe ticket #${receipt.id}:`, directUpdateErr.message);
-                    failedCount++;
-                    continue;
-                }
-            }
-            
+        for (const receipt of receipts) {
             try {
                 const newStatus = receipt.prize > 0 ? 'won' : 'lost';
-                const oldStatus = dbReceipt.status || receipt.status || 'pending';
                 receipt.status = newStatus;
                 
-                // ✅ Utiliser le vrai ID de la DB (même si différent de receipt.id)
-                const updateResult = await updateReceiptStatus(dbId, newStatus, receipt.prize || 0);
+                // Mettre à jour en DB
+                await updateReceiptStatus(receipt.id, newStatus, receipt.prize || 0);
+                console.log(`[DB] ✓ Ticket #${receipt.id}: status=${newStatus}, prize=${receipt.prize}`);
                 
-                if (updateResult?.success && updateResult.rowsAffected > 0) {
-                    console.log(`[DB] ✓ Ticket #${dbId}: status=${oldStatus}→${newStatus}, prize=${receipt.prize} (${updateResult.rowsAffected} ligne(s) affectée(s))`);
-                    updatedCount++;
-                    
-                    // ✅ NOUVEAU: Synchroniser l'ID dans gameState si différent
-                    if (receipt.id !== dbId) {
-                        receipt.id = dbId;
-                        console.log(`[DB] 🔄 ID synchronisé dans gameState: ${receipt.id} → ${dbId}`);
-                    }
-                    
-                    // ✅ CORRECTION: Mettre à jour le round_id si NULL ou différent
-                    if (!dbReceipt.round_id || dbReceipt.round_id !== finishedRoundId) {
-                        await pool.query(
-                            `UPDATE receipts SET round_id = $1 WHERE receipt_id = $2`,
-                            [finishedRoundId, dbId]
-                        );
-                        console.log(`[DB] ✓ Ticket #${dbId}: round_id mis à jour → ${finishedRoundId}`);
-                    }
-                    
-                    // ✅ NOUVEAU: Stocker le receipt mis à jour pour broadcast immédiat
-                    updatedReceipts.push({
-                        receiptId: dbId,
-                        roundId: finishedRoundId,
-                        status: newStatus,
-                        prize: receipt.prize || 0,
-                        receipt: JSON.parse(JSON.stringify(receipt)) // Copie complète pour les clients
-                    });
-                } else {
-                    console.error(`[DB] ✗ Ticket #${dbId}: Échec mise à jour (${updateResult?.reason || 'unknown'})`);
-                    failedCount++;
-                }
-                
-                // Mettre à jour le cache Redis (même si DB a échoué)
+                // Mettre à jour le cache Redis
                 if (finishedRoundId) {
-                    await updateTicketInRoundCache(finishedRoundId, dbId, newStatus, receipt.prize || 0);
+                    await updateTicketInRoundCache(finishedRoundId, receipt.id, newStatus, receipt.prize || 0);
                 }
             } catch (err) {
-                console.error(`[DB] ✗ Erreur ticket #${dbId}:`, err.message);
-                failedCount++;
+                console.error(`[DB] ✗ Erreur ticket #${receipt.id}:`, err.message);
             }
-        }
-        
-        console.log(`[RACE-RESULTS] 📊 Résumé mise à jour: ${updatedCount} réussie(s), ${failedCount} échouée(s) sur ${receipts.length} ticket(s)`);
-        
-        // ✅ CORRECTION: Invalider le cache HTTP pour forcer le rafraîchissement des données
-        try {
-            const { invalidateCachePattern } = await import("../models/queryCache.js");
-            const { cacheDelPattern } = await import("../config/redis.js");
-            await invalidateCachePattern("my-bets");
-            await invalidateCachePattern("receipts");
-            await cacheDelPattern("http:*/api/v1/my-bets*");
-            await cacheDelPattern("http:*/api/v1/receipts*");
-            console.log(`[RACE-RESULTS] ✅ Cache HTTP invalidé pour my-bets et receipts`);
-        } catch (cacheErr) {
-            console.warn(`[RACE-RESULTS] ⚠️ Erreur invalidation cache:`, cacheErr.message);
-        }
-        
-        // ✅ NOUVEAU: Mettre à jour les tickets avec round_id = null qui appartiennent à ce round
-        // Ces tickets ont été créés avant que le round soit persisté en DB
-        try {
-            const roundInfo = await pool.query(
-                `SELECT started_at, finished_at FROM rounds WHERE round_id = $1`,
-                [finishedRoundId]
-            );
-            
-            if (roundInfo.rows.length > 0 && roundInfo.rows[0].started_at) {
-                const roundStartTime = roundInfo.rows[0].started_at;
-                const roundEndTime = roundInfo.rows[0].finished_at || new Date();
-                
-                const nullRoundReceipts = await pool.query(
-                    `SELECT receipt_id, user_id, total_amount, status, prize, created_at
-                     FROM receipts 
-                     WHERE round_id IS NULL
-                     AND created_at >= $1
-                     AND created_at <= $2`,
-                    [roundStartTime, roundEndTime]
-                );
-                
-                if (nullRoundReceipts.rows.length > 0) {
-                    console.log(`[RACE-RESULTS] 📊 ${nullRoundReceipts.rows.length} ticket(s) avec round_id=NULL trouvé(s), mise à jour...`);
-                    
-                    let nullRoundUpdated = 0;
-                    for (const nullReceipt of nullRoundReceipts.rows) {
-                        // Trouver le ticket correspondant dans gameState
-                        const matchingReceipt = receipts.find(r => {
-                            const rTotal = (r.bets || []).reduce((sum, b) => sum + (Number(b.value) || 0), 0);
-                            const userMatch = (nullReceipt.user_id === r.user_id) || (!nullReceipt.user_id && !r.user_id);
-                            const amountMatch = Math.abs(Number(nullReceipt.total_amount) - rTotal) < 0.01;
-                            return userMatch && amountMatch;
-                        });
-                        
-                        if (matchingReceipt) {
-                            const newStatus = matchingReceipt.prize > 0 ? 'won' : 'lost';
-                            
-                            // Mettre à jour le statut et le prize
-                            const updateResult = await updateReceiptStatus(nullReceipt.receipt_id, newStatus, matchingReceipt.prize || 0);
-                            
-                            if (updateResult?.success) {
-                                // Mettre à jour le round_id
-                                await pool.query(
-                                    `UPDATE receipts SET round_id = $1 WHERE receipt_id = $2`,
-                                    [finishedRoundId, nullReceipt.receipt_id]
-                                );
-                                
-                                console.log(`[RACE-RESULTS] ✅ Ticket #${nullReceipt.receipt_id} mis à jour: round_id=NULL → ${finishedRoundId}, status=${newStatus}`);
-                                nullRoundUpdated++;
-                                
-                                // Ajouter au broadcast
-                                updatedReceipts.push({
-                                    receiptId: nullReceipt.receipt_id,
-                                    roundId: finishedRoundId,
-                                    status: newStatus,
-                                    prize: matchingReceipt.prize || 0,
-                                    receipt: JSON.parse(JSON.stringify(matchingReceipt))
-                                });
-                            }
-                        }
-                    }
-                    
-                    if (nullRoundUpdated > 0) {
-                        console.log(`[RACE-RESULTS] ✅ ${nullRoundUpdated} ticket(s) avec round_id=NULL mis à jour`);
-                    }
-                }
-            }
-        } catch (nullRoundErr) {
-            console.error(`[RACE-RESULTS] ❌ Erreur mise à jour tickets round_id=NULL:`, nullRoundErr.message);
-        }
-        
-        // ✅ NOUVEAU: Broadcaster immédiatement chaque receipt mis à jour pour synchronisation temps réel
-        if (updatedReceipts.length > 0 && broadcast) {
-            console.log(`[RACE-RESULTS] 📡 Broadcasting ${updatedReceipts.length} receipt(s) mis à jour via WebSocket...`);
-            
-            // Option 1: Broadcaster tous les receipts en un seul message (plus efficace)
-            broadcast({
-                event: "receipts_status_updated",
-                roundId: finishedRoundId,
-                receipts: updatedReceipts,
-                totalUpdated: updatedReceipts.length,
-                timestamp: Date.now()
-            });
-            
-            // Option 2: Broadcaster individuellement chaque receipt (pour compatibilité avec handlers existants)
-            // Cela permet aux clients de réagir immédiatement à chaque mise à jour
-            for (const updatedReceipt of updatedReceipts) {
-                broadcast({
-                    event: "receipt_status_updated",
-                    receiptId: updatedReceipt.receiptId,
-                    roundId: updatedReceipt.roundId,
-                    status: updatedReceipt.status,
-                    prize: updatedReceipt.prize,
-                    receipt: updatedReceipt.receipt,
-                    timestamp: Date.now()
-                });
-            }
-            
-            console.log(`[RACE-RESULTS] ✅ ${updatedReceipts.length} receipt(s) broadcasté(s) via WebSocket`);
         }
 
         // ✅ RETOURNER LES RÉSULTATS (PROBLÈME #12)
@@ -726,7 +379,8 @@ export default function createRoundsRouter(broadcast) {
                 // Cela doit être fait ICI, après avoir déterminé le gagnant et trouvé participant_id
                 if (winnerParticipantId && winnerWithPlace && finishedRoundId) {
                     try {
-                        // ✅ Sauvegarder le gagnant en base de données (plus de localStorage)
+                        // ✅ Winners are now persisted via localStorage on frontend
+                        // No database storage needed for winners display
                         if (winnerWithPlace.number && winnerWithPlace.name) {
                             console.log(`[RACE-RESULTS] 🏆 Gagnant de la course:`);
                             console.log(`   - Round ID: ${finishedRoundId}`);
@@ -734,23 +388,7 @@ export default function createRoundsRouter(broadcast) {
                             console.log(`   - Name: ${winnerWithPlace.name}`);
                             console.log(`   - Family: ${winnerWithPlace.family ?? 0}`);
                             console.log(`   - Prize: ${totalPrizeAll}`);
-                            
-                            // ✅ Importer et utiliser saveWinner pour sauvegarder en DB
-                            const { saveWinner } = await import('../models/winnerModel.js');
-                            const winnerData = {
-                                id: winnerParticipantId,
-                                number: winnerWithPlace.number,
-                                name: winnerWithPlace.name,
-                                family: winnerWithPlace.family ?? 0,
-                                prize: totalPrizeAll
-                            };
-                            
-                            const savedWinner = await saveWinner(finishedRoundId, winnerData);
-                            if (savedWinner) {
-                                console.log(`[RACE-RESULTS] ✅ Gagnant sauvegardé en base de données (winner_id: ${savedWinner.winner_id})`);
-                            } else {
-                                console.warn(`[RACE-RESULTS] ⚠️ Échec de la sauvegarde du gagnant en DB`);
-                            }
+                            console.log(`[RACE-RESULTS] 💾 Winner will be persisted via localStorage on frontend (not DB)`);
                         } else {
                             console.error(`[RACE-RESULTS] ❌ Données gagnant incomplètes:`, {
                                 number: winnerWithPlace.number,
@@ -760,7 +398,6 @@ export default function createRoundsRouter(broadcast) {
                         }
                     } catch (saveErr) {
                         console.error(`[RACE-RESULTS] ❌ Erreur sauvegarde gagnant:`, saveErr.message);
-                        console.error(`   Stack:`, saveErr.stack);
                     }
                 } else {
                     console.error(`[RACE-RESULTS] ❌ Impossible de sauvegarder gagnant: roundId=${finishedRoundId}, winnerId=${winnerParticipantId}, winner=${winnerWithPlace ? 'present' : 'null'}`);
@@ -771,6 +408,9 @@ export default function createRoundsRouter(broadcast) {
         }
 
         // ✅ PROBLÈME #12 CORRIGÉ: Retourner les résultats explicitement
+        console.log('\n█████████████████████████████████████████████████████████████████████████████████████████');
+        console.log('🎯🎯🎯 [RACE-RESULTS] FIN calculateRaceResults() - RETOUR RÉSULTATS 🎯🎯🎯');
+        console.log('█████████████████████████████████████████████████████████████████████████████████████████\n');
         return {
             roundId: finishedRoundId,
             winner: winnerWithPlace,
@@ -848,7 +488,7 @@ export default function createRoundsRouter(broadcast) {
 
     // ✅ DÉFINIR LES CALLBACKS DE LA SÉQUENCE DE COURSE
     const raceCallbacks = {
-        // T=0: Race commence
+        // T=0: Race commence - Appeler profit-choice pour attribuer les places finales
         onRaceStart: () => {
             const raceStartTime = Date.now();
             gameState.isRaceRunning = true;
@@ -856,6 +496,29 @@ export default function createRoundsRouter(broadcast) {
             gameState.raceEndTime = null;
             // ✅ RESET LE TIMER POUR ÉVITER LE PETIT TIMER PENDANT LE FINISH SCREEN
             gameState.nextRoundStartTime = null;
+
+            // ✅ ÉTAPE CRITIQUE: Appeler profit-choice AVANT race_start pour obtenir les places finales
+            console.log(`[RACE-START] 🎯 Appel à profit-choice() pour attribuer les places finales`);
+            const profitChoiceResult = chooseProfitableWinner(gameState.currentRound, 0.25);
+            
+            if (!profitChoiceResult.winner || !profitChoiceResult.allParticipantsWithPlaces) {
+                console.error(`[RACE-START] ❌ ERREUR: profit-choice n'a pas retourné les places!`);
+                broadcast({
+                    event: "error",
+                    message: "Impossible de démarrer la course: profit-choice a échoué"
+                });
+                return;
+            }
+            
+            // ✅ Mettre à jour les participants avec les places du profit-choice
+            gameState.currentRound.participants = profitChoiceResult.allParticipantsWithPlaces;
+            console.log(`[RACE-START] ✅ Participants mis à jour avec les places du profit-choice:`);
+            gameState.currentRound.participants
+                .sort((a, b) => a.place - b.place)
+                .forEach(p => {
+                    const marker = p.place === 1 ? '🏆' : '  ';
+                    console.log(`[RACE-START]   ${marker} Place ${p.place}: №${p.number} ${p.name}`);
+                });
 
             // ✅ Calculer l'écran actuel et le temps écoulé pour synchronisation
             const now = Date.now();
@@ -866,12 +529,14 @@ export default function createRoundsRouter(broadcast) {
                 event: "race_start",
                 roundId: gameState.currentRound.id,
                 raceStartTime: raceStartTime,
-                currentRound: JSON.parse(JSON.stringify(gameState.currentRound)),
+                currentRound: JSON.parse(JSON.stringify(gameState.currentRound)),  // ✅ Contient les places finales!
                 isRaceRunning: true,
                 currentScreen: currentScreen,  // ✅ NOUVEAU: Écran actuel
                 timeInRace: timeInRace,       // ✅ NOUVEAU: Temps écoulé depuis le début
                 serverTime: now               // ✅ NOUVEAU: Timestamp serveur pour sync
             });
+            
+            console.log(`[RACE-START] 🎙️ race_start broadcasté avec places finales du profit-choice`);
         },
 
         // ✅ PROBLÈME #5 CORRIGÉ: onPrepareNewRound supprimé (code mort)
@@ -913,35 +578,32 @@ export default function createRoundsRouter(broadcast) {
                 // ✅ CORRECTION #2: calculateRaceResults() utilise currentRound directement
                 // Les données sont sauvegardées en DB dans calculateRaceResults()
                 console.log('[RACE-SEQ] ÉTAPE 1: Calcul des résultats (utilise currentRound)');
-                const raceResults = await calculateRaceResults();
+                console.log('\n🔴🔴🔴 [PRE-CALL-DEBUG] Avant calculateRaceResults()');
+                console.log(`🔴🔴🔴 currentRound.id=${gameState.currentRound?.id}, receipts=${gameState.currentRound?.receipts?.length || 0}`);
+                console.log('[RACE-RESULTS] 🚀 APPEL calculateRaceResults() en cours...');
+                
+                let raceResults = null;
+                try {
+                    console.log('🔴🔴🔴 [EXECUTION-START] calculateRaceResults() va être appelée MAINTENANT');
+                    raceResults = await calculateRaceResults();
+                    console.log('🔴🔴🔴 [EXECUTION-END] calculateRaceResults() s\'est exécutée et a retourné');
+                    console.log('[RACE-RESULTS] ✅ calculateRaceResults() terminée, raceResults=' + (raceResults ? 'OK' : 'NULL'));
+                } catch (calculateError) {
+                    console.error('🔴🔴🔴 [EXECUTION-ERROR] calculateRaceResults() a lancé une exception:');
+                    console.error(calculateError);
+                    raceResults = null;
+                }
                 
                 if (raceResults) {
                     // ✅ Broadcaster les résultats complets à T=35s
                     // ✅ IMPORTANT: Ne PAS changer l'écran, juste mettre à jour les données
                     // Le finish_screen est déjà affiché depuis race_end (T=30s)
                     
-                    // ✅ VÉRIFICATION CRITIQUE: S'assurer que le gagnant broadcasté correspond à celui en DB
-                    console.log(`[RACE-SEQ] 🏆 Vérification du gagnant avant broadcast:`);
-                    console.log(`   - Gagnant calculé: ${raceResults.winner.name} (N°${raceResults.winner.number})`);
+                    // ✅ VÉRIFICATION CRITIQUE: Le gagnant vient SEULEMENT de chooseProfitableWinner()
+                    console.log(`[RACE-SEQ] 🏆 Vérification du gagnant:`);
+                    console.log(`   - Gagnant choisi par profitChoice: ${raceResults.winner.name} (N°${raceResults.winner.number})`);
                     console.log(`   - Place marquée: ${raceResults.winner.place}`);
-                    const finishScreenWinner = raceResults.participants.find(p => p.place === 1);
-                    if (finishScreenWinner) {
-                        console.log(`   - Gagnant du finish screen: ${finishScreenWinner.name} (N°${finishScreenWinner.number})`);
-                        if (finishScreenWinner.number !== raceResults.winner.number) {
-                            console.error(`[RACE-SEQ] ❌ INCOHÉRENCE: Le gagnant du finish screen ne correspond pas!`);
-                            console.error(`   ${finishScreenWinner.name} vs ${raceResults.winner.name}`);
-                        }
-                    }
-                    
-                    // ✅ CORRECTION CRITIQUE: Inclure currentRound avec les participants mis à jour
-                    // Cela garantit que le movie screen et le finish screen utilisent le même gagnant
-                    const currentRoundWithWinner = {
-                        ...gameState.currentRound,
-                        participants: raceResults.participants, // Participants avec le gagnant marqué place=1
-                        receipts: raceResults.receipts,
-                        totalPrize: raceResults.totalPrize,
-                        winner: raceResults.winner
-                    };
+                    console.log(`   - ✅ Source de vérité unique: chooseProfitableWinner()`);
                     
                     broadcast({
                         event: "race_results",
@@ -950,7 +612,6 @@ export default function createRoundsRouter(broadcast) {
                         receipts: JSON.parse(JSON.stringify(raceResults.receipts)),
                         totalPrize: raceResults.totalPrize,
                         participants: raceResults.participants,
-                        currentRound: currentRoundWithWinner, // ✅ NOUVEAU: Inclure currentRound avec le gagnant
                         gameHistory: gameState.gameHistory || [],
                         currentScreen: "finish_screen",  // ✅ NOUVEAU: Confirmer l'écran actuel
                         // ✅ NE PAS inclure isRaceRunning=false ici - cela sera dans new_round
@@ -962,14 +623,9 @@ export default function createRoundsRouter(broadcast) {
                 // Utiliser createNewRound() - une seule source de vérité consolidée
                 console.log('[RACE-SEQ] ÉTAPE 2: Création du nouveau round via createNewRound()');
                 const raceStartTimeBackup = gameState.raceStartTime;
-                
-                // ✅ CORRECTION CRITIQUE: S'assurer que isRaceRunning est false AVANT de créer le nouveau round
-                // Cela garantit que le nouveau round est créé dans un état "en attente" et non "course en cours"
                 gameState.isRaceRunning = false;
                 gameState.raceStartTime = null;
                 gameState.raceEndTime = null;
-                
-                console.log(`[RACE-SEQ] ✅ État réinitialisé: isRaceRunning=${gameState.isRaceRunning}, raceStartTime=${gameState.raceStartTime}, raceEndTime=${gameState.raceEndTime}`);
                 
                 // ✅ Appeler la nouvelle fonction unifiée
                 // archiveCurrentRound=true car c'est après une course
@@ -986,40 +642,15 @@ export default function createRoundsRouter(broadcast) {
                     checkLock: false             // ❌ NE PAS vérifier le lock car il est déjà set dans onCleanup()
                 });
                 
-                // ✅ CORRECTION CRITIQUE: Vérifier que le nouveau round ID est bien créé
-                if (!newRoundId) {
-                    console.error('[RACE-SEQ] ❌ ERREUR CRITIQUE: createNewRound() n\'a pas retourné de round ID!');
-                    console.error('[RACE-SEQ] currentRound:', gameState.currentRound);
-                } else {
-                    console.log(`[RACE-SEQ] ✅ Nouveau round créé avec succès: ID=${newRoundId}`);
-                    console.log(`[RACE-SEQ] 📊 Vérification: gameState.currentRound.id=${gameState.currentRound?.id}`);
-                    
-                    // ✅ VÉRIFICATION: S'assurer que gameState.currentRound.id correspond au nouveau round ID
-                    if (gameState.currentRound?.id !== newRoundId) {
-                        console.error(`[RACE-SEQ] ❌ INCOHÉRENCE: gameState.currentRound.id (${gameState.currentRound?.id}) !== newRoundId (${newRoundId})`);
-                        // Corriger l'incohérence
-                        if (gameState.currentRound) {
-                            gameState.currentRound.id = newRoundId;
-                            console.log(`[RACE-SEQ] ✅ Correction appliquée: gameState.currentRound.id mis à jour vers ${newRoundId}`);
-                        }
-                    }
-                }
-                
                 // ✅ ÉTAPE 3: CRÉER LE TIMER (T=35s) - ATOMIQUE
                 console.log('[RACE-SEQ] ÉTAPE 3: Démarrage du timer pour le prochain round');
                 const timerNow = Date.now();
                 gameState.nextRoundStartTime = timerNow + ROUND_WAIT_DURATION_MS;
                 
-                // ✅ CORRECTION: Utiliser le nouveau round ID pour le timer_update
-                const roundIdForTimer = newRoundId || gameState.currentRound?.id;
-                if (!roundIdForTimer) {
-                    console.error('[RACE-SEQ] ❌ ERREUR: Aucun round ID disponible pour timer_update!');
-                }
-                
                 broadcast({
                     event: 'timer_update',
                     serverTime: timerNow,
-                    roundId: roundIdForTimer,
+                    roundId: newRoundId || gameState.currentRound?.id,
                     timer: {
                         timeLeft: ROUND_WAIT_DURATION_MS,
                         totalDuration: ROUND_WAIT_DURATION_MS,
@@ -1027,101 +658,29 @@ export default function createRoundsRouter(broadcast) {
                         endTime: gameState.nextRoundStartTime
                     }
                 });
-                console.log(`[TIMER] ⏱️ Timer de ${ROUND_WAIT_DURATION_MS}ms créé et broadcasté pour round #${roundIdForTimer}`);
+                console.log(`[TIMER] ⏱️ Timer de ${ROUND_WAIT_DURATION_MS}ms créé et broadcasté`);
                 
             } catch (error) {
                 // ✅ Si une erreur survient, libérer le lock acquis au début de onCleanup()
                 console.error('[RACE-SEQ] ❌ Erreur dans onCleanup():', error.message);
-                console.error('[RACE-SEQ] ❌ Stack:', error.stack);
                 // Réinitialiser l'état pour éviter les blocages
                 gameState.isRaceRunning = false;
                 gameState.raceStartTime = null;
                 gameState.raceEndTime = null;
-                
-                // ✅ CRITIQUE: S'assurer qu'un timer est créé même en cas d'erreur
-                // Sinon le système restera bloqué sans timer
-                const errorNow = Date.now();
-                if (!gameState.nextRoundStartTime || gameState.nextRoundStartTime <= errorNow) {
-                    console.warn('[RACE-SEQ] ⚠️ Timer manquant après erreur, création d\'urgence...');
-                    gameState.nextRoundStartTime = errorNow + ROUND_WAIT_DURATION_MS;
-                    
-                    // Créer un nouveau round d'urgence si nécessaire
-                    if (!gameState.currentRound || !gameState.currentRound.id) {
-                        console.warn('[RACE-SEQ] ⚠️ Round manquant après erreur, création d\'urgence...');
-                        try {
-                            await createNewRound({
-                                broadcast: broadcast || (() => {}),
-                                archiveCurrentRound: false,
-                                checkLock: false // Pas de lock car déjà libéré dans finally
-                            });
-                        } catch (emergencyErr) {
-                            console.error('[RACE-SEQ] ❌ Erreur création round d\'urgence:', emergencyErr);
-                        }
-                    }
-                    
-                    // Broadcaster le timer d'urgence
-                    if (broadcast) {
-                        broadcast({
-                            event: 'timer_update',
-                            serverTime: errorNow,
-                            roundId: gameState.currentRound?.id,
-                            timer: {
-                                timeLeft: ROUND_WAIT_DURATION_MS,
-                                totalDuration: ROUND_WAIT_DURATION_MS,
-                                startTime: errorNow,
-                                endTime: gameState.nextRoundStartTime
-                            }
-                        });
-                    }
-                }
                 // Ne pas throw pour éviter de bloquer le serveur
             } finally {
                 // ✅ TOUJOURS libérer le lock à la fin (succès ou erreur)
                 gameState.operationLock = false;
                 console.log('[LOCK] 🔓 operationLock libéré par onCleanup()');
                 
-                // ✅ VÉRIFICATION FINALE CRITIQUE: S'assurer qu'un timer existe après le cleanup
-                // Si le timer n'existe toujours pas, le créer maintenant (dernière chance)
-                const finalNow = Date.now();
-                if (!gameState.nextRoundStartTime || gameState.nextRoundStartTime <= finalNow) {
-                    console.warn('[RACE-SEQ] ⚠️ Timer toujours manquant après finally, création finale...');
-                    gameState.nextRoundStartTime = finalNow + ROUND_WAIT_DURATION_MS;
-                    
-                    // Créer un nouveau round si nécessaire
-                    if (!gameState.currentRound || !gameState.currentRound.id) {
-                        console.warn('[RACE-SEQ] ⚠️ Round toujours manquant après finally, création finale...');
-                        try {
-                            await createNewRound({
-                                broadcast: broadcast || (() => {}),
-                                archiveCurrentRound: false,
-                                checkLock: false // Pas de lock car déjà libéré
-                            });
-                        } catch (finalErr) {
-                            console.error('[RACE-SEQ] ❌ Erreur création round finale:', finalErr);
-                        }
-                    }
-                    
-                    // Broadcaster le timer final
-                    if (broadcast) {
-                        broadcast({
-                            event: 'timer_update',
-                            serverTime: finalNow,
-                            roundId: gameState.currentRound?.id,
-                            timer: {
-                                timeLeft: ROUND_WAIT_DURATION_MS,
-                                totalDuration: ROUND_WAIT_DURATION_MS,
-                                startTime: finalNow,
-                                endTime: gameState.nextRoundStartTime
-                            }
-                        });
-                    }
-                    console.log('[RACE-SEQ] ✅ Timer final créé dans finally');
-                }
-                
-                // ✅ CORRECTION: Ne pas recharger la page
-                // Les événements WebSocket (race_results, new_round) gèrent la mise à jour de l'UI
-                // Recharger causait une race condition avec localStorage et round_winner
-                console.log('[RACE-SEQ] ✅ Cleanup complete - UI sera mise à jour via WebSocket (race_results, new_round)');
+                // ✅ NOUVEAU: Envoyer un message WebSocket pour recharger la page
+                broadcast({
+                    event: 'reload_page',
+                    reason: 'cleanup_complete',
+                    roundId: gameState.currentRound?.id || null,
+                    serverTime: Date.now()
+                });
+                console.log('[RACE-SEQ] 📡 Message WebSocket reload_page envoyé après cleanup');
             }
         }
     };
@@ -1193,75 +752,9 @@ export default function createRoundsRouter(broadcast) {
         // ✅ UTILISER LES CONSTANTES UNIFIÉES IMPORTÉES DE config/app.config.js
         // Pas de redéfinition locale des timers!
 
-        // ✅ TIMER GUARD: Vérifier et réparer automatiquement les états bloqués
-        let timerFixed = false;
-        
-        // Vérifier si isRaceRunning est bloqué (course "en cours" depuis trop longtemps)
-        if (gameState.isRaceRunning && gameState.raceStartTime) {
-            const elapsed = now - gameState.raceStartTime;
-            const hasActiveTimers = gameState.timers.finish !== null || gameState.timers.cleanup !== null;
-            
-            // Si la course est "en cours" depuis plus de 50s (35s + 15s marge) et pas de timers actifs
-            if (elapsed > TOTAL_RACE_TIME_MS + 15000 || (!hasActiveTimers && elapsed > 5000)) {
-                console.warn(`[TIMER-GUARD] ⚠️ Course bloquée détectée (elapsed=${elapsed}ms, timers=${hasActiveTimers ? 'actifs' : 'inactifs'}), réinitialisation...`);
-                gameState.isRaceRunning = false;
-                gameState.raceStartTime = null;
-                gameState.raceEndTime = null;
-                clearAllTimers();
-                raceTimerManager.activeRaces.clear();
-                timerFixed = true;
-            }
-        }
-        
-        // ✅ TIMER GUARD: Vérifier si le timer est bloqué (null ou expiré sans course)
-        if (!gameState.isRaceRunning && (!gameState.nextRoundStartTime || gameState.nextRoundStartTime <= now)) {
-            // Timer bloqué: créer un nouveau round automatiquement
-            console.warn(`[TIMER-GUARD] ⚠️ Timer bloqué détecté (nextRoundStartTime=${gameState.nextRoundStartTime ? new Date(gameState.nextRoundStartTime).toISOString() : 'null'}), création automatique d'un nouveau round...`);
-            
-            // Vérifier que le lock n'est pas bloqué
-            if (gameState.operationLock) {
-                console.warn('[TIMER-GUARD] ⚠️ operationLock actif, libération forcée...');
-                gameState.operationLock = false;
-            }
-            
-            try {
-                // Créer un nouveau round automatiquement
-                const newRoundId = await createNewRound({
-                    broadcast: broadcast || (() => {}),
-                    archiveCurrentRound: false,
-                    checkLock: false // Pas de lock car déjà vérifié
-                });
-                
-                if (newRoundId) {
-                    const timerNow = Date.now();
-                    gameState.nextRoundStartTime = timerNow + ROUND_WAIT_DURATION_MS;
-                    
-                    // Broadcaster le nouveau timer
-                    if (broadcast) {
-                        broadcast({
-                            event: 'timer_update',
-                            serverTime: timerNow,
-                            roundId: newRoundId,
-                            timer: {
-                                timeLeft: ROUND_WAIT_DURATION_MS,
-                                totalDuration: ROUND_WAIT_DURATION_MS,
-                                startTime: timerNow,
-                                endTime: gameState.nextRoundStartTime
-                            }
-                        });
-                    }
-                    
-                    console.log(`[TIMER-GUARD] ✅ Nouveau round créé automatiquement (ID: ${newRoundId}), timer réinitialisé`);
-                    timerFixed = true;
-                }
-            } catch (guardErr) {
-                console.error('[TIMER-GUARD] ❌ Erreur création automatique round:', guardErr);
-                // En cas d'erreur, au moins réinitialiser le timer
-                const timerNow = Date.now();
-                gameState.nextRoundStartTime = timerNow + ROUND_WAIT_DURATION_MS;
-                timerFixed = true;
-            }
-        }
+        // ✅ PROBLÈME #15 CORRIGÉ: GET endpoint sans side effects
+        // La création automatique de round a été déplacée vers POST /api/v1/rounds/ avec action=reset_timer
+        // Si le timer est bloqué, l'admin peut appeler POST /api/v1/rounds/ avec action=reset_timer
 
         let screen = "game_screen"; // Par défaut
         let timeRemaining = 0;
@@ -1304,8 +797,7 @@ export default function createRoundsRouter(broadcast) {
                 ? gameState.nextRoundStartTime - now 
                 : 0,
             timerTotalDuration: ROUND_WAIT_DURATION_MS,
-            gameHistory: gameState.gameHistory || [],
-            timerFixed: timerFixed // Indiquer si le timer a été réparé automatiquement
+            gameHistory: gameState.gameHistory || []
         });
     });
 
@@ -1439,14 +931,14 @@ export default function createRoundsRouter(broadcast) {
                 const raceSequenceId = `${roundId}-${Date.now()}`;
                 
                 // ✅ UTILISER LE GESTIONNAIRE CENTRALISÉ
-                const success = raceTimerManager.startRaceSequence(raceSequenceId, raceCallbacks, broadcast);
+                const success = raceTimerManager.startRaceSequence(raceSequenceId, raceCallbacks);
                 
                 if (!success) {
                     console.warn('[FINISH] ⚠️ startRaceSequence a retourné false, nettoyage de activeRaces...');
                     // Nettoyer les anciennes séquences orphelines
                     raceTimerManager.activeRaces.clear();
                     // Réessayer
-                    const retrySuccess = raceTimerManager.startRaceSequence(raceSequenceId, raceCallbacks, broadcast);
+                    const retrySuccess = raceTimerManager.startRaceSequence(raceSequenceId, raceCallbacks);
                     if (!retrySuccess) {
                         return res.json(wrap({ skipped: true, reason: 'race sequence already active after cleanup' }));
                     }

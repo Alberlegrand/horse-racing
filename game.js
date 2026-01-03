@@ -192,201 +192,38 @@ export async function createNewRound(options = {}) {
         console.log(`[ROUND-CREATE] 🔑 Seed complet (hex): [${roundSeed.map(s => s.toString(16).padStart(8, '0')).join(', ')}]`);
         console.log(`[ROUND-CREATE] 🔑 Seed (décimal): [${roundSeed.join(', ')}]`);
         
-        // ✅ TEST: Générer quelques nombres aléatoires pour vérifier que le RNG fonctionne
-        console.log(`[ROUND-CREATE] 🔬 ========== TEST DU RNG ==========`);
-        const testRandom1 = chacha20RandomInt(100);
-        const testRandom2 = chacha20RandomInt(100);
-        const testRandom3 = chacha20RandomInt(100);
-        const testRandom4 = chacha20RandomInt(6); // Pour simuler une sélection de place
-        const testRandom5 = chacha20RandomInt(6);
-        const testRandom6 = chacha20RandomInt(6);
-        console.log(`[ROUND-CREATE] 🔬 Test RNG (3 nombres aléatoires 0-99): [${testRandom1}, ${testRandom2}, ${testRandom3}]`);
-        console.log(`[ROUND-CREATE] 🔬 Test RNG (3 nombres aléatoires 0-5 pour places): [${testRandom4}, ${testRandom5}, ${testRandom6}]`);
-        console.log(`[ROUND-CREATE] 🔬 Vérification: Les valeurs sont différentes = ${testRandom1 !== testRandom2 || testRandom2 !== testRandom3 ? '✅ Oui' : '⚠️ Non'}`);
-        console.log(`[ROUND-CREATE] 🔬 ========== FIN TEST DU RNG ==========`);
+       
+        // ✅ ARCHITECTURE SIMPLIFIÉE: Pas de places au démarrage
+        // Les places seront attribuées par profit-choice APRÈS réception des paris
+        // et AVANT le broadcast de race_start
         
-        // ✅ ALGORITHME RNG COMPLÈTEMENT RÉVISÉ: Attribution aléatoire avec shuffle Fisher-Yates
-        // 
-        // PROBLÈME IDENTIFIÉ: L'itération séquentielle sur BASE_PARTICIPANTS (family 0→5)
-        // créait un pattern prévisible même avec sélection aléatoire de places.
-        //
-        // SOLUTION: Mélanger les participants AVANT d'attribuer les places pour garantir
-        // un ordre d'attribution vraiment aléatoire.
-        //
-        // ÉTAPE 1: Créer une liste des places disponibles (1-6)
-        const availablePlaces = [1, 2, 3, 4, 5, 6];
+        const participantsWithoutPlaces = BASE_PARTICIPANTS.map(p => ({ ...p, place: 0 }));
         
-        // ÉTAPE 2: Créer une copie des participants
-        const participantsCopy = BASE_PARTICIPANTS.map(p => ({ ...p }));
-        
-        console.log(`[ROUND-CREATE] 🎲 ========== DÉBUT ATTRIBUTION ALÉATOIRE DES PLACES ==========`);
-        console.log(`[ROUND-CREATE] 🔍 Round ID: ${newRoundId}`);
-        console.log(`[ROUND-CREATE] 🔍 Seed (hex): [${roundSeed.map(s => s.toString(16).padStart(8, '0')).join(', ')}]`);
-        console.log(`[ROUND-CREATE] 📋 Participants AVANT shuffle (ordre original):`);
-        participantsCopy.forEach((p, idx) => {
+        console.log(`[ROUND-CREATE] 📋 Participants créés (places seront attribuées par profit-choice au démarrage de la course):`);
+        participantsWithoutPlaces.forEach((p, idx) => {
             console.log(`   [${idx}] №${p.number} ${p.name} (family: ${p.family}, coeff: ${p.coeff})`);
         });
-        console.log(`[ROUND-CREATE] 📋 Places disponibles: [${availablePlaces.join(', ')}]`);
-        
-        // ✅ ÉTAPE 3 CRITIQUE: MÉLANGER LES PARTICIPANTS AVANT D'ATTRIBUER LES PLACES
-        // Cela garantit que l'ordre d'attribution est vraiment aléatoire, pas séquentiel
-        console.log(`[ROUND-CREATE] 🔀 Mélange des participants avec Fisher-Yates shuffle...`);
-        const shuffledParticipants = chacha20Shuffle(participantsCopy);
-        
-        // ✅ Vérifier que le shuffle a bien modifié l'ordre
-        const orderChanged = !participantsCopy.every((p, idx) => p.number === shuffledParticipants[idx].number);
-        console.log(`[ROUND-CREATE] 🔀 Ordre modifié par le shuffle: ${orderChanged ? '✅ Oui' : '⚠️ Non (problème possible!)'}`);
-        if (!orderChanged) {
-            console.warn(`[ROUND-CREATE] ⚠️ ATTENTION: Le shuffle n'a pas modifié l'ordre des participants!`);
-            console.warn(`[ROUND-CREATE] ⚠️ Cela peut indiquer un problème avec le RNG ou le shuffle`);
-        }
-        
-        console.log(`[ROUND-CREATE] ✅ Participants APRÈS shuffle (ordre aléatoire):`);
-        shuffledParticipants.forEach((p, idx) => {
-            const originalIndex = participantsCopy.findIndex(orig => orig.number === p.number);
-            const moved = originalIndex !== idx ? ` (déplacé de position ${originalIndex})` : '';
-            console.log(`   [${idx}] №${p.number} ${p.name} (family: ${p.family}, coeff: ${p.coeff})${moved}`);
-        });
-        
-        // ✅ ÉTAPE 4: Assigner une place aléatoire à chaque participant DANS L'ORDRE MÉLANGÉ
-        // Utiliser Fisher-Yates pour sélectionner une place aléatoire pour chaque participant
-        const participantsWithPlaces = [];
-        const placesRemaining = [...availablePlaces];
-        
-        console.log(`[ROUND-CREATE] 🎯 Attribution des places (ordre mélangé):`);
-        for (let i = 0; i < shuffledParticipants.length; i++) {
-            const participant = shuffledParticipants[i];
-            
-            // Sélectionner une place aléatoire parmi les places restantes
-            const randomIndex = chacha20RandomInt(placesRemaining.length);
-            const selectedPlace = placesRemaining[randomIndex];
-            
-            // Logs détaillés pour chaque attribution
-            console.log(`[ROUND-CREATE]   ┌─ Itération ${i + 1}/${shuffledParticipants.length}`);
-            console.log(`[ROUND-CREATE]   │  Participant: №${participant.number} ${participant.name} (family: ${participant.family})`);
-            console.log(`[ROUND-CREATE]   │  Places restantes: [${placesRemaining.join(', ')}] (${placesRemaining.length} disponibles)`);
-            console.log(`[ROUND-CREATE]   │  Index aléatoire généré: ${randomIndex} (via chacha20RandomInt(${placesRemaining.length}))`);
-            console.log(`[ROUND-CREATE]   │  Place sélectionnée: ${selectedPlace}`);
-            
-            // Retirer la place sélectionnée de la liste
-            placesRemaining.splice(randomIndex, 1);
-            
-            // Assigner la place au participant
-            const participantWithPlace = {
-                ...participant,
-                place: selectedPlace
-            };
-            
-            participantsWithPlaces.push(participantWithPlace);
-            
-            console.log(`[ROUND-CREATE]   └─ ✅ Attribué: №${participant.number} ${participant.name} (family: ${participant.family}) → place ${selectedPlace}`);
-            console.log(`[ROUND-CREATE]      Places restantes après attribution: [${placesRemaining.join(', ')}]`);
-        }
-        
-        // ✅ ÉTAPE 5: Vérifier l'intégrité des places (chaque place 1-6 doit être présente exactement une fois)
-        const assignedPlaces = participantsWithPlaces.map(p => p.place).sort((a, b) => a - b);
-        const expectedPlaces = [1, 2, 3, 4, 5, 6];
-        const placesValid = JSON.stringify(assignedPlaces) === JSON.stringify(expectedPlaces);
-        
-        console.log(`[ROUND-CREATE] 🔍 ========== VÉRIFICATION DE L'INTÉGRITÉ ==========`);
-        console.log(`[ROUND-CREATE] 🔍 Places assignées (triées): [${assignedPlaces.join(', ')}]`);
-        console.log(`[ROUND-CREATE] 🔍 Places attendues: [${expectedPlaces.join(', ')}]`);
-        console.log(`[ROUND-CREATE] 🔍 Places restantes: [${placesRemaining.join(', ')}]`);
-        console.log(`[ROUND-CREATE] 🔍 Validation: ${placesValid ? '✅ OK' : '❌ ÉCHEC'}`);
-        
-        if (!placesValid) {
-            console.error(`[ROUND-CREATE] ❌ ERREUR CRITIQUE: Places invalides!`);
-            console.error(`   Places assignées: [${assignedPlaces.join(', ')}]`);
-            console.error(`   Places attendues: [${expectedPlaces.join(', ')}]`);
-            console.error(`   Places restantes: [${placesRemaining.join(', ')}]`);
-            throw new Error(`Invalid place distribution: expected [1,2,3,4,5,6], got [${assignedPlaces.join(',')}]`);
-        }
-        
-        // ✅ ÉTAPE 6: Analyser la distribution des places par family
-        console.log(`[ROUND-CREATE] 📊 ========== ANALYSE DE LA DISTRIBUTION ==========`);
-        const distributionByFamily = {};
-        participantsWithPlaces.forEach(p => {
-            if (!distributionByFamily[p.family]) {
-                distributionByFamily[p.family] = [];
-            }
-            distributionByFamily[p.family].push({
-                number: p.number,
-                name: p.name,
-                place: p.place
-            });
-        });
-        
-        console.log(`[ROUND-CREATE] 📊 Distribution des places par family:`);
-        for (let family = 0; family <= 5; family++) {
-            const familyParticipants = distributionByFamily[family] || [];
-            if (familyParticipants.length > 0) {
-                const places = familyParticipants.map(p => p.place).sort((a, b) => a - b);
-                const isWinner = places.includes(1) ? ' 🏆' : '';
-                console.log(`[ROUND-CREATE]   Family ${family}: ${familyParticipants.map(p => `№${p.number} ${p.name}`).join(', ')} → places [${places.join(', ')}]${isWinner}`);
-            } else {
-                console.log(`[ROUND-CREATE]   Family ${family}: Aucun participant`);
-            }
-        }
-        
-        // ✅ Vérifier si le pattern uniforme (family 0→5 = place 1→6) est présent
-        const sortedByFamily = [...participantsWithPlaces].sort((a, b) => a.family - b.family);
-        const sortedByPlace = [...participantsWithPlaces].sort((a, b) => a.place - b.place);
-        const isUniformPattern = sortedByFamily.every((p, idx) => p.place === idx + 1);
-        
-        if (isUniformPattern) {
-            console.warn(`[ROUND-CREATE] ⚠️ ATTENTION: Pattern uniforme détecté!`);
-            console.warn(`[ROUND-CREATE] ⚠️ Family 0→5 correspond exactement à place 1→6`);
-            console.warn(`[ROUND-CREATE] ⚠️ Cela ne devrait PAS se produire avec un vrai shuffle aléatoire`);
-        } else {
-            console.log(`[ROUND-CREATE] ✅ Pas de pattern uniforme détecté (bon signe)`);
-        }
-        
-        console.log(`[ROUND-CREATE] 🎲 ========== RÉSULTAT FINAL DE L'ATTRIBUTION ==========`);
-        console.log(`[ROUND-CREATE] 🎲 Résultat trié par place:`);
-        sortedByPlace.forEach((p, i) => {
-            const isWinner = p.place === 1 ? ' 🏆' : '';
-            console.log(`[ROUND-CREATE]   Place ${p.place}: №${p.number} ${p.name} (family: ${p.family})${isWinner}`);
-        });
-        
-        console.log(`[ROUND-CREATE] 🎲 Résultat trié par ordre d'attribution:`);
-        participantsWithPlaces.forEach((p, i) => {
-            const isWinner = p.place === 1 ? ' 🏆' : '';
-            console.log(`[ROUND-CREATE]   [${i}] №${p.number} ${p.name} (family: ${p.family}) → place ${p.place}${isWinner}`);
-        });
-        
-        console.log(`[ROUND-CREATE] 🎲 ========== FIN ATTRIBUTION ALÉATOIRE DES PLACES ==========`);
 
         const newRound = {
             id: newRoundId,
-            participants: participantsWithPlaces,
+            participants: participantsWithoutPlaces,  // ✅ place:0 = EN ATTENTE
             receipts: [],
             lastReceiptId: 3,
             totalPrize: 0,
             persisted: false
         };
         
-        // ✅ Trouver le gagnant (participant avec place: 1)
-        const winner = newRound.participants.find(p => p.place === 1);
-        if (winner) {
-            console.log(`[ROUND-CREATE] 🏆 ========== GAGNANT DÉTERMINÉ ==========`);
-            console.log(`[ROUND-CREATE] 🏆 Gagnant: №${winner.number} ${winner.name} (family: ${winner.family}, place: 1)`);
-            console.log(`[ROUND-CREATE] 🏆 Vérification: Le gagnant a bien place === 1: ${winner.place === 1 ? '✅ Oui' : '❌ Non'}`);
-            console.log(`[ROUND-CREATE] 📊 Distribution complète des places (triée par place):`);
-            newRound.participants
-                .sort((a, b) => a.place - b.place)
-                .forEach(p => {
-                    const isWinner = p.place === 1 ? ' 🏆' : '';
-                    console.log(`[ROUND-CREATE]   Place ${p.place}: №${p.number} ${p.name} (family: ${p.family})${isWinner}`);
-                });
-            console.log(`[ROUND-CREATE] 🏆 ========== FIN GAGNANT ==========`);
-        } else {
-            console.error(`[ROUND-CREATE] ❌ ERREUR: Aucun participant avec place: 1 trouvé!`);
-            console.error(`[ROUND-CREATE] ❌ Participants disponibles:`);
-            newRound.participants.forEach(p => {
-                console.error(`[ROUND-CREATE]   №${p.number} ${p.name} (family: ${p.family}, place: ${p.place})`);
-            });
-            throw new Error('No winner found: participant with place: 1 is missing');
-        }
+        // ✅ ARCHITECTURE FINALE - SIMPLE ET EFFICACE:
+        // T=?s: Paris reçus via POST /api/bets
+        // T=Race Start: Appel à profit-choice() → détermine places 1-6 POUR TOUS les participants
+        // T=0s: race_start broadcast avec places finales du profit-choice
+        // T=30s: race_end event
+        // T=40s: finish_screen affiche gagnant
+        
+        console.log(`[ROUND-CREATE] ⏰ TIMELINE SIMPLIFIÉE:`);
+        console.log(`[ROUND-CREATE]   - Participants initialisés avec place:0`);
+        console.log(`[ROUND-CREATE]   - Au démarrage de la course: profit-choice attribue les places 1-6`);
+        console.log(`[ROUND-CREATE]   - race_start broadcast avec places finales du profit-choice`);
 
         gameState.currentRound = newRound;
         console.log(`[ROUND-CREATE] ✅ Nouveau round #${newRoundId} en mémoire`);
@@ -707,6 +544,199 @@ export async function invalidateGameStateCache() {
         console.error(`⚠️ [CACHE] Erreur invalidation gameState cache:`, err.message);
         return false;
     }
+}
+
+/**
+ * ✅ ARCHITECTURE FINALE: profit-choice attribue place:1-6 à TOUS les participants
+ * 
+ * Algorithme:
+ * 1. Calculer TotalMises = somme de toutes les mises
+ * 2. Calculer MargeGlobale = TotalMises × 25%
+ * 3. Calculer ResteDistribuable = TotalMises - MargeGlobale
+ * 4. Pour chaque participant, estimer payout = somme(mise × coeff) si ce participant gagne
+ * 5. Sélectionner un gagnant dont payout ≤ ResteDistribuable
+ * 6. Si aucun viable, choisir celui avec payout minimal (perte minimale)
+ * 7. Attribuer place:1 au gagnant et places:2-6 aux autres (mélangés aléatoirement)
+ * 
+ * @param {Object} roundData - Données du round { participants: [], receipts: [] }
+ * @param {number} marginPercent - Pourcentage de marge (défaut: 0.25 = 25%)
+ * @returns {Object} { winner, allParticipantsWithPlaces, reason, totalMises, margeGlobale, resteDistribuable, payoutsByNumber }
+ */
+export function chooseProfitableWinner(roundData, marginPercent = 0.25) {
+    console.log(`[PROFIT-CHOICE] 🔄 Fonction executée...`);
+    const participants = Array.isArray(roundData.participants) ? roundData.participants : [];
+    const receipts = Array.isArray(roundData.receipts) ? roundData.receipts : [];
+
+    console.log(`[PROFIT-CHOICE] 📊 Données reçues: ${participants.length} participants, ${receipts.length} receipts`);
+
+    // ÉTAPE 1: Calculer le total des mises
+    const totalMises = receipts.reduce((accR, r) => {
+        const betsSum = (r.bets || []).reduce((accB, b) => accB + (Number(b.value) || 0), 0);
+        return accR + betsSum;
+    }, 0);
+
+    // ÉTAPE 2: Calculer la marge globale
+    const margeGlobale = Math.floor(totalMises * Number(marginPercent));
+    
+    // ÉTAPE 3: Calculer le reste distribuable
+    const resteDistribuable = totalMises - margeGlobale;
+
+    console.log(`[PROFIT-CHOICE] 💰 ========== MARGE DE RENTABILITÉ (25%) ==========`);
+    console.log(`[PROFIT-CHOICE] 💵 TotalMises:        ${totalMises}`);
+    console.log(`[PROFIT-CHOICE] 🔐 MargeGlobale (25%): ${margeGlobale}`);
+    console.log(`[PROFIT-CHOICE] 💸 ResteDistribuable: ${resteDistribuable}`);
+
+    // ÉTAPE 4: Calculer payout potentiel pour chaque participant
+    const payoutsByNumber = {};
+    const misesByNumber = {}; // Track mises pour analyse
+    participants.forEach(p => { 
+        payoutsByNumber[p.number] = 0;
+        misesByNumber[p.number] = 0;
+    });
+
+    receipts.forEach(receipt => {
+        (receipt.bets || []).forEach(bet => {
+            const num = Number(bet.number ?? bet.participant?.number);
+            if (!Number.isFinite(num)) return;
+            
+            // Récupérer le coefficient: priorité bet.participant.coeff -> participant coeff
+            let coeff = 0;
+            if (bet.participant && bet.participant.coeff) {
+                coeff = Number(bet.participant.coeff);
+            } else {
+                const participant = participants.find(pp => Number(pp.number) === num);
+                if (participant && participant.coeff) {
+                    coeff = Number(participant.coeff);
+                }
+            }
+            
+            const betValue = Number(bet.value) || 0;
+            misesByNumber[num] = (misesByNumber[num] || 0) + betValue; // Accumuler les mises
+            // payout contribution = mise × coeff
+            payoutsByNumber[num] = (payoutsByNumber[num] || 0) + Math.floor(betValue * coeff);
+        });
+    });
+    
+    // Log des mises et payouts
+    console.log(`[PROFIT-CHOICE] 💳 Analyse par participant:`);
+    participants.forEach(p => {
+        const mise = misesByNumber[p.number] || 0;
+        const payout = payoutsByNumber[p.number] || 0;
+        const isViable = payout <= resteDistribuable;
+        const marker = isViable ? '✅ VIABLE' : '❌ RISQUÉ';
+        const margin = resteDistribuable - payout;
+        console.log(`[PROFIT-CHOICE]   ${marker} №${p.number} ${p.name}: mise=${mise} → payout=${payout} (marge: ${margin >= 0 ? '+' : ''}${margin})`);
+    });
+
+    // ÉTAPE 5: Construire liste de candidats viables
+    const viable = participants.filter(p => {
+        const payout = payoutsByNumber[p.number] || 0;
+        return payout <= resteDistribuable;
+    });
+
+    console.log(`[PROFIT-CHOICE] 📋 RÉSUMÉ VIABILITÉ:`);
+    console.log(`[PROFIT-CHOICE]   - Viables: ${viable.length}/${participants.length}`);
+    console.log(`[PROFIT-CHOICE]   - Mises totales: ${totalMises} centimes (${(totalMises/100).toFixed(2)} HTG)`);
+    console.log(`[PROFIT-CHOICE]   - Marge 25%: ${margeGlobale} centimes (${(margeGlobale/100).toFixed(2)} HTG)`);
+    console.log(`[PROFIT-CHOICE]   - Reste distribuable: ${resteDistribuable} centimes (${(resteDistribuable/100).toFixed(2)} HTG)`);
+    if (viable.length > 0) {
+        viable.forEach(p => {
+            const payout = payoutsByNumber[p.number] || 0;
+            console.log(`[PROFIT-CHOICE]   ✅ №${p.number} ${p.name}: payout=${payout} centimes (${(payout/100).toFixed(2)} HTG)`);
+        });
+    } else {
+        console.warn(`[PROFIT-CHOICE] ⚠️ AUCUN gagnant viable! Mises trop concentrées ou coefficients trop élevés.`);
+        console.warn(`[PROFIT-CHOICE] ⚠️ Les participants avec payout minimal:`);
+        participants.forEach(p => {
+            const payout = payoutsByNumber[p.number] || 0;
+            const excess = payout - resteDistribuable;
+            console.warn(`[PROFIT-CHOICE]   ❌ №${p.number} ${p.name}: payout=${payout} centimes (DÉPASSEMENT: +${excess} centimes)`);
+        });
+    }
+
+    let chosen = null;
+    let reason = 'unknown';
+
+    if (viable.length > 0) {
+        // Choisir au hasard parmi viables
+        console.log(`[PROFIT-CHOICE] ✅ ${viable.length} gagnant(s) viable(s) trouvé(s)`);
+        try {
+            const idx = typeof chacha20RandomInt === 'function' ? chacha20RandomInt(viable.length) : Math.floor(Math.random() * viable.length);
+            chosen = viable[idx];
+            reason = 'viable';
+        } catch (err) {
+            console.warn(`[PROFIT-CHOICE] ⚠️ Erreur chacha20RandomInt, fallback random`);
+            chosen = viable[Math.floor(Math.random() * viable.length)];
+            reason = 'viable_random_fallback';
+        }
+    } else {
+        // ÉTAPE 6: Aucun viable → choisir celui avec payout minimal (perte minimale)
+        console.warn(`[PROFIT-CHOICE] ⚠️ Aucun gagnant viable, sélection du moindre coût`);
+        let minPayload = Number.POSITIVE_INFINITY;
+        participants.forEach(p => {
+            const payout = payoutsByNumber[p.number] || 0;
+            if (payout < minPayload) {
+                minPayload = payout;
+                chosen = p;
+            }
+        });
+        reason = 'min_loss';
+    }
+
+    if (!chosen && participants.length > 0) {
+        console.error(`[PROFIT-CHOICE] ❌ Impossible de choisir un gagnant!`);
+        chosen = participants[0];
+        reason = 'fallback_first';
+    }
+
+    if (chosen) {
+        const chosenPayout = payoutsByNumber[chosen.number] || 0;
+        const margin = resteDistribuable - chosenPayout;
+        const marginPercent = ((margin / totalMises) * 100).toFixed(2);
+        console.log(`[PROFIT-CHOICE] 🏆 ========== GAGNANT SÉLECTIONNÉ ==========`);
+        console.log(`[PROFIT-CHOICE] 🎯 Participant: №${chosen.number} ${chosen.name}`);
+        console.log(`[PROFIT-CHOICE] 💰 Payout estimé: ${chosenPayout}`);
+        console.log(`[PROFIT-CHOICE] 🔐 Marge préservée: ${margin} (${marginPercent}%)`);
+        console.log(`[PROFIT-CHOICE] 📌 Raison: ${reason}`);
+        console.log(`[PROFIT-CHOICE] ========== FIN SÉLECTION ==========`);
+    }
+
+    // ✅ ÉTAPE FINALE: Attribuer place:1 au gagnant et places:2-6 aux autres
+    console.log(`[PROFIT-CHOICE] 🎲 ATTRIBUTION DES PLACES:`);
+    
+    // Séparer le gagnant des autres participants
+    const otherParticipants = participants.filter(p => Number(p.number) !== Number(chosen?.number));
+    
+    // Mélanger les autres participants pour aléatoires les places 2-6
+    const shuffledOthers = chacha20Shuffle(otherParticipants);
+    
+    // Construire le tableau final avec places attribuées
+    const allParticipantsWithPlaces = [
+        { ...chosen, place: 1 },  // Gagnant en place 1
+        ...shuffledOthers.map((p, idx) => ({ ...p, place: idx + 2 }))  // Autres en places 2-6
+    ];
+    
+    console.log(`[PROFIT-CHOICE] 🏆 Distribution FINALE des places:`);
+    allParticipantsWithPlaces
+        .sort((a, b) => a.place - b.place)
+        .forEach((p, idx) => {
+            const marker = p.place === 1 ? '🏆' : '  ';
+            console.log(`[PROFIT-CHOICE]   ${marker} Place ${p.place}: №${p.number} ${p.name}`);
+        });
+
+    return {
+        winner: (() => {
+            // ✅ Retourner le gagnant SANS place (place sera dans allParticipantsWithPlaces)
+            const { place, ...winnerWithoutPlace } = chosen;
+            return winnerWithoutPlace;
+        })(),
+        allParticipantsWithPlaces,  // ✅ NOUVEAU: Tableau complet avec places attribuées
+        reason,
+        totalMises,
+        margeGlobale,
+        resteDistribuable,
+        payoutsByNumber
+    };
 }
 
 

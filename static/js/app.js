@@ -11,27 +11,6 @@ class App {
         return statusMap[status] || status;
     }
 
-    // Fonction utilitaire pour formater les dates avec le fuseau horaire Haïti/Port-au-Prince
-    formatDate(date) {
-        if (!date) return '';
-        try {
-            const dateObj = new Date(date);
-            // Utiliser le fuseau horaire America/Port-au-Prince
-            return dateObj.toLocaleString('fr-FR', {
-                timeZone: 'America/Port-au-Prince',
-                year: 'numeric',
-                month: '2-digit',
-                day: '2-digit',
-                hour: '2-digit',
-                minute: '2-digit',
-                second: '2-digit'
-            });
-        } catch (e) {
-            console.warn('Erreur formatage date:', e);
-            return new Date(date).toLocaleString('fr-FR');
-        }
-    }
-
     constructor() {
         this.currentPage = 'dashboard';
         this.isRaceRunning = false; // État de la course pour contrôler les boutons d'annulation
@@ -130,30 +109,12 @@ class App {
 
         switch (pageId) {
             case 'dashboard':
-                // ✅ CORRECTION: Réinitialiser le cache lors de la navigation vers dashboard
-                if (this.dashboardRefreshTickets) {
-                    // Forcer le rafraîchissement si la fonction existe déjà
-                    setTimeout(() => {
-                        if (this.dashboardRefreshTickets) {
-                            this.dashboardRefreshTickets(true);
-                        }
-                    }, 100);
-                }
                 this.initDashboard();
                 break;
             case 'course-chevaux':
                 this.initCourseChevaux();
                 break;
             case 'my-bets':
-                // ✅ CORRECTION: Forcer le rafraîchissement lors de la navigation vers my-bets
-                // Si myBetsFetchMyBets existe déjà, forcer le rafraîchissement
-                if (this.myBetsFetchMyBets) {
-                    setTimeout(() => {
-                        if (this.myBetsFetchMyBets) {
-                            this.myBetsFetchMyBets(1);
-                        }
-                    }, 100);
-                }
                 this.initMyBets();
                 break;
             case 'betting':
@@ -217,32 +178,21 @@ class App {
            Fonction pour formater un ticket depuis les données WebSocket
         ------------------------- */
         const formatTicketForTable = (t) => {
-            // ✅ CORRECTION: Gérer tous les formats possibles de tickets
-            if (!t || (!t.id && !t.receiptId && !t.receipt_id)) {
-                console.warn('⚠️ [DASHBOARD] Ticket invalide:', t);
-                return null;
-            }
-            
             const roundId = t.roundId || t.round_id || '-';
             const createdTime = t.date || t.created_time || t.created_at || Date.now();
             
-            // ✅ CRITIQUE: Les API retournent TOUJOURS des valeurs publiques (déjà converties)
-            // On utilise directement les valeurs sans conversion supplémentaire
-            let totalAmount = 0;
-            
-            // Les API convertissent déjà de système à publique, utiliser directement
-            if (typeof t.totalAmount === 'number') {
-                totalAmount = t.totalAmount;
-            } else if (typeof t.total_amount === 'number') {
-                totalAmount = t.total_amount;
-            } else if (typeof t.total_amount === 'string') {
-                totalAmount = parseFloat(t.total_amount);
-            } 
-            // Calculer depuis les bets si totalAmount n'existe pas (les bets sont déjà en publique)
-            else if (Array.isArray(t.bets) && t.bets.length > 0) {
+            // Calculer totalAmount depuis les bets si non fourni
+            let totalAmount = t.totalAmount || t.total_amount || 0;
+            if (!totalAmount && Array.isArray(t.bets)) {
+                // Convertir de système à publique si nécessaire
                 totalAmount = t.bets.reduce((sum, b) => {
-                    // Les valeurs des bets sont déjà converties en publique par les API
-                    return sum + (Number(b.value) || 0);
+                    const valueSystem = Number(b.value || 0);
+                    // Si Currency est disponible, utiliser systemToPublic, sinon diviser par 100
+                    if (typeof Currency !== 'undefined' && typeof Currency.systemToPublic === 'function') {
+                        const valuePublic = Currency.systemToPublic(valueSystem);
+                        return sum + (typeof valuePublic === 'object' && valuePublic.toNumber ? valuePublic.toNumber() : Number(valuePublic));
+                    }
+                    return sum + (valueSystem / 100);
                 }, 0);
             }
             
@@ -250,7 +200,7 @@ class App {
             const isMultibet = Array.isArray(t.bets) && t.bets.length > 1;
             // For single bets, show the participant coeff; for multibets, show a compact label
             const coeffLabel = isMultibet ? `Multibet (${t.bets.length})` : (t.bets && t.bets[0] && t.bets[0].participant ? `x${Number(t.bets[0].participant.coeff).toFixed(2)}` : (t.avgCoeff ? `x${Number(t.avgCoeff).toFixed(2)}` : '-'));
-            const hasPrize = t.prize && Number(t.prize) > 0;
+            const hasPrize = t.prize && t.prize > 0;
             // Permettre l'annulation tant que le statut est "pending" ET que les paris ne sont pas verrouillés
             const canCancel = t.status === 'pending' && !this.bettingLocked && !this.isRaceRunning;
             
@@ -264,100 +214,48 @@ class App {
                 canCancel,
                 id: t.id || t.receiptId || t.receipt_id,
                 status: t.status || 'pending',
-                prize: typeof t.prize === 'number' ? t.prize : (typeof t.prize === 'string' ? parseFloat(t.prize) : 0),
+                prize: t.prize || 0,
                 paidAt: t.paidAt || t.paid_at || null
             };
         };
 
         /* -------------------------
            Fonction pour créer une ligne de ticket dans le tableau
-           ✅ UTILISE LA MÊME LOGIQUE QUE MY-BETS
         ------------------------- */
         const createTicketRow = (ticketData) => {
-            // ✅ CORRECTION: Utiliser la même logique que my-bets pour formater le ticket
-            // Ne pas utiliser formatTicketForTable qui simplifie trop les données
-            const ticket = ticketData;
-            if (!ticket || (!ticket.id && !ticket.receiptId && !ticket.receipt_id)) {
-                console.warn('⚠️ [DASHBOARD] Impossible de créer une ligne: ticket invalide', ticketData);
-                return null;
-            }
-            
-            const ticketId = ticket.id || ticket.receiptId || ticket.receipt_id;
-            const isMultibet = Array.isArray(ticket.bets) && ticket.bets.length > 1;
-            const canCancel = ticket.status === 'pending' && !this.bettingLocked && !this.isRaceRunning;
-            const isInCurrentRound = (ticket.roundId || ticket.round_id) === this.currentRoundId;
-            
-            // ✅ CRITIQUE: Les API retournent TOUJOURS des valeurs publiques (déjà converties)
-            // On utilise directement les valeurs sans conversion supplémentaire
-            let totalAmount = 0;
-            if (typeof ticket.totalAmount === 'number') {
-                totalAmount = ticket.totalAmount;
-            } else if (typeof ticket.total_amount === 'number') {
-                // Les API convertissent déjà, utiliser directement
-                totalAmount = ticket.total_amount;
-            } else if (Array.isArray(ticket.bets) && ticket.bets.length > 0) {
-                // Les bets sont déjà convertis en publique par les API
-                totalAmount = ticket.bets.reduce((sum, b) => {
-                    return sum + (Number(b.value) || 0);
-                }, 0);
-            }
-            
-            // ✅ Calculer avgCoeff et potentialWinnings pour single bets
-            let avgCoeff = 0;
-            let potentialWinnings = 0;
-            if (!isMultibet && ticket.bets && ticket.bets.length === 1) {
-                avgCoeff = Number(ticket.bets[0].participant?.coeff || ticket.bets[0].coeff || 0);
-                // Les valeurs des bets sont déjà en publique depuis les API
-                const betValuePublic = Number(ticket.bets[0].value || 0);
-                potentialWinnings = betValuePublic * avgCoeff;
-            } else if (ticket.avgCoeff) {
-                avgCoeff = Number(ticket.avgCoeff);
-            }
-            
+            const t = formatTicketForTable(ticketData);
             const tr = document.createElement('tr');
             tr.className = 'hover:bg-slate-700/50';
-            tr.setAttribute('data-receipt-id', String(ticketId));
+            tr.setAttribute('data-receipt-id', t.id);
             tr.innerHTML = `
-                <td class="p-2">${ticketId}</td>
-                <td class="p-2">${this.formatDate(ticket.date || ticket.created_time || ticket.created_at || Date.now())}</td>
-                <td class="p-2">${ticket.roundId || ticket.round_id || '-'}</td>
+                <td class="p-2 text-sm font-medium">#${t.id || '—'}</td>
+                <td class="p-2 text-slate-400 text-xs">${new Date(t.createdTime).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</td>
+                <td class="p-2 text-sm text-slate-300">#${t.roundId}</td>
+                <td class="p-2 text-sm font-semibold text-green-300">${t.total} HTG</td>
+                <td class="p-2 text-sm text-slate-300">${t.coeffLabel}</td>
+                <td class="p-2">${this.formatStatus(t.status)}</td>
                 <td class="p-2">
-                    ${isMultibet ? `
-                        <div class="text-sm font-medium">Multibet (${ticket.bets.length} paris)</div>
-                        <div class="text-xs text-slate-400 mt-1">Total: ${totalAmount.toFixed(2)} HTG</div>
-                    ` : (ticket.bets || []).map(bet => {
-                        const betValue = Number(bet.value || 0);
-                        // Les valeurs des bets sont déjà en publique depuis les API
-                        const betValuePublic = Number(bet.value || 0);
-                        const coeff = Number(bet.participant?.coeff || bet.coeff || 0);
-                        return `
-                            <div class="text-sm mb-1">
-                                <span title="Participant">#${bet.participant?.number || bet.number} ${bet.participant?.name || ''}</span>
-                                <span class="text-slate-400"> - </span>
-                                <span title="Mise">${betValuePublic.toFixed(2)} HTG</span>
-                                <span class="text-slate-400">×</span>
-                                <span title="Cote">${coeff}x</span>
-                                <span class="text-slate-400">=</span>
-                                <span title="Gain potentiel">${(betValuePublic * coeff).toFixed(2)} HTG</span>
-                            </div>
-                        `;
-                    }).join('')}
-                </td>
-                <td class="p-2">${isMultibet ? `Multibet (${ticket.bets.length})` : `${avgCoeff.toFixed(2)}x`}</td>
-                <td class="p-2">${isMultibet ? '-' : `${potentialWinnings.toFixed(2)} HTG`}</td>
-                <td class="p-2">${this.formatStatus(ticket.status || 'pending')}</td>
-                <td class="p-2">
-                    <div class="flex items-center gap-2">
-                        <button onclick="window.printTicket && window.printTicket(${ticketId})" 
-                            class="p-1 hover:bg-slate-600 rounded" title="Imprimer">🖨️</button>
-                        ${ticket.status === 'won' ? 
-                            `<button onclick="payTicket(${ticketId}, this)" 
-                                     class="p-1 hover:bg-slate-600 rounded" title="Payer">💰</button>` : ''}
-                        ${canCancel && isInCurrentRound ? 
-                            `<button onclick="cancelTicket(${ticketId}, this)" 
-                                     class="p-1 hover:bg-slate-600 rounded" title="Annuler">❌</button>` : ''}
-                        <button onclick="window.rebetTicket && window.rebetTicket(${ticketId})" 
-                            class="p-1 hover:bg-slate-600 rounded" title="Rejouer">🔄</button>
+                    <div class="flex gap-1 flex-wrap">
+                        <button data-action="print" data-id="${t.id || ''}" 
+                            class="px-2 py-1 bg-blue-600 hover:bg-blue-700 text-xs rounded text-white" 
+                            title="Imprimer">🖨️</button>
+                        ${t.canCancel
+                            ? `<button data-action="void" data-id="${t.id || ''}" 
+                                class="px-2 py-1 bg-red-600 hover:bg-red-700 text-xs rounded text-white" 
+                                title="Annuler">❌</button>`
+                            : ''}
+                        ${t.status === 'won'
+                            ? `<button data-action="pay" data-id="${t.id || ''}" 
+                                class="px-2 py-1 bg-green-600 hover:bg-green-700 text-xs rounded text-white" 
+                                title="Payer le ticket">💵</button>`
+                            : ''}
+                        ${t.status === 'paid'
+                            ? `<span class="px-2 py-1 bg-blue-500/30 text-blue-300 text-xs rounded" 
+                                title="Payé le ${t.paidAt ? new Date(t.paidAt).toLocaleString('fr-FR') : 'N/A'}">✓ Payé</span>`
+                            : ''}
+                        <button data-action="rebet" data-id="${t.id || ''}" 
+                            class="px-2 py-1 bg-purple-600 hover:bg-purple-700 text-xs rounded text-white" 
+                            title="Rejouer ce ticket">🔄</button>
                     </div>
                 </td>
             `;
@@ -376,16 +274,12 @@ class App {
             }
 
             // Vérifier si le ticket existe déjà
-            // ✅ CORRECTION: Normaliser l'ID pour la recherche
-            const ticketId = String(ticketData.id || ticketData.receiptId || ticketData.receipt_id);
-            const existingRow = table.querySelector(`tr[data-receipt-id="${ticketId}"]`);
+            const existingRow = table.querySelector(`tr[data-receipt-id="${ticketData.id || ticketData.receiptId}"]`);
             if (existingRow) {
-                console.log(`⚠️ Ticket #${ticketId} déjà présent, mise à jour...`);
+                console.log(`⚠️ Ticket #${ticketData.id || ticketData.receiptId} déjà présent, mise à jour...`);
                 // Mettre à jour la ligne existante
                 const newRow = createTicketRow(ticketData);
-                if (newRow) {
                 existingRow.replaceWith(newRow);
-                }
                 return;
             }
 
@@ -413,61 +307,20 @@ class App {
         ------------------------- */
         const removeTicketFromTable = (ticketId) => {
             const table = el('ticketsTable');
-            if (!table) {
-                console.warn('⚠️ [DASHBOARD] Table ticketsTable introuvable');
-                return;
-            }
+            if (!table) return;
 
-            // ✅ CORRECTION: Normaliser l'ID (peut être nombre ou string)
-            const normalizedId = String(ticketId);
-            console.log(`🔍 [DASHBOARD] Recherche ticket à supprimer: ID=${normalizedId}`);
-            
-            // ✅ CORRECTION: Chercher toutes les lignes et comparer les IDs normalisés
-            const rows = table.querySelectorAll('tr[data-receipt-id]');
-            let found = false;
-            
-            rows.forEach(row => {
-                const rowId = String(row.getAttribute('data-receipt-id'));
-                if (rowId === normalizedId) {
-                    console.log(`✅ [DASHBOARD] Ticket ${normalizedId} trouvé et supprimé`);
+            const row = table.querySelector(`tr[data-receipt-id="${ticketId}"]`);
+            if (row) {
                 row.remove();
-                    found = true;
-                }
-            });
-            
-            if (!found) {
-                console.warn(`⚠️ [DASHBOARD] Ticket ${normalizedId} non trouvé dans le tableau. Lignes présentes:`, 
-                    Array.from(rows).map(r => r.getAttribute('data-receipt-id')));
-                // ✅ FALLBACK: Forcer un refresh complet si le ticket n'est pas trouvé
-                if (this.dashboardRefreshTickets) {
-                    console.log('🔄 [DASHBOARD] Refresh complet après échec suppression directe');
-                    this.dashboardRefreshTickets(true);
-                }
-                return;
-            }
                 
                 // Si le tableau est vide, afficher "Aucun ticket"
                 if (table.querySelectorAll('tr[data-receipt-id]').length === 0) {
-                    table.innerHTML = `<tr><td colspan="8" class="p-4 text-slate-400">Aucun ticket</td></tr>`;
+                    table.innerHTML = `<tr><td colspan="7" class="p-4 text-slate-400">Aucun ticket</td></tr>`;
                 }
                 
-            // ✅ CORRECTION: Ne PAS appeler refreshTickets immédiatement après suppression
-            // Le ticket est déjà supprimé du DOM, et refreshTickets pourrait le réafficher
-            // si l'API retourne encore le ticket (problème de timing)
-            // Les stats seront mises à jour lors du prochain refresh naturel ou via WebSocket
-            
-            // ✅ NOUVEAU: Mettre à jour les stats immédiatement après suppression
-            // On peut recalculer les stats depuis les tickets restants dans le DOM
-            if (this.dashboardUpdateStats) {
-                // Recharger les stats depuis l'API pour avoir les valeurs exactes
-                setTimeout(() => {
-                    if (this.dashboardRefreshTickets) {
-                        this.dashboardRefreshTickets(false); // Refresh sans forcer pour mettre à jour les stats seulement
-                    }
-                }, 500); // Petit délai pour laisser le temps au serveur de mettre à jour
+                // ✅ Mettre à jour les stats
+                refreshTickets(); // Refresh pour recalculer les stats correctement
             }
-            
-            console.log(`✅ [DASHBOARD] Ticket ${normalizedId} supprimé du DOM. Stats mises à jour lors du prochain refresh.`);
         };
 
         /* -------------------------
@@ -511,45 +364,19 @@ class App {
         ------------------------- */
         const updateTicketsTable = (tickets) => {
             const table = el('ticketsTable');
-            if (!table) {
-                console.warn('⚠️ #ticketsTable introuvable');
-                return;
-            }
+            if (!table) return console.warn('⚠️ #ticketsTable introuvable');
 
             table.innerHTML = '';
 
             if (!tickets || tickets.length === 0) {
-                table.innerHTML = `<tr><td colspan="8" class="p-4 text-slate-400">Aucun ticket</td></tr>`;
-                console.debug('ℹ️ [DASHBOARD] Aucun ticket à afficher');
+                table.innerHTML = `<tr><td colspan="7" class="p-4 text-slate-400">Aucun ticket</td></tr>`;
                 return;
             }
 
-            console.debug(`📋 [DASHBOARD] Affichage de ${tickets.length} ticket(s)`);
-            
-            let successCount = 0;
-            let errorCount = 0;
-            
-            // ✅ CORRECTION: Utiliser directement les données du ticket (comme my-bets)
-            // createTicketRow gère maintenant le formatage directement depuis les données brutes
-            tickets.forEach((t, index) => {
-                try {
-                    // ✅ Ne plus utiliser formatTicketForTable, créer directement depuis les données brutes
-                    const tr = createTicketRow(t);
-                    if (tr) {
+            tickets.forEach(t => {
+                const tr = createTicketRow(t);
                 table.appendChild(tr);
-                        successCount++;
-                    } else {
-                        console.warn(`⚠️ [DASHBOARD] Impossible de créer la ligne pour le ticket ${index}`);
-                        errorCount++;
-                    }
-                } catch (err) {
-                    console.error(`❌ [DASHBOARD] Erreur formatage ticket ${index}:`, err);
-                    console.error(`❌ [DASHBOARD] Données ticket:`, t);
-                    errorCount++;
-                }
             });
-            
-            console.debug(`✅ [DASHBOARD] Tableau mis à jour: ${successCount} ticket(s) affiché(s), ${errorCount} erreur(s)`);
         }
 
         /* -------------------------
@@ -688,19 +515,33 @@ class App {
                             if (!res.ok) throw new Error(data.error || data.message || 'Erreur lors du paiement');
                         }
                         
-                        // 2️⃣ ✅ IMPRESSION SILENCIEUSE DU DÉCAISSEMENT APRÈS LE PAIEMENT
+                        // 2️⃣ ✅ IMPRESSION DU DÉCAISSEMENT APRÈS LE PAIEMENT
                         try {
                             const payoutRes = await fetch(`/api/v1/receipts/?action=payout&id=${ticketId}`);
                             if (payoutRes.ok) {
                                 const payoutHtml = await payoutRes.text();
-                                console.log(`✅ [PAY] HTML du décaissement reçu pour le ticket #${ticketId}, impression silencieuse...`);
+                                console.log(`✅ [PAY] HTML du décaissement reçu pour le ticket #${ticketId}`);
                                 
-                                // Utiliser l'impression silencieuse
-                                if (typeof window.silentPrint === 'function') {
-                                    await window.silentPrint(payoutHtml);
-                                    console.log(`✅ [PAY] Impression du décaissement terminée`);
+                                // Essayer printJS d'abord
+                                if (typeof window.printJS === 'function') {
+                                    console.log(`✅ [PAY] printJS disponible, déclenchement de l'impression`);
+                                    window.printJS({ printable: payoutHtml, type: 'raw-html' });
                                 } else {
-                                    console.warn('⚠️ [PAY] silentPrint non disponible');
+                                    // Fallback: créer une iframe et imprimer
+                                    console.log(`⚠️ [PAY] printJS non disponible, utilisation fallback iframe`);
+                                    const printWindow = window.open('', '', 'height=600,width=800');
+                                    if (printWindow) {
+                                        printWindow.document.write(payoutHtml);
+                                        printWindow.document.close();
+                                        // Attendre le chargement du contenu
+                                        setTimeout(() => {
+                                            printWindow.print();
+                                            // Ne pas fermer la fenêtre immédiatement pour laisser le temps d'imprimer
+                                            setTimeout(() => printWindow.close(), 500);
+                                        }, 250);
+                                    } else {
+                                        console.warn('⚠️ [PAY] Impossible d\'ouvrir la fenêtre d\'impression');
+                                    }
                                 }
                             } else {
                                 console.warn(`⚠️ [PAY] Impossible de récupérer le décaissement (HTTP ${payoutRes.status})`);
@@ -799,13 +640,9 @@ class App {
                             if (!res.ok) throw new Error(data.error || data.message || 'Erreur lors de l\'annulation');
                         }
                         
-                        // ✅ CORRECTION: Ne PAS rafraîchir immédiatement après suppression
-                        // Le WebSocket receipt_deleted va mettre à jour le DOM directement
-                        // Un refresh immédiat pourrait réafficher le ticket si l'API n'est pas encore synchronisée
-                        // this.alertModal(`✅ Ticket #${ticketId} annulé avec succès`, 'success');
-                        
-                        // Le message de succès sera affiché via WebSocket receipt_deleted
-                        // Cela évite les problèmes de timing où refreshTickets réaffiche le ticket supprimé
+                        // Rafraîchir immédiatement la liste des tickets pour synchroniser l'UI
+                        try { refreshTickets(); } catch (e) { console.warn('refreshTickets failed after delete:', e); }
+                        this.alertModal(`✅ Ticket #${ticketId} annulé avec succès`, 'success');
                         
                     } catch (err) {
                         console.error('Erreur cancelTicket:', err);
@@ -841,12 +678,9 @@ class App {
         
         const refreshTickets = async (force = false) => {
             try {
-                // ✅ CORRECTION: Toujours rafraîchir lors du chargement initial de la page (force = true)
-                // Le cache ne doit pas empêcher l'affichage des tickets lors de la navigation
+                // ✅ OPTIMISATION: Utiliser le cache si récent (évite requêtes répétées)
                 const now = Date.now();
-                const isInitialLoad = !ticketsCache.data || (now - ticketsCache.timestamp) > 5000; // Cache expiré après 5s
-                
-                if (!force && !isInitialLoad && ticketsCache.data && (now - ticketsCache.timestamp) < ticketsCache.ttl) {
+                if (!force && ticketsCache.data && (now - ticketsCache.timestamp) < ticketsCache.ttl) {
                     const { tickets, stats, round } = ticketsCache.data;
                     updateTicketsTable(tickets);
                     if (round) updateStats(round, stats);
@@ -854,149 +688,51 @@ class App {
                     return;
                 }
                 
-                // ✅ CORRECTION: Le dashboard doit afficher TOUS les tickets du round actuel
-                // Utiliser /api/v1/init/dashboard pour récupérer tous les tickets (pas de filtre user_id)
+                // ✅ OPTIMISATION: Un seul fetch (my-bets contient déjà les stats)
+                const res = await fetch('/api/v1/my-bets/?limit=50&page=1', { credentials: 'include' });
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                const data = await res.json();
+                const myBetsData = data?.data || {};
                 
-                let tickets = [];
+                const tickets = myBetsData.tickets || [];
+                const stats = myBetsData.stats || {};
+                
+                // ✅ CORRECTION: Récupérer le round ID depuis les tickets ou le serveur
                 let roundId = this.currentRoundId;
-                let round = null;
-                let stats = {};
-                
-                // ✅ Source: Récupérer TOUS les tickets du round actuel depuis /api/v1/init/dashboard
-                try {
-                    const res = await fetch('/api/v1/init/dashboard', { 
-                        credentials: 'include',
-                        cache: force ? 'no-cache' : 'default'
-                    });
-                    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-                    const data = await res.json();
-                    const dashboardData = data?.data || {};
-                    
-                    // Récupérer les tickets bruts depuis gameState.currentRound.receipts
-                    const rawTickets = dashboardData.tickets || [];
-                    const roundData = dashboardData.round || {};
-                    
-                    console.debug(`🔍 [DASHBOARD] Raw tickets reçus: ${rawTickets.length}, structure:`, rawTickets.length > 0 ? Object.keys(rawTickets[0]) : 'aucun');
-                    
-                    // ✅ CRITIQUE: Filtrer les tickets avec statut "cancelled" côté client aussi (sécurité supplémentaire)
-                    const validRawTickets = rawTickets.filter(t => t.status !== 'cancelled');
-                    
-                    // ✅ CORRECTION: Formater les tickets en gérant tous les cas possibles avec conversion cohérente
-                    tickets = validRawTickets.map(t => {
-                        // ✅ CRITIQUE: Les API retournent TOUJOURS des valeurs publiques (déjà converties)
-                        // On utilise directement les valeurs sans conversion supplémentaire
-                        let totalAmount = 0;
-                        
-                        // Les API convertissent déjà de système à publique, utiliser directement
-                        if (typeof t.totalAmount === 'number') {
-                            totalAmount = t.totalAmount;
-                        } else if (typeof t.total_amount === 'number') {
-                            totalAmount = t.total_amount;
-                        } else if (typeof t.total_amount === 'string') {
-                            totalAmount = parseFloat(t.total_amount);
-                        } 
-                        // Calculer depuis les bets si totalAmount n'existe pas (les bets sont déjà en publique)
-                        else if (Array.isArray(t.bets) && t.bets.length > 0) {
-                            totalAmount = t.bets.reduce((sum, b) => {
-                                // Les valeurs des bets sont déjà converties en publique par les API
-                                return sum + (Number(b.value) || 0);
-                            }, 0);
-                        }
-                        
-                        // ✅ Les API convertissent déjà prize de système à publique
-                        let prize = 0;
-                        if (typeof t.prize === 'number') {
-                            prize = t.prize;
-                        } else if (typeof t.prize === 'string') {
-                            prize = parseFloat(t.prize);
-                        }
-                        
-                        // ✅ S'assurer que bets existe et est un tableau
-                        const bets = Array.isArray(t.bets) ? t.bets : [];
-                        
-                        // ✅ Récupérer l'ID du ticket (plusieurs formats possibles)
-                        const ticketId = t.id || t.receipt_id || t.receiptId;
-                        
-                        // ✅ Récupérer le roundId
-                        const ticketRoundId = t.round_id || t.roundId || roundData.id;
-                        
-                        // ✅ Récupérer la date
-                        const ticketDate = t.created_time || t.created_at || t.date || new Date().toISOString();
-                        
-                        return {
-                            id: ticketId,
-                            receiptId: ticketId,
-                            roundId: ticketRoundId,
-                            status: t.status || 'pending',
-                            prize: prize,
-                            bets: bets,
-                            totalAmount: totalAmount,
-                            created_time: ticketDate,
-                            date: ticketDate,
-                            user_id: t.user_id || null
-                        };
-                    });
-                    
-                    // ✅ Si aucun ticket depuis gameState, essayer de récupérer depuis la DB (comme my-bets)
-                    if (tickets.length === 0 && roundData.id) {
-                        console.warn('⚠️ [DASHBOARD] Aucun ticket dans gameState, tentative récupération depuis DB...');
-                        try {
-                            const dbRes = await fetch(`/api/v1/my-bets/?limit=50&page=1`, { 
-                                credentials: 'include',
-                                cache: 'no-cache'
-                            });
-                            if (dbRes.ok) {
-                                const dbData = await dbRes.json();
-                                const dbTickets = dbData?.data?.tickets || [];
-                                // Filtrer seulement les tickets du round actuel
-                                const currentRoundTickets = dbTickets.filter(t => t.roundId === roundData.id);
-                                if (currentRoundTickets.length > 0) {
-                                    console.log(`✅ [DASHBOARD] ${currentRoundTickets.length} ticket(s) récupéré(s) depuis DB pour le round ${roundData.id}`);
-                                    tickets = currentRoundTickets;
-                                }
-                            }
-                        } catch (dbErr) {
-                            console.warn('⚠️ [DASHBOARD] Erreur récupération DB:', dbErr);
-                        }
-                    }
-                    
-                    roundId = roundData.id || (tickets.length > 0 ? tickets[0]?.roundId : null);
+                // Si pas de round ID en mémoire, prendre depuis le premier ticket
+                if (!roundId && tickets.length > 0) {
+                    roundId = tickets[0]?.roundId || null;
                     if (roundId) {
-                        this.currentRoundId = roundId;
+                        this.currentRoundId = roundId; // Mettre à jour pour la prochaine fois
                     }
-                    
-                    // Créer l'objet round avec tous les tickets
-                    round = {
-                        id: roundId,
-                        participants: roundData.participants || [],
-                        receipts: tickets,
-                        totalPrize: dashboardData.totalPrize || 0
-                    };
-                    
-                    // Calculer les stats basiques
-                    stats = {
-                        totalReceipts: tickets.length,
-                        totalMise: tickets.reduce((sum, t) => sum + (t.totalAmount || 0), 0),
-                        totalPrize: round.totalPrize || 0
-                    };
-                    
-                    console.debug(`✅ [DASHBOARD] ${tickets.length} ticket(s) formaté(s) et prêt(s) pour affichage`);
-                } catch (err) {
-                    console.error('❌ [DASHBOARD] Erreur récupération tickets:', err);
-                    console.error('❌ [DASHBOARD] Stack:', err.stack);
-                    throw err;
+                }
+                // Si toujours pas de round ID, essayer de récupérer depuis l'API
+                if (!roundId) {
+                    try {
+                        const roundRes = await fetch('/api/v1/rounds/', { 
+                            method: 'POST',
+                            credentials: 'include',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ action: 'get' })
+                        });
+                        if (roundRes.ok) {
+                            const roundData = await roundRes.json();
+                            roundId = roundData?.data?.id || null;
+                            if (roundId) this.currentRoundId = roundId;
+                        }
+                    } catch (err) {
+                        console.debug('Erreur récupération round ID:', err);
+                    }
                 }
                 
-                // ✅ CORRECTION: Mettre à jour le cache avec les données complètes
+                const round = roundId ? { id: roundId, receipts: tickets.filter(t => t.roundId === roundId) } : null;
+                
+                // Mettre à jour le cache
                 ticketsCache = { data: { tickets, stats, round }, timestamp: now, ttl: 2000 };
                 
-                // ✅ CORRECTION: Toujours mettre à jour le tableau, même si tickets est vide
-                // Cela garantit que les tickets sont toujours affichés correctement
                 updateTicketsTable(tickets);
                 if (round) updateStats(round, stats);
                 if (this.updateBettingButtonsState) this.updateBettingButtonsState();
-                
-                console.debug(`✅ [DASHBOARD] Tickets mis à jour: ${tickets.length} ticket(s) affiché(s)`);
             } catch (err) {
                 console.error('Erreur refreshTickets:', err);
                 this.showToast('Erreur de connexion à l\'API.', 'error');
@@ -1247,8 +983,8 @@ class App {
             }
         };
         
-        // ✅ CORRECTION: Rafraîchir immédiatement avec force=true pour éviter le cache lors de la navigation
-        refreshTickets(true);
+        // Rafraîchir immédiatement
+        refreshTickets();
         
         // Initialiser le round ID
         initRoundId();
@@ -1315,7 +1051,7 @@ class App {
             return `
                 <tr class="hover:bg-slate-700/50" data-receipt-id="${ticket.id}">
                     <td class="p-2">${ticket.id}</td>
-                    <td class="p-2">${this.formatDate(ticket.date)}</td>
+                    <td class="p-2">${new Date(ticket.date).toLocaleString('fr-FR')}</td>
                     <td class="p-2">${ticket.roundId}</td>
                     <td class="p-2">
                         ${isMultibet ? `
@@ -1415,50 +1151,20 @@ class App {
            Fonction pour supprimer un ticket directement du tableau my-bets (WebSocket)
         ------------------------- */
         const removeTicketFromMyBetsTable = (ticketId) => {
-            if (!ticketsTableBody) {
-                console.warn('⚠️ [MY-BETS] ticketsTableBody introuvable');
-                return;
-            }
+            if (!ticketsTableBody) return;
 
-            // ✅ CORRECTION: Normaliser l'ID (peut être nombre ou string)
-            const normalizedId = String(ticketId);
-            console.log(`🔍 [MY-BETS] Recherche ticket à supprimer: ID=${normalizedId}`);
-            
-            // ✅ CORRECTION: Chercher toutes les lignes et comparer les IDs normalisés
-            const rows = ticketsTableBody.querySelectorAll('tr[data-receipt-id]');
-            let found = false;
-            
-            rows.forEach(row => {
-                const rowId = String(row.getAttribute('data-receipt-id'));
-                if (rowId === normalizedId) {
-                    console.log(`✅ [MY-BETS] Ticket ${normalizedId} trouvé et supprimé`);
+            const row = ticketsTableBody.querySelector(`tr[data-receipt-id="${ticketId}"]`);
+            if (row) {
                 row.remove();
-                    found = true;
-                }
-            });
-            
-            if (!found) {
-                console.warn(`⚠️ [MY-BETS] Ticket ${normalizedId} non trouvé dans le tableau. Lignes présentes:`, 
-                    Array.from(rows).map(r => r.getAttribute('data-receipt-id')));
-                // ✅ FALLBACK: Forcer un refresh complet si le ticket n'est pas trouvé
-                if (this.myBetsFetchMyBets) {
-                    const currentPage = document.getElementById('currentPage')?.textContent || 1;
-                    console.log('🔄 [MY-BETS] Refresh complet après échec suppression directe');
-                    this.myBetsFetchMyBets(parseInt(currentPage, 10));
-                }
-                return;
-            }
-            
-            // Si le tableau est vide, afficher "Aucun ticket trouvé"
+                
+                // Si le tableau est vide, afficher "Aucun ticket"
                 if (ticketsTableBody.querySelectorAll('tr[data-receipt-id]').length === 0) {
                     ticketsTableBody.innerHTML = `<tr><td colspan="8" class="p-4 text-center text-slate-400">Aucun ticket trouvé</td></tr>`;
                 }
                 
-            // ✅ CORRECTION: Ne PAS appeler fetchMyBets immédiatement après suppression
-            // Le ticket est déjà supprimé du DOM, et fetchMyBets pourrait le réafficher
-            // si l'API retourne encore le ticket (problème de timing)
-            // Les stats seront mises à jour lors du prochain refresh naturel ou via WebSocket
-            console.log(`✅ [MY-BETS] Ticket ${normalizedId} supprimé du DOM. Stats mises à jour lors du prochain refresh.`);
+                // ✅ Mettre à jour les stats
+                fetchMyBets(currentPage); // Refresh pour recalculer les stats correctement
+            }
         };
 
         /* -------------------------
@@ -1508,11 +1214,7 @@ class App {
                     filters.append('searchId', searchIdInput.value);
                 }
 
-                // ✅ CORRECTION: Ajouter cache: 'no-cache' pour éviter le cache navigateur lors de la navigation
-                const response = await fetch(`${API_URL}?${filters.toString()}`, {
-                    cache: 'no-cache',
-                    credentials: 'include'
-                });
+                const response = await fetch(`${API_URL}?${filters.toString()}`);
                 if (!response.ok) throw new Error('Erreur lors de la récupération des tickets');
 
                 const payload = await response.json();
@@ -1523,11 +1225,6 @@ class App {
                 }
 
                 const body = payload.data || payload;
-                
-                // ✅ CRITIQUE: Filtrer les tickets avec statut "cancelled" côté client (sécurité supplémentaire)
-                if (body.tickets) {
-                    body.tickets = body.tickets.filter(t => t.status !== 'cancelled');
-                }
 
                 // Mise à jour de la pagination
                 currentPage = body.pagination?.currentPage || currentPage;
@@ -1666,19 +1363,33 @@ class App {
                             throw new Error(data.error || data.message || "Erreur lors du paiement");
                         }
                         
-                        // 2️⃣ ✅ IMPRESSION SILENCIEUSE DU DÉCAISSEMENT APRÈS LE PAIEMENT
+                        // 2️⃣ ✅ IMPRESSION DU DÉCAISSEMENT APRÈS LE PAIEMENT
                         try {
                             const payoutRes = await fetch(`/api/v1/receipts/?action=payout&id=${id}`);
                             if (payoutRes.ok) {
                                 const payoutHtml = await payoutRes.text();
-                                console.log(`✅ [PAY-DASH] HTML du décaissement reçu pour le ticket #${id}, impression silencieuse...`);
+                                console.log(`✅ [PAY-DASH] HTML du décaissement reçu pour le ticket #${id}`);
                                 
-                                // Utiliser l'impression silencieuse
-                                if (typeof window.silentPrint === 'function') {
-                                    await window.silentPrint(payoutHtml);
-                                    console.log(`✅ [PAY-DASH] Impression du décaissement terminée`);
+                                // Essayer printJS d'abord
+                                if (typeof window.printJS === 'function') {
+                                    console.log(`✅ [PAY-DASH] printJS disponible, déclenchement de l'impression`);
+                                    window.printJS({ printable: payoutHtml, type: 'raw-html' });
                                 } else {
-                                    console.warn('⚠️ [PAY-DASH] silentPrint non disponible');
+                                    // Fallback: créer une iframe et imprimer
+                                    console.log(`⚠️ [PAY-DASH] printJS non disponible, utilisation fallback iframe`);
+                                    const printWindow = window.open('', '', 'height=600,width=800');
+                                    if (printWindow) {
+                                        printWindow.document.write(payoutHtml);
+                                        printWindow.document.close();
+                                        // Attendre le chargement du contenu
+                                        setTimeout(() => {
+                                            printWindow.print();
+                                            // Ne pas fermer la fenêtre immédiatement pour laisser le temps d'imprimer
+                                            setTimeout(() => printWindow.close(), 500);
+                                        }, 250);
+                                    } else {
+                                        console.warn('⚠️ [PAY-DASH] Impossible d\'ouvrir la fenêtre d\'impression');
+                                    }
                                 }
                             } else {
                                 console.warn(`⚠️ [PAY-DASH] Impossible de récupérer le décaissement (HTTP ${payoutRes.status})`);
@@ -1773,25 +1484,9 @@ class App {
             ticketsTableBody.innerHTML = `<tr><td colspan="7" class="p-4 text-center text-red-400">${msg}</td></tr>`;
         }
 
-        const formatDate = (date) => {
-            if (!date) return '';
-            try {
-                const dateObj = new Date(date);
-                // Utiliser le fuseau horaire America/Port-au-Prince
-                return dateObj.toLocaleString('fr-FR', {
-                    timeZone: 'America/Port-au-Prince',
-                    year: 'numeric',
-                    month: '2-digit',
-                    day: '2-digit',
-                    hour: '2-digit',
-                    minute: '2-digit',
-                    second: '2-digit'
-                });
-            } catch (e) {
-                console.warn('Erreur formatage date:', e);
-                return new Date(date).toLocaleString('fr-FR');
-            }
-        };
+        function formatDate(date) {
+            return new Date(date).toLocaleString('fr-FR');
+        }
 
         function formatStatus(status) {
             const base = "px-2.5 py-0.5 rounded-full text-xs font-medium";
@@ -1841,11 +1536,8 @@ class App {
         this.myBetsAddTicketToTable = addTicketToMyBetsTable; // ✅ NOUVEAU: Ajouter directement un ticket
         this.myBetsRemoveTicketFromTable = removeTicketFromMyBetsTable; // ✅ NOUVEAU: Supprimer directement un ticket
 
-        // ✅ CORRECTION: Chargement initial avec cache-busting pour forcer le rafraîchissement
-        // Utiliser requestAnimationFrame pour s'assurer que le DOM est prêt
-        requestAnimationFrame(() => {
-            fetchMyBets(1);
-        });
+        // Chargement initial
+        fetchMyBets(1);
 
         console.log('✅ Mes Paris initialisé avec WebSocket en temps réel');
     }
@@ -1882,8 +1574,6 @@ class App {
 
         async function refreshCashierDashboard() {
             try {
-                console.log('🔄 [CASHIER-DASHBOARD] Rafraîchissement des données...');
-                
                 // 🚀 OPTIMISATION: Parallel API calls (Promise.all) instead of sequential
                 const [moneyRes, myBetsRes] = await Promise.all([
                     fetch('/api/v1/money/', { credentials: 'include' }),
@@ -1891,129 +1581,37 @@ class App {
                 ]);
 
                 // Check responses
-                if (!moneyRes.ok) {
-                    const errorText = await moneyRes.text();
-                    console.error(`❌ [CASHIER-DASHBOARD] Money API HTTP ${moneyRes.status}:`, errorText);
-                    throw new Error(`Money API HTTP ${moneyRes.status}`);
-                }
-                if (!myBetsRes.ok) {
-                    const errorText = await myBetsRes.text();
-                    console.error(`❌ [CASHIER-DASHBOARD] My-bets API HTTP ${myBetsRes.status}:`, errorText);
-                    throw new Error(`My-bets API HTTP ${myBetsRes.status}`);
-                }
+                if (!moneyRes.ok) throw new Error(`Money API HTTP ${moneyRes.status}`);
+                if (!myBetsRes.ok) throw new Error(`My-bets API HTTP ${myBetsRes.status}`);
 
                 const moneyJson = await moneyRes.json();
                 const myBetsJson = await myBetsRes.json();
-
-                console.log('💰 [CASHIER-DASHBOARD] Money data:', moneyJson);
-                console.log('🎫 [CASHIER-DASHBOARD] My-bets data:', myBetsJson);
 
                 const moneyData = moneyJson.data || {};
                 state.currentBalance = Number(moneyData.money || 0);
                 state.totalReceipts = Number(moneyData.totalReceived || 0);
                 state.totalPayouts = Number(moneyData.totalPayouts || 0);
-                
-                console.log(`💰 [CASHIER-DASHBOARD] Balance: ${state.currentBalance}, Received: ${state.totalReceipts}, Payouts: ${state.totalPayouts}`);
 
                 const el = id => document.getElementById(id);
-                
-                // ✅ CORRECTION: Mise à jour avec logs pour débogage
-                const currentBalanceEl = el('currentBalance');
-                const totalReceiptsEl = el('totalReceipts');
-                const totalPayoutsEl = el('totalPayouts');
-                const netBalanceEl = el('netBalance');
-                const systemBalanceEl = el('systemBalance');
-                
-                if (currentBalanceEl) {
-                    currentBalanceEl.textContent = state.currentBalance.toFixed(2) + ' HTG';
-                    console.log(`✅ [CASHIER-DASHBOARD] currentBalance mis à jour: ${state.currentBalance.toFixed(2)} HTG`);
-                } else {
-                    console.warn('⚠️ [CASHIER-DASHBOARD] Élément currentBalance non trouvé');
-                }
-                
-                if (totalReceiptsEl) {
-                    totalReceiptsEl.textContent = state.totalReceipts.toFixed(2) + ' HTG';
-                    console.log(`✅ [CASHIER-DASHBOARD] totalReceipts mis à jour: ${state.totalReceipts.toFixed(2)} HTG`);
-                } else {
-                    console.warn('⚠️ [CASHIER-DASHBOARD] Élément totalReceipts non trouvé');
-                }
-                
-                if (totalPayoutsEl) {
-                    totalPayoutsEl.textContent = state.totalPayouts.toFixed(2) + ' HTG';
-                    console.log(`✅ [CASHIER-DASHBOARD] totalPayouts mis à jour: ${state.totalPayouts.toFixed(2)} HTG`);
-                } else {
-                    console.warn('⚠️ [CASHIER-DASHBOARD] Élément totalPayouts non trouvé');
-                }
-                
-                const netBalance = state.totalReceipts - state.totalPayouts;
-                if (netBalanceEl) {
-                    netBalanceEl.textContent = netBalance.toFixed(2) + ' HTG';
-                    console.log(`✅ [CASHIER-DASHBOARD] netBalance mis à jour: ${netBalance.toFixed(2)} HTG`);
-                } else {
-                    console.warn('⚠️ [CASHIER-DASHBOARD] Élément netBalance non trouvé');
-                }
-                
-                if (systemBalanceEl) {
-                    systemBalanceEl.textContent = state.currentBalance.toFixed(2) + ' HTG';
-                    console.log(`✅ [CASHIER-DASHBOARD] systemBalance mis à jour: ${state.currentBalance.toFixed(2)} HTG`);
-                } else {
-                    console.warn('⚠️ [CASHIER-DASHBOARD] Élément systemBalance non trouvé');
-                }
+                if (el('currentBalance')) el('currentBalance').textContent = state.currentBalance.toFixed(2) + ' HTG';
+                if (el('totalReceipts')) el('totalReceipts').textContent = state.totalReceipts.toFixed(2) + ' HTG';
+                if (el('totalPayouts')) el('totalPayouts').textContent = state.totalPayouts.toFixed(2) + ' HTG';
+                if (el('netBalance')) el('netBalance').textContent = (state.totalReceipts - state.totalPayouts).toFixed(2) + ' HTG';
+                if (el('systemBalance')) el('systemBalance').textContent = state.currentBalance.toFixed(2) + ' HTG';
 
                 // tickets
                 const myBetsData = myBetsJson.data || {};
                 const tickets = myBetsData.tickets || [];
-                
-                console.log(`🎫 [CASHIER-DASHBOARD] ${tickets.length} ticket(s) récupéré(s)`);
 
                 const activeTickets = tickets.filter(t => t.status === 'pending');
                 const wonTickets = tickets.filter(t => t.status === 'won');
                 const paidTickets = tickets.filter(t => t.status === 'paid');
-                
-                console.log(`🎫 [CASHIER-DASHBOARD] Tickets: ${activeTickets.length} actifs, ${wonTickets.length} gagnants, ${paidTickets.length} payés`);
 
-                const activeTicketsCountEl = el('activeTicketsCount');
-                const wonTicketsCountEl = el('wonTicketsCount');
-                const wonTicketsAmountEl = el('wonTicketsAmount');
-                const paidTicketsCountEl = el('paidTicketsCount');
-                const paidTicketsAmountEl = el('paidTicketsAmount');
-                
-                if (activeTicketsCountEl) {
-                    activeTicketsCountEl.textContent = activeTickets.length;
-                    console.log(`✅ [CASHIER-DASHBOARD] activeTicketsCount mis à jour: ${activeTickets.length}`);
-                } else {
-                    console.warn('⚠️ [CASHIER-DASHBOARD] Élément activeTicketsCount non trouvé');
-                }
-                
-                if (wonTicketsCountEl) {
-                    wonTicketsCountEl.textContent = wonTickets.length;
-                    console.log(`✅ [CASHIER-DASHBOARD] wonTicketsCount mis à jour: ${wonTickets.length}`);
-                } else {
-                    console.warn('⚠️ [CASHIER-DASHBOARD] Élément wonTicketsCount non trouvé');
-                }
-                
-                const wonTicketsAmount = wonTickets.reduce((s, t) => s + (Number(t.prize) || 0), 0);
-                if (wonTicketsAmountEl) {
-                    wonTicketsAmountEl.textContent = wonTicketsAmount.toFixed(2) + ' HTG';
-                    console.log(`✅ [CASHIER-DASHBOARD] wonTicketsAmount mis à jour: ${wonTicketsAmount.toFixed(2)} HTG`);
-                } else {
-                    console.warn('⚠️ [CASHIER-DASHBOARD] Élément wonTicketsAmount non trouvé');
-                }
-                
-                if (paidTicketsCountEl) {
-                    paidTicketsCountEl.textContent = paidTickets.length;
-                    console.log(`✅ [CASHIER-DASHBOARD] paidTicketsCount mis à jour: ${paidTickets.length}`);
-                } else {
-                    console.warn('⚠️ [CASHIER-DASHBOARD] Élément paidTicketsCount non trouvé');
-                }
-                
-                const paidTicketsAmount = paidTickets.reduce((s, t) => s + (Number(t.prize) || 0), 0);
-                if (paidTicketsAmountEl) {
-                    paidTicketsAmountEl.textContent = paidTicketsAmount.toFixed(2) + ' HTG';
-                    console.log(`✅ [CASHIER-DASHBOARD] paidTicketsAmount mis à jour: ${paidTicketsAmount.toFixed(2)} HTG`);
-                } else {
-                    console.warn('⚠️ [CASHIER-DASHBOARD] Élément paidTicketsAmount non trouvé');
-                }
+                if (el('activeTicketsCount')) el('activeTicketsCount').textContent = activeTickets.length;
+                if (el('wonTicketsCount')) el('wonTicketsCount').textContent = wonTickets.length;
+                if (el('wonTicketsAmount')) el('wonTicketsAmount').textContent = wonTickets.reduce((s, t) => s + (Number(t.prize) || 0), 0).toFixed(2) + ' HTG';
+                if (el('paidTicketsCount')) el('paidTicketsCount').textContent = paidTickets.length;
+                if (el('paidTicketsAmount')) el('paidTicketsAmount').textContent = paidTickets.reduce((s, t) => s + (Number(t.prize) || 0), 0).toFixed(2) + ' HTG';
 
                 // history
                 const historyEl = document.getElementById('cashierOperationsHistory');
@@ -2023,7 +1621,7 @@ class App {
                         historyEl.innerHTML = '<div class="p-2 text-center text-slate-500">Aucune opération récente</div>';
                     } else {
                         historyEl.innerHTML = recent.map(t => {
-                            const time = t.created_time ? this.formatDate(t.created_time) : '';
+                            const time = t.created_time ? new Date(t.created_time).toLocaleString('fr-FR') : '';
                             const status = (t.status || '').toUpperCase();
                             const total = (Number(t.total_amount) || (t.bets && t.bets.reduce((s, b) => s + (Number(b.value)||0), 0)) || 0).toFixed(2);
                             return `<div class="p-2 border-b border-slate-600 flex justify-between items-center">
@@ -2112,106 +1710,69 @@ class App {
             }
         }
 
-        // ✅ CORRECTION: Ne pas créer une connexion WebSocket séparée
-        // Utiliser la connexion WebSocket principale de app.js qui est déjà gérée
-        // La fonction connectWebSocket locale est supprimée car elle causait des erreurs
-        // avec une URL hardcodée incorrecte (ws://localhost:8081)
-        
-        // ✅ CORRECTION: Utiliser la connexion WebSocket principale si disponible
-        // Les événements WebSocket sont déjà gérés par this.handleWebSocketMessage()
-        // qui appelle refreshCashierDashboard() pour les événements pertinents
-
-        // ✅ NOUVEAU: Charger l'historique des gagnants
-        async function loadWinnersHistory() {
-            try {
-                const res = await fetch('/api/v1/winners/recent?limit=10');
-                if (!res.ok) {
-                    throw new Error(`HTTP ${res.status}`);
-                }
-                const json = await res.json();
-                const winners = json.data?.winners || [];
-                
-                const winnersContainer = document.getElementById('winnersHistory');
-                if (!winnersContainer) return;
-
-                if (winners.length === 0) {
-                    winnersContainer.innerHTML = '<div class="p-3 text-center text-slate-400 text-sm">Aucun gagnant enregistré</div>';
-                    return;
-                }
-
-                // Formater la date avec le fuseau horaire Haïti/Port-au-Prince
-                function formatDate(dateString) {
-                    if (!dateString) return 'N/A';
-                    try {
-                        const date = new Date(dateString);
-                        return date.toLocaleString('fr-FR', {
-                            timeZone: 'America/Port-au-Prince',
-                            day: '2-digit',
-                            month: '2-digit',
-                            year: 'numeric',
-                            hour: '2-digit',
-                            minute: '2-digit',
-                            second: '2-digit'
-                        });
-                    } catch (e) {
-                        console.warn('Erreur formatage date:', e);
-                        return new Date(dateString).toLocaleString('fr-FR');
-                    }
-                }
-
-                winnersContainer.innerHTML = winners.map((winner, index) => {
-                    const prize = parseFloat(winner.prize || 0).toFixed(2);
-                    return `
-                        <div class="bg-slate-800/50 rounded-lg p-3 border border-slate-600/50 hover:border-slate-500 transition-colors">
-                            <div class="flex items-center justify-between">
-                                <div class="flex items-center gap-3">
-                                    <div class="w-10 h-10 rounded-full bg-gradient-to-br from-yellow-500/20 to-yellow-600/20 flex items-center justify-center border border-yellow-500/30">
-                                        <span class="text-yellow-400 font-bold text-sm">#${index + 1}</span>
-                                    </div>
-                                    <div>
-                                        <div class="font-semibold text-white">
-                                            <span class="text-yellow-400">№${winner.number}</span> ${winner.name || 'N/A'}
-                                        </div>
-                                        <div class="text-xs text-slate-400">
-                                            Round #${winner.id || 'N/A'} • ${formatDate(winner.created_at)}
-                                        </div>
-                                    </div>
-                                </div>
-                                <div class="text-right">
-                                    <div class="text-lg font-bold text-green-400">${prize} HTG</div>
-                                    <div class="text-xs text-slate-500">Gain total</div>
-                                </div>
-                            </div>
-                        </div>
-                    `;
-                }).join('');
-
-                console.log(`✅ [WINNERS-HISTORY] ${winners.length} gagnants chargés`);
-            } catch (err) {
-                console.error('❌ [WINNERS-HISTORY] Erreur lors du chargement:', err);
-                const winnersContainer = document.getElementById('winnersHistory');
-                if (winnersContainer) {
-                    winnersContainer.innerHTML = '<div class="p-3 text-center text-red-400 text-sm">Erreur lors du chargement des gagnants</div>';
-                }
-            }
+        function connectWebSocket() {
+            try { state.ws = new WebSocket('ws://localhost:8081/connection/websocket'); }
+            catch (e) { console.error('WS connection failed:', e); scheduleReconnect(); return; }
+            state.ws.addEventListener('open', () => { console.log('📡 WebSocket caisse connecté'); fetchCurrentRound(); });
+            state.ws.addEventListener('message', (msg) => { try { const data = JSON.parse(msg.data); handleWsEvent(data); } catch (err) { console.warn('WS: invalid message', err, msg.data); } });
+            state.ws.addEventListener('close', (ev) => { console.warn('⚠️ WebSocket closed', ev.code, ev.reason); scheduleReconnect(); });
+            state.ws.addEventListener('error', (err) => { console.error('WebSocket error', err); state.ws.close(); });
         }
 
-        // Charger l'historique au démarrage
-        loadWinnersHistory();
+        function scheduleReconnect() {
+            if (state.wsReconnectTimer) return;
+            state.wsReconnectTimer = setTimeout(() => { state.wsReconnectTimer = null; connectWebSocket(); }, 3000);
+        }
 
         // event listeners UI
         const refreshBtn = document.getElementById('refreshCashierBtn');
-        if (refreshBtn) refreshBtn.addEventListener('click', () => {
-            refreshCashierDashboard();
-            loadWinnersHistory(); // Recharger aussi l'historique des gagnants
-        });
+        if (refreshBtn) refreshBtn.addEventListener('click', refreshCashierDashboard);
         const validateBtn = document.getElementById('validateBalanceBtn');
         if (validateBtn) validateBtn.addEventListener('click', () => { alert('✓ Réconciliation validée. Nouvelle caisse: ' + (document.getElementById('physicalBalance')?.value || '0') + ' HTG'); document.getElementById('physicalBalance').value = ''; refreshCashierDashboard(); });
         const physical = document.getElementById('physicalBalance'); if (physical) physical.addEventListener('input', () => { const v = parseFloat(physical.value)||0; const discrepancy = v - state.currentBalance; const alertEl = document.getElementById('discrepancyAlert'); if (Math.abs(discrepancy) > 0.01) { document.getElementById('discrepancyAmount').textContent = (discrepancy>0?'+':'')+discrepancy.toFixed(2)+' HTG'; alertEl.classList.remove('hidden'); } else { alertEl.classList.add('hidden'); } });
 
-        // ✅ SUPPRIMÉ: Handlers pour opérations caisse (section remplacée par historique des gagnants)
-        // Les boutons "Ouvrir le tiroir", "Fermer la caisse", "Dépôt en banque", "Retrait/Remise" 
-        // ont été remplacés par l'historique des gagnants des 10 dernières courses dans account.html
+        // Handlers pour opérations caisse
+        const openDrawerBtn = document.getElementById('openDrawerBtn');
+        if (openDrawerBtn) openDrawerBtn.addEventListener('click', () => { 
+            alert('🔓 Tiroir ouvert - Montant disponible: ' + state.currentBalance.toFixed(2) + ' HTG'); 
+        });
+        
+        const closeDrawerBtn = document.getElementById('closeDrawerBtn');
+        if (closeDrawerBtn) closeDrawerBtn.addEventListener('click', () => { 
+            alert('🔒 Caisse fermée - Solde: ' + state.currentBalance.toFixed(2) + ' HTG'); 
+        });
+
+        const depositBtn = document.getElementById('depositBtn');
+        if (depositBtn) depositBtn.addEventListener('click', () => {
+            const amount = prompt('💰 Montant du dépôt en banque (HTG):', state.currentBalance.toFixed(2));
+            if (amount && !isNaN(parseFloat(amount)) && parseFloat(amount) > 0) {
+                fetch('/api/v1/money/payout', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ amount: parseFloat(amount), reason: 'Dépôt en banque' })
+                }).then(r => r.json())
+                  .then(data => {
+                    alert(`✅ Dépôt de ${amount} HTG enregistré`);
+                    refreshCashierDashboard();
+                  }).catch(err => alert('❌ Erreur: ' + err.message));
+            }
+        });
+
+        const withdrawalBtn = document.getElementById('withdrawalBtn');
+        if (withdrawalBtn) withdrawalBtn.addEventListener('click', () => {
+            const amount = prompt('💸 Montant du retrait (HTG):', (state.currentBalance / 2).toFixed(2));
+            if (amount && !isNaN(parseFloat(amount)) && parseFloat(amount) > 0) {
+                fetch('/api/v1/money/payout', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ amount: parseFloat(amount), reason: 'Retrait/Remise' })
+                }).then(r => r.json())
+                  .then(data => {
+                    alert(`✅ Retrait de ${amount} HTG enregistré`);
+                    refreshCashierDashboard();
+                  }).catch(err => alert('❌ Erreur: ' + err.message));
+            }
+        });
 
         // ✅ Exposer refreshCashierDashboard pour les handlers WebSocket
         this.refreshCashierDashboard = refreshCashierDashboard;
@@ -2220,18 +1781,8 @@ class App {
         refreshCashierDashboard();
         // ✅ OPTIMISATION: Supprimé setInterval - refresh via WebSocket events uniquement
         // Les événements receipt_added, receipt_paid, money_update déclenchent déjà refreshCashierDashboard
-        
-        // ✅ CORRECTION: Ne pas créer de connexion WebSocket séparée
-        // La connexion WebSocket principale de app.js est déjà gérée par connectWebSocket()
-        // et les événements sont traités par handleWebSocketMessage() qui appelle refreshCashierDashboard()
-        
-        // ✅ CORRECTION: S'assurer que la connexion WebSocket principale est active
-        if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-            // Si la connexion principale n'est pas active, la démarrer
-            if (typeof this.connectWebSocket === 'function') {
-                this.connectWebSocket();
-            }
-        }
+        // start websocket
+        connectWebSocket();
     }
 
     setupGlobalEventListeners() {
@@ -3054,14 +2605,9 @@ class App {
                 
                 // ✅ MET À JOUR LE GAMEMANAGER AVEC LES DONNÉES DU WEBSOCKET
                 // Cela garantit que le movie screen aura les données correctes
-                // ✅ CORRECTION: Vérifier que client existe avant de l'utiliser
-                if (data.currentRound && typeof window !== 'undefined' && window.client && window.client._context && window.client._context.getGameManager) {
-                    try {
-                        window.client._context.getGameManager().updateGameFromWebSocket(data.currentRound);
-                        console.log('✅ GameManager mis à jour avec race_start data');
-                    } catch (err) {
-                        console.warn('⚠️ Erreur mise à jour GameManager:', err.message);
-                    }
+                if (data.currentRound) {
+                    client._context.getGameManager().updateGameFromWebSocket(data.currentRound);
+                    console.log('✅ GameManager mis à jour avec race_start data');
                 }
                 
                 // Mettre à jour l'état de la course
@@ -3101,14 +2647,9 @@ class App {
                 
                 // ✅ CORRECTION: MET À JOUR LE GAMEMANAGER AVEC LES DONNÉES FINALES DU ROUND
                 // Cela garantit que le finish screen affichera les données correctes
-                // ✅ CORRECTION: Vérifier que client existe avant de l'utiliser
-                if (data.currentRound && typeof window !== 'undefined' && window.client && window.client._context && window.client._context.getGameManager) {
-                    try {
-                        window.client._context.getGameManager().updateGameFromWebSocket(data.currentRound);
-                        console.log('✅ GameManager mis à jour avec race_end data (winner inclus)');
-                    } catch (err) {
-                        console.warn('⚠️ Erreur mise à jour GameManager:', err.message);
-                    }
+                if (data.currentRound) {
+                    client._context.getGameManager().updateGameFromWebSocket(data.currentRound);
+                    console.log('✅ GameManager mis à jour avec race_end data (winner inclus)');
                 }
                 
                 // Note: betFrameOverlay reste visible jusqu'à new_round (géré par main.js)
@@ -3153,7 +2694,7 @@ class App {
                 if (this.currentPage === 'my-bets' && this.myBetsFetchMyBets) {
                     this.myBetsFetchMyBets(1); // Pas de setTimeout - mise à jour immédiate
                 }
-                if ((this.currentPage === 'account' || this.currentPage === 'cashier-account') && this.refreshCashierDashboard) {
+                if (this.currentPage === 'account' && this.refreshCashierDashboard) {
                     this.refreshCashierDashboard(); // Mise à jour cashier immédiate
                 }
                 
@@ -3165,26 +2706,8 @@ class App {
                 break;
                 
             case 'receipt_added':
-                // ✅ CORRECTION: Invalider le cache et forcer un refresh pour garantir la synchronisation
+                // ✅ OPTIMISATION: Ajouter directement le ticket au tableau sans appel API
                 console.log('🎫 Nouveau ticket ajouté - Round:', data.roundId, 'Ticket ID:', data.receiptId);
-                
-                // ✅ CRITIQUE: Invalider le cache des tickets pour forcer un refresh depuis l'API
-                // Le ticket peut ne pas être encore en DB, donc on attend un peu avant de rafraîchir
-                if (this.currentPage === 'dashboard' || this.currentPage === 'my-bets') {
-                    // Attendre un court délai pour que le ticket soit persisté en DB
-                    setTimeout(() => {
-                        // Invalider le cache et forcer un refresh
-                        if (this.currentPage === 'dashboard' && this.dashboardRefreshTickets) {
-                            console.log('🔄 [DASHBOARD] Refresh forcé après receipt_added');
-                            this.dashboardRefreshTickets(true); // force = true pour bypasser le cache
-                        } else if (this.currentPage === 'my-bets' && this.myBetsFetchMyBets) {
-                            console.log('🔄 [MY-BETS] Refresh forcé après receipt_added');
-                            // Récupérer la page actuelle et forcer le refresh
-                            const currentPage = document.getElementById('currentPage')?.textContent || 1;
-                            this.myBetsFetchMyBets(parseInt(currentPage, 10)); // Refresh depuis l'API
-                        }
-                    }, 800); // Attendre 800ms pour que le ticket soit persisté en DB (augmenté pour plus de sécurité)
-                }
                 
                 // Mettre à jour le round si nécessaire
                 if (data.roundId) {
@@ -3192,60 +2715,38 @@ class App {
                     if (currentRoundEl) currentRoundEl.textContent = data.roundId;
                 }
                 
-                // ✅ OPTIONNEL: Essayer d'ajouter directement le ticket au DOM (si les données sont complètes)
-                // Cela permet une mise à jour immédiate pendant que l'API se synchronise
-                // ✅ CRITIQUE: Convertir les valeurs système en valeurs publiques pour l'affichage
-                const betsFromData = data.bets || data.receipt?.bets || [];
-                const totalAmountSystem = data.totalAmount || data.receipt?.total_amount || 
-                    (betsFromData.reduce((sum, b) => sum + (Number(b.value) || 0), 0));
-                // Convertir de système à publique (diviser par 100)
-                const totalAmountPublic = typeof Currency !== 'undefined' && typeof Currency.systemToPublic === 'function' 
-                    ? Currency.systemToPublic(totalAmountSystem)
-                    : (totalAmountSystem / 100);
-                
+                // Formater le ticket depuis les données WebSocket (format unifié)
                 const ticketData = {
                     id: data.receiptId || data.receipt?.id,
                     receiptId: data.receiptId || data.receipt?.id,
                     roundId: data.roundId,
                     status: data.status || 'pending',
                     prize: data.prize || 0,
-                    bets: betsFromData.map(bet => ({
-                        ...bet,
-                        value: typeof Currency !== 'undefined' && typeof Currency.systemToPublic === 'function'
-                            ? Currency.systemToPublic(Number(bet.value) || 0)
-                            : ((Number(bet.value) || 0) / 100)
-                    })),
-                    totalAmount: typeof totalAmountPublic === 'object' && totalAmountPublic.toNumber 
-                        ? totalAmountPublic.toNumber() 
-                        : Number(totalAmountPublic),
+                    bets: data.bets || data.receipt?.bets || [],
+                    totalAmount: data.totalAmount || (data.receipt?.bets ? data.receipt.bets.reduce((sum, b) => sum + (Number(b.value) || 0), 0) / 100 : 0),
                     created_time: data.created_time || data.receipt?.created_time || new Date().toISOString(),
                     date: data.date || data.created_time || data.receipt?.created_time || new Date().toISOString(),
                     user_id: data.receipt?.user_id || data.user_id || null
                 };
                 
-                // ✅ Mise à jour DIRECTE du DOM pour le dashboard (si les données sont complètes)
-                if (this.currentPage === 'dashboard' && ticketData.id && ticketData.bets && ticketData.bets.length > 0) {
+                // ✅ Mise à jour DIRECTE du DOM pour le dashboard
+                if (this.currentPage === 'dashboard') {
                     if (this.dashboardAddTicketToTable) {
-                        try {
                         this.dashboardAddTicketToTable(ticketData);
-                            console.log('✅ [DASHBOARD] Ticket ajouté directement au DOM');
-                        } catch (err) {
-                            console.warn('⚠️ [DASHBOARD] Erreur ajout direct ticket:', err);
+                    } else {
+                        // Fallback: refresh complet si la fonction n'est pas disponible
+                        if (this.dashboardRefreshTickets) {
+                            this.dashboardRefreshTickets();
                         }
                     }
                 }
                 
-                // ✅ Mise à jour DIRECTE du DOM pour my-bets (si les données sont complètes)
-                if (this.currentPage === 'my-bets' && ticketData.id && ticketData.bets && ticketData.bets.length > 0) {
+                // ✅ Mise à jour DIRECTE du DOM pour my-bets
+                if (this.currentPage === 'my-bets') {
                     // Vérifier si le ticket appartient à l'utilisateur connecté
                     // Note: Le serveur devrait déjà filtrer, mais on peut aussi vérifier côté client
                     if (this.myBetsAddTicketToTable) {
-                        try {
                         this.myBetsAddTicketToTable(ticketData);
-                            console.log('✅ [MY-BETS] Ticket ajouté directement au DOM');
-                        } catch (err) {
-                            console.warn('⚠️ [MY-BETS] Erreur ajout direct ticket:', err);
-                        }
                     } else {
                         // Fallback: refresh complet
                         if (this.myBetsFetchMyBets) {
@@ -3265,27 +2766,19 @@ class App {
 
             case 'receipt_deleted':
             case 'receipt_cancelled':
-                // ✅ CORRECTION: Le ticket est maintenant marqué comme "cancelled" au lieu d'être supprimé
-                // On peut soit le supprimer du DOM, soit mettre à jour son statut
-                console.log('🎫 Ticket annulé (statut "cancelled") - Round:', data.roundId, 'Ticket ID:', data.receiptId);
-                console.log('🔍 [DEBUG] currentPage:', this.currentPage, 'dashboardRemoveTicketFromTable:', typeof this.dashboardRemoveTicketFromTable);
+                // ✅ OPTIMISATION: Supprimer directement le ticket du tableau sans appel API
+                console.log('🎫 Ticket supprimé - Round:', data.roundId, 'Ticket ID:', data.receiptId);
                 
                 // ✅ Mise à jour DIRECTE du DOM pour le dashboard
-                // Option 1: Supprimer le ticket du DOM (recommandé car les API filtrent déjà les "cancelled")
                 if (this.currentPage === 'dashboard') {
-                    console.log('✅ [DASHBOARD] Tentative suppression ticket via WebSocket');
                     if (this.dashboardRemoveTicketFromTable) {
-                        console.log('✅ [DASHBOARD] Appel dashboardRemoveTicketFromTable pour ticket:', data.receiptId);
                         this.dashboardRemoveTicketFromTable(data.receiptId);
                     } else {
-                        console.warn('⚠️ [DASHBOARD] dashboardRemoveTicketFromTable non disponible, fallback refresh');
                         // Fallback: refresh complet si la fonction n'est pas disponible
                         if (this.dashboardRefreshTickets) {
-                            this.dashboardRefreshTickets(true); // Force refresh pour éviter cache
+                            this.dashboardRefreshTickets();
                         }
                     }
-                } else {
-                    console.log('⚠️ [DASHBOARD] currentPage !== dashboard, page actuelle:', this.currentPage);
                 }
                 
                 // ✅ Mise à jour DIRECTE du DOM pour my-bets
@@ -3295,8 +2788,7 @@ class App {
                     } else {
                         // Fallback: refresh complet
                         if (this.myBetsFetchMyBets) {
-                            const currentPage = document.getElementById('currentPage')?.textContent || 1;
-                            this.myBetsFetchMyBets(parseInt(currentPage, 10));
+                            this.myBetsFetchMyBets(1);
                         }
                     }
                 }
@@ -3307,7 +2799,7 @@ class App {
                 }
                 
                 // Notification
-                if (data.event === 'receipt_cancelled' || data.status === 'cancelled') {
+                if (data.event === 'receipt_cancelled') {
                     this.showToast(`❌ Ticket #${data.receiptId} annulé - Round #${data.roundId || 'N/A'}`, 'info');
                 }
                 break;
@@ -3327,7 +2819,7 @@ class App {
                 if (this.currentPage === 'my-bets' && this.myBetsFetchMyBets) {
                     this.myBetsFetchMyBets(1); // Pas de setTimeout - mise à jour immédiate
                 }
-                if ((this.currentPage === 'account' || this.currentPage === 'cashier-account') && this.refreshCashierDashboard) {
+                if (this.currentPage === 'account' && this.refreshCashierDashboard) {
                     this.refreshCashierDashboard(); // Mise à jour cashier immédiate
                 }
                 // Notifications spéciales
@@ -3356,83 +2848,36 @@ class App {
             if (typeof cancelTicket === 'function') return cancelTicket(id);
             console.error('cancelTicket function not available');
         };
-        // Fonction d'impression silencieuse (sans fenêtre visible)
-        window.silentPrint = (html) => {
-            return new Promise((resolve, reject) => {
-                try {
-                    // Créer un iframe caché
-                    const iframe = document.createElement('iframe');
-                    iframe.style.position = 'fixed';
-                    iframe.style.right = '0';
-                    iframe.style.bottom = '0';
-                    iframe.style.width = '0';
-                    iframe.style.height = '0';
-                    iframe.style.border = 'none';
-                    iframe.style.opacity = '0';
-                    iframe.style.pointerEvents = 'none';
-                    
-                    document.body.appendChild(iframe);
-                    
-                    // Obtenir la référence au document de l'iframe
-                    let iframeDoc = iframe.contentWindow || iframe.contentDocument;
-                    if (iframeDoc.document) {
-                        iframeDoc = iframeDoc.document;
-                    }
-                    
-                    // Écrire le HTML dans l'iframe
-                    iframeDoc.open();
-                    iframeDoc.write(html);
-                    iframeDoc.close();
-                    
-                    let printed = false;
-                    
-                    // Fonction pour effectuer l'impression
-                    const doPrint = () => {
-                        if (printed) return;
-                        printed = true;
-                        try {
-                            iframe.contentWindow.focus();
-                            iframe.contentWindow.print();
-                            // Nettoyer l'iframe après impression
-                            setTimeout(() => {
-                                if (iframe.parentNode) {
-                                    document.body.removeChild(iframe);
-                                }
-                                resolve();
-                            }, 1000);
-                        } catch (printErr) {
-                            if (iframe.parentNode) {
-                                document.body.removeChild(iframe);
-                            }
-                            reject(printErr);
-                        }
-                    };
-                    
-                    // Attendre que le contenu soit chargé, puis imprimer
-                    iframe.onload = () => {
-                        setTimeout(doPrint, 100);
-                    };
-                    
-                    // Fallback si onload ne se déclenche pas rapidement
-                    setTimeout(doPrint, 200);
-                } catch (err) {
-                    reject(err);
-                }
-            });
-        };
-
-        // Impression centralisée silencieuse
+        // Impression centralisée via printJS (printJS est garanti)
         window.printTicket = async (id) => {
             try {
                 const res = await fetch(`/api/v1/receipts/?action=print&id=${id}`);
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 const html = await res.text();
                 
-                console.log(`✅ [PRINT] HTML du ticket #${id} reçu, impression silencieuse...`);
+                console.log(`✅ [PRINT] HTML du ticket #${id} reçu`);
                 
-                // Utiliser l'impression silencieuse
-                await window.silentPrint(html);
-                console.log(`✅ [PRINT] Impression du ticket #${id} terminée`);
+                // Essayer printJS d'abord
+                if (typeof window.printJS === 'function') {
+                    console.log(`✅ [PRINT] printJS disponible, déclenchement de l'impression`);
+                    window.printJS({ printable: html, type: 'raw-html' });
+                } else {
+                    // Fallback: créer une fenêtre et imprimer
+                    console.log(`⚠️ [PRINT] printJS non disponible, utilisation fallback iframe`);
+                    const printWindow = window.open('', '', 'height=600,width=800');
+                    if (printWindow) {
+                        printWindow.document.write(html);
+                        printWindow.document.close();
+                        // Attendre le chargement du contenu
+                        setTimeout(() => {
+                            printWindow.print();
+                            // Ne pas fermer la fenêtre immédiatement pour laisser le temps d'imprimer
+                            setTimeout(() => printWindow.close(), 500);
+                        }, 250);
+                    } else {
+                        throw new Error('Impossible d\'ouvrir la fenêtre d\'impression');
+                    }
+                }
             } catch (err) {
                 console.error('❌ [PRINT] Erreur printTicket:', err);
                 if (window.app && typeof window.app.showToast === 'function') {

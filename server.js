@@ -35,7 +35,7 @@ import {
 import { initChaCha20 } from "./chacha20.js";
 
 // Import base de données
-import { initializeDatabase, pool, repairDatabase } from "./config/db.js";
+import { initializeDatabase, pool } from "./config/db.js";
 
 // Import Redis pour cache et sessions
 import { initRedis, closeRedis, redisClient, getRedisStatus, clearAllCaches } from "./config/redis.js";
